@@ -31,7 +31,7 @@ import { AuthForm } from "./hooks/AuthSection";
 
 export default function App() {
   // --- CORE STATE ---
-  const API_BASE = import.meta.env.VITE_API_URL || "";
+  const API_BASE = "https://aura.basildo.me"
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
   const [user, setUser] = useState<any>(localStorage.getItem('aura_user') ? JSON.parse(localStorage.getItem('aura_user')!) : null);
   const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");

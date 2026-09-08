@@ -16,7 +16,7 @@ export function useSocketLogic(user: any, handlePlaySongRef: any, setIsPlaying: 
   const currentSongIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
+    const SOCKET_URL = "https://aura.basildo.me"
     socketRef.current = io(SOCKET_URL);
     
     socketRef.current.on('connect', () => {
