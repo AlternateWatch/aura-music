@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "moderator", "admin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["email", "role", "createdAt"]
+    },
+    "Song": {
+      "title": "Song",
+      "description": "A song uploaded by a user.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "uploaderId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "artist", "album", "audioUrl", "status", "uploaderId", "createdAt", "updatedAt"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "A user-created playlist.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "songIds": { "type": "array", "items": { "type": "string" } },
+        "color": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "songIds", "color", "ownerId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/songs/{songId}": {
+      "schema": { "$ref": "#/entities/Song" },
+      "description": "Stores all songs uploaded by users."
+    },
+    "/playlists/{playlistId}": {
+      "schema": { "$ref": "#/entities/Playlist" },
+      "description": "Stores all playlists."
+    }
+  }
+}

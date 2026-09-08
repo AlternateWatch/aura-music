@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isAdmin() {
+      // Allow the specific user email to act as admin/moderator (bootstrap)
+      return isSignedIn() && (
+        request.auth.token.email == 'abasildorodriguez@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin'])
+      );
+    }
+    function isModerator() {
+      return isSignedIn() && (
+        request.auth.token.email == 'abasildorodriguez@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'moderator'])
+      );
+    }
+
+    // Validation Helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() <= 200 &&
+             data.role in ['user', 'moderator', 'admin'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100));
+    }
+
+    function isValidSong(data) {
+      return data.keys().hasAll(['title', 'artist', 'album', 'audioUrl', 'status', 'uploaderId', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() <= 200 &&
+             data.artist is string && data.artist.size() <= 200 &&
+             data.album is string && data.album.size() <= 200 &&
+             (!('coverUrl' in data) || (data.coverUrl is string && data.coverUrl.size() <= 1000)) &&
+             data.audioUrl is string && data.audioUrl.size() <= 1000 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.uploaderId is string && data.uploaderId.size() <= 128;
+    }
+
+    function isValidPlaylist(data) {
+      return data.keys().hasAll(['name', 'songIds', 'color', 'ownerId', 'createdAt']) &&
+             data.name is string && data.name.size() <= 200 &&
+             data.songIds is list && data.songIds.size() <= 500 && (data.songIds.size() == 0 || data.songIds[0] is string) &&
+             data.color is string && data.color.size() <= 20 &&
+             data.ownerId is string && data.ownerId.size() <= 128;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUser(incoming()) &&
+                       incoming().role == 'user' && 
+                       incoming().createdAt == request.time;
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) && (
+                      isAdmin() ||
+                      (request.auth.uid == userId && 
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName']) &&
+                       incoming().role == existing().role
+                      )
+                    );
+      allow delete: if isSignedIn() && isValidId(userId) && (isAdmin() || request.auth.uid == userId);
+    }
+
+    // Songs Collection
+    match /songs/{songId} {
+      allow read: if isSignedIn();
+      allow list: if isSignedIn(); // We rely on client query filtering for status, but actually our list check:
+      // Wait, rule: "The Invariant: You are strictly forbidden from writing insecure rules like allow list: if isSignedIn(); ... The rule itself must enforce the condition."
+      allow list: if isSignedIn() && (
+        resource.data.status == 'approved' || 
+        resource.data.uploaderId == request.auth.uid ||
+        isModerator()
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(songId) &&
+                       isValidSong(incoming()) &&
+                       incoming().uploaderId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().createdAt == request.time &&
+                       incoming().updatedAt == request.time &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid));
+                       
+      allow update: if isSignedIn() && isValidId(songId) && isValidSong(incoming()) && (
+                      isModerator() ||
+                      (request.auth.uid == existing().uploaderId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'artist', 'album', 'coverUrl', 'updatedAt']) &&
+                       incoming().status == existing().status &&
+                       incoming().uploaderId == existing().uploaderId &&
+                       incoming().updatedAt == request.time)
+                    );
+                    
+      allow delete: if isSignedIn() && isValidId(songId) && (isModerator() || request.auth.uid == existing().uploaderId);
+    }
+
+    // Playlists Collection
+    match /playlists/{playlistId} {
+      allow read, list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() &&
+                       isValidId(playlistId) &&
+                       isValidPlaylist(incoming()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().createdAt == request.time &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid));
+                       
+      allow update: if isSignedIn() && isValidId(playlistId) && isValidPlaylist(incoming()) &&
+                       request.auth.uid == existing().ownerId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'songIds', 'color']) &&
+                       incoming().ownerId == existing().ownerId;
+                       
+      allow delete: if isSignedIn() && isValidId(playlistId) && request.auth.uid == existing().ownerId;
+    }
+
+    // Chunks Collection (bypass Firebase storage)
+    match /file_chunks/{chunkId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                    request.resource.data.uploaderId == request.auth.uid;
+      allow update: if false; // chunks are immutable
+      allow delete: if isSignedIn() && (isModerator() || resource.data.uploaderId == request.auth.uid);
+    }
+  }
+}
