@@ -7,7 +7,7 @@ on:
       - master
 
 jobs:
-  build-tauri:
+  publish-tauri:
     permissions:
       contents: write
     strategy:
@@ -31,9 +31,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri App & Create Release
-        uses: tauri-apps/tauri-action@v0.5.0
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: app-v__VERSION__
+          releaseName: 'Aura Music v__VERSION__'
+          releaseBody: 'Versión compilada automáticamente para Windows.'
+          releaseDraft: true
+          prerelease: false
           args: ''
