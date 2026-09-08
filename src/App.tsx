@@ -21,7 +21,8 @@ import { QueueOverlay } from "./components/QueueOverlay";
 import { SessionOverlay } from "./components/SessionOverlay";
 import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
 
-// MODULED IMPORTS
+// MODULED IMPORTS AND HOOKS
+
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSocketLogic } from "./hooks/useSocketLogic";
 import { SocialSidebar } from "./hooks/SocialSidebar";
