@@ -36,9 +36,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__
-          releaseName: 'Aura Music v__VERSION__'
-          releaseBody: 'Versión compilada automáticamente para Windows.'
-          releaseDraft: true
+          tagName: v0.1.0
+          releaseName: 'Aura Music v0.1.0'
+          releaseBody: 'Primera versión de escritorio oficial para Windows.'
+          releaseDraft: false
           prerelease: false
           args: ''
