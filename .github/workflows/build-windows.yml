@@ -2,9 +2,8 @@ name: 'Build Windows App'
 
 on:
   push:
-    branches:
-      - main
-      - master
+    tags:
+      - 'v*' # Se dispara automáticamente solo cuando subes un tag como v0.1.1, v0.2.0, etc.
 
 jobs:
   publish-tauri:
@@ -36,9 +35,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v0.1.0
-          releaseName: 'Aura Music v0.1.0'
-          releaseBody: 'Primera versión de escritorio oficial para Windows.'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Aura Music ${{ github.ref_name }}'
+          releaseBody: 'Nueva versión automática de Aura Music.'
           releaseDraft: false
           prerelease: false
           args: ''
