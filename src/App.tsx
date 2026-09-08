@@ -28,8 +28,10 @@ import { useSocketLogic } from "./hooks/useSocketLogic";
 import { SocialSidebar } from "./hooks/SocialSidebar";
 import { AuthForm } from "./hooks/AuthSection";
 
+
 export default function App() {
   // --- CORE STATE ---
+  const API_BASE = import.meta.env.VITE_API_URL || "";
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
   const [user, setUser] = useState<any>(localStorage.getItem('aura_user') ? JSON.parse(localStorage.getItem('aura_user')!) : null);
   const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");
@@ -133,7 +135,7 @@ export default function App() {
   const handleLogout = () => { localStorage.clear(); window.location.reload(); };
 
   const handleStartSession = async () => {
-    const res = await fetch('/api/sessions/create', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const res = await fetch(`${API_BASE}/api/sessions/create`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
     const data = await res.json();
     if (res.ok) { socketObj.setCurrentSession(data.code); socketObj.socketRef.current?.emit('join-session', { code: data.code, user }); }
   };
@@ -158,7 +160,7 @@ export default function App() {
   const loadPlaylists = async () => {
     if (!token) return;
     try {
-      const res = await fetch('/api/playlists', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       if (Array.isArray(data)) setPlaylists(data);
     } catch (e) { console.error("Playlists failed"); }
@@ -168,7 +170,7 @@ export default function App() {
   if (!token) return;
 
   try {
-    const res = await fetch('/api/users/me/last-track', {
+    const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -357,7 +359,7 @@ const mysterySong: Song = {
  if (!fromSocket && token) {
   console.log("GUARDANDO ÚLTIMA CANCIÓN:", song.id);
 
-  fetch('/api/users/me/last-track', {
+  fetch(`${API_BASE}/api/users/me/last-track`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -513,7 +515,7 @@ const mysterySong: Song = {
     e.preventDefault();
     if (!newPlaylistName.trim()) return;
     try {
-        const res = await fetch('/api/playlists', { 
+        const res = await fetch(`${API_BASE}/api/playlists`, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
             body: JSON.stringify({ name: newPlaylistName }) 

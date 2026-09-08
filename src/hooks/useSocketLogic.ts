@@ -16,7 +16,8 @@ export function useSocketLogic(user: any, handlePlaySongRef: any, setIsPlaying: 
   const currentSongIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    socketRef.current = io(window.location.origin);
+    const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
+    socketRef.current = io(SOCKET_URL);
     
     socketRef.current.on('connect', () => {
         if (user) socketRef.current?.emit('identify', user.userId);
