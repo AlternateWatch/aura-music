@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "aura",
-  "version": "0.1.0",
+  "productName": "Aura",
+  "version": "0.1.4",
   "identifier": "com.alternatewatch.auramusic",
   "build": {
     "frontendDist": "../dist",

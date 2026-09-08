@@ -40,4 +40,4 @@ jobs:
           releaseBody: 'Nueva versión automática de Aura Music.'
           releaseDraft: false
           prerelease: false
-          args: ''
+          args: '--debug'
