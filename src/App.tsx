@@ -77,7 +77,7 @@ export default function App() {
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [likedIds, setLikedIds] = useState<string[]>([]);
 
-  // --- MINIGAME STATE ---
+  // --- MINIGAME STATE AND MISC---
   const [isMinigameLobbyOpen, setIsMinigameLobbyOpen] = useState(false);
   const [isMinigameActive, setIsMinigameActive] = useState(false);
   const [minigameTargetSong, setMinigameTargetSong] = useState<Song | null>(null);
