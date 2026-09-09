@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "Aura Music",
-        "width": 800,
-        "height": 600,
+        "width": 1200,
+        "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "url": "https://aura.basildo.me"
       }
     ],
     "security": {
