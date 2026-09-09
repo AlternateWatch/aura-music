@@ -31,6 +31,36 @@ import { AuthForm } from "./hooks/AuthSection";
 
 export default function App() {
   // --- CORE STATE ---
+
+  // 1. Detectar si estamos en escritorio
+const isDesktop = typeof window !== 'undefined' && (
+  window.location.search.includes('app=desktop') ||
+  Boolean((window as any).__TAURI__) ||
+  Boolean((window as any).__TAURI_INTERNALS__)
+);
+
+// 2. Funciones para los botones de la ventana
+const handleMinimize = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    getCurrentWindow().minimize();
+  } catch (e) {}
+};
+
+const handleMaximize = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    getCurrentWindow().toggleMaximize();
+  } catch (e) {}
+};
+
+const handleClose = async () => {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    getCurrentWindow().close();
+  } catch (e) {}
+};
+
   const API_BASE = "https://aura.basildo.me"
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
   const [user, setUser] = useState<any>(localStorage.getItem('aura_user') ? JSON.parse(localStorage.getItem('aura_user')!) : null);
@@ -680,6 +710,29 @@ const canReorderPlaylist =
 
   return (
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
+    {/* Barra superior de escritorio (INVISBLE EN LA WEB) */}
+{isDesktop && (
+  <div 
+    data-tauri-drag-region 
+    className="h-8 bg-[#0a0a0a] border-b border-white/5 flex items-center justify-between px-3 select-none z-[999] shrink-0"
+  >
+    <div className="flex items-center gap-2 pointer-events-none">
+      <span className="text-[11px] font-bold tracking-widest uppercase text-white/40">AURA</span>
+    </div>
+    
+    <div className="flex items-center">
+      <button onClick={handleMinimize} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
+        ─
+      </button>
+      <button onClick={handleMaximize} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-colors cursor-pointer text-xs">
+        □
+      </button>
+      <button onClick={handleClose} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-red-500/80 transition-colors cursor-pointer">
+        ✕
+      </button>
+    </div>
+  </div>
+)}
       {/* Hidden Minigame Engine */}
       <audio 
         ref={minigameAudioRef} 
