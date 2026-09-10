@@ -301,7 +301,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   )}
                 </div>
 
-                {/* 7. QUITAR DE LA PLAYLIST */}
+                {/* 7. QUITAR DE LA PLAYLIST Y DE TODO */}
                 {onRemoveFromPlaylist && (
                   <button
                     type="button"
