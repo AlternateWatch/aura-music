@@ -40,6 +40,44 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   const [addedToQueue, setAddedToQueue] = useState(false);
   const [playedNext, setPlayedNext] = useState(false);
 
+  // FUNCIÓN UNIVERSAL PARA ABRIR ENLACES EN EL NAVEGADOR (ESCRITORIO Y WEB)
+  const openExternalLink = async (url: string | undefined | null) => {
+    if (!url || !url.trim()) return;
+    const cleanUrl = url.trim();
+
+    // 1. Intento con función global inyectada en Tauri
+    if (typeof (window as any).__TAURI_OPEN_URL__ === 'function') {
+      try {
+        (window as any).__TAURI_OPEN_URL__(cleanUrl);
+        return;
+      } catch (e) {}
+    }
+
+    // 2. Intento con el plugin oficial de apertura de Tauri v2
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(cleanUrl);
+      return;
+    } catch (e) {}
+
+    // 3. Intento directo con el canal IPC interno de Tauri
+    try {
+      if ((window as any).__TAURI_INTERNALS__?.invoke) {
+        await (window as any).__TAURI_INTERNALS__.invoke('plugin:opener|open_url', { url: cleanUrl });
+        return;
+      }
+    } catch (e) {}
+
+    // 4. Si estamos en navegador normal (Chrome/Firefox/Safari/móvil):
+    const a = document.createElement('a');
+    a.href = cleanUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const handleQueueClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onAddToQueue();
@@ -58,13 +96,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     if (e) e.stopPropagation();
     const videoUrl = (song as any).video_url;
     if (videoUrl && videoUrl.trim()) {
-      window.open(videoUrl, '_blank');
+      openExternalLink(videoUrl);
     } else {
       alert("Esta canción aún no tiene un vídeo oficial vinculado. Puedes añadirlo editando los metadatos.");
     }
   };
 
   const hasVideo = Boolean((song as any).video_url && (song as any).video_url.trim());
+  const hasTabs = Boolean((song as any).tabs_url && (song as any).tabs_url.trim());
 
   return (
     <div
@@ -95,7 +134,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         onDragStart ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
-      {/* PORTADA LIMPIA (Solo con el botón de Play/Pause central al pasar el ratón) */}
+      {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
         <img 
           src={song.coverUrl || '/default-cover.jpg'} 
@@ -108,10 +147,10 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         </div>
       </div>
 
-      {/* FILA INFERIOR: INFORMACIÓN + BOTÓN DE 3 PUNTOS SIEMPRE ACTIVO */}
+      {/* FILA INFERIOR: INFORMACIÓN + BOTÓN DE 3 PUNTOS */}
       <div className="flex items-end justify-between gap-3 min-w-0 w-full pt-1">
         
-        {/* TÍTULO Y ARTISTA (Espacio maximizado con puntos suspensivos sin solapes) */}
+        {/* TÍTULO Y ARTISTA */}
         <div className="min-w-0 flex-1 space-y-1 md:space-y-0.5">
           <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
             {song.title}
@@ -121,7 +160,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           </p>
         </div>
 
-        {/* MENÚ DE 3 PUNTOS (Universal para cualquier pantalla) */}
+        {/* MENÚ DE 3 PUNTOS */}
         <div className="relative flex items-center shrink-0">
           <button
             type="button"
@@ -143,7 +182,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           {/* DESPLEGABLE CON TODAS LAS ACCIONES */}
           {showMenu && (
             <>
-              {/* Capa invisible para cerrar al hacer clic fuera */}
               <div 
                 className="fixed inset-0 z-40" 
                 onClick={(e) => {
@@ -167,17 +205,27 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
                 </button>
 
-                {/* 2. VER TABS / ACORDES */}
+                {/* 2. VER TABS / ACORDES (Abre Songsterr en el navegador del sistema) */}
                 <button
                   type="button"
-                  onClick={() => { onOpenTabs(); setShowMenu(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-brand-primary hover:bg-white/10 transition-colors cursor-pointer text-left"
+                  onClick={() => { 
+                    setShowMenu(false);
+                    const tabsUrl = (song as any).tabs_url;
+                    if (tabsUrl && tabsUrl.trim()) {
+                      openExternalLink(tabsUrl);
+                    } else {
+                      onOpenTabs();
+                    }
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
+                    hasTabs ? 'text-white/70 hover:text-brand-primary hover:bg-white/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
+                  }`}
                 >
                   <Guitar size={15} />
-                  <span>Ver Acordes / Tabs</span>
+                  <span>{hasTabs ? 'Ver Acordes / Tabs' : 'Sin acordes / tabs'}</span>
                 </button>
 
-                {/* 3. VÍDEO OFICIAL YOUTUBE */}
+                {/* 3. VÍDEO OFICIAL YOUTUBE (Abre el vídeo en el navegador del sistema) */}
                 <button
                   type="button"
                   onClick={() => { setShowMenu(false); handleOpenVideo(); }}
@@ -229,7 +277,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                     <span className="text-[10px] text-white/30">{showPlaylistSubmenu ? '▲' : '▼'}</span>
                   </button>
 
-                  {/* Submenú de Playlists */}
                   {showPlaylistSubmenu && (
                     <div className="max-h-36 overflow-y-auto pl-8 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5">
                       {playlists.length > 0 ? (
