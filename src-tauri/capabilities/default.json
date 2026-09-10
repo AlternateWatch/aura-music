@@ -2,9 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
   "description": "Permisos principales",
-  "windows": ["main"],
+  "windows": ["*"],
   "remote": {
-    "urls": ["https://aura.basildo.me*"]
+    "urls": [
+      "https://aura.basildo.me",
+      "https://aura.basildo.me/*",
+      "https://aura.basildo.me/**"
+    ]
   },
   "permissions": [
     "core:default",
@@ -12,6 +16,7 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
-    "opener:default"
+    "opener:default",
+    "opener:allow-open-url"
   ]
 }
