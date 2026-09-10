@@ -1,7 +1,6 @@
-
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { X, ListMusic, Play, Disc, GripVertical } from 'lucide-react';
+import React from 'react';
+import { motion, Reorder, useDragControls } from 'motion/react';
+import { X, ListMusic, Play, Disc, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { type Song } from '../constants';
 
 interface QueueOverlayProps {
@@ -15,6 +14,102 @@ interface QueueOverlayProps {
   activeTheme: string;
 }
 
+interface QueueItemProps {
+  song: Song;
+  idx: number;
+  total: number;
+  onPlay: () => void;
+  onMove: (index: number, direction: 'up' | 'down') => void;
+}
+
+// Componente individual con soporte de arrastre por puntero (invulnerable a bloqueos de Tauri)
+const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, onPlay, onMove }) => {
+  const dragControls = useDragControls();
+
+  return (
+    <Reorder.Item
+      as="div"
+      key={song.id}
+      value={song}
+      dragListener={false}
+      dragControls={dragControls}
+      whileDrag={{ 
+        scale: 1.02, 
+        boxShadow: "0 20px 30px rgba(0, 0, 0, 0.7)",
+        zIndex: 50
+      }}
+      transition={{ type: "spring", stiffness: 350, damping: 25 }}
+      className="group relative flex items-center gap-3 p-3 rounded-2xl border border-transparent hover:border-white/5 hover:bg-white/5 bg-[#121212]/60 select-none transition-colors"
+    >
+      {/* Controles de movimiento: Drag Handle táctil/ratón + Flechas de clic rápido */}
+      <div className="flex items-center gap-1 shrink-0">
+        <div 
+          onPointerDown={(e) => dragControls.start(e)}
+          className="text-white/20 hover:text-white/60 active:text-brand-primary transition-colors p-1.5 cursor-grab active:cursor-grabbing touch-none"
+          title="Arrastra para reordenar"
+        >
+          <GripVertical size={18} />
+        </div>
+        
+        <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            disabled={idx === 0}
+            onClick={(e) => { e.stopPropagation(); onMove(idx, 'up'); }}
+            className="text-white/30 hover:text-white disabled:opacity-0 cursor-pointer p-0.5 outline-none"
+            title="Mover arriba"
+          >
+            <ChevronUp size={12} />
+          </button>
+          <button
+            type="button"
+            disabled={idx === total - 1}
+            onClick={(e) => { e.stopPropagation(); onMove(idx, 'down'); }}
+            className="text-white/30 hover:text-white disabled:opacity-0 cursor-pointer p-0.5 outline-none"
+            title="Mover abajo"
+          >
+            <ChevronDown size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Cover */}
+      <div 
+        onClick={onPlay} 
+        className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-white/5 cursor-pointer"
+      >
+        <img
+          src={song.coverUrl || '/default-cover.jpg'}
+          className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none"
+          alt=""
+          draggable={false}
+        />
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
+          <Play size={16} fill="white" className="text-white" />
+        </div>
+      </div>
+
+      {/* Song Info */}
+      <div 
+        onClick={onPlay} 
+        className="overflow-hidden flex-1 cursor-pointer"
+      >
+        <p className="text-sm font-bold text-white truncate group-hover:text-brand-primary transition-colors">
+          {song.title}
+        </p>
+        <p className="text-[10px] font-bold uppercase text-white/30 tracking-wider truncate">
+          {song.artist}
+        </p>
+      </div>
+
+      {/* Position */}
+      <div className="text-[10px] font-bold font-mono text-white/10 group-hover:text-white/20 shrink-0 pointer-events-none">
+        #{(idx + 1).toString().padStart(2, '0')}
+      </div>
+    </Reorder.Item>
+  );
+};
+
 export const QueueOverlay: React.FC<QueueOverlayProps> = ({
   isOpen,
   onClose,
@@ -25,91 +120,28 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
   isShuffle,
   activeTheme
 }) => {
-  const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
-  const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
-
   if (!isOpen) return null;
 
-  // The 'queue' passed here is either the linear list
-  // or the pre-shuffled list from App.tsx.
   const currentIndex = queue.findIndex(s => s.id === currentSong?.id);
-
-  // Show everything after the current song in the sequence.
   const upcoming = currentIndex !== -1 ? queue.slice(currentIndex + 1) : queue;
 
-  const handleDragStart = (
-    e: React.DragEvent<HTMLDivElement>,
-    songId: string
-  ) => {
-    setDraggedSongId(songId);
-
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', songId);
-
-    // Makes the dragged item slightly transparent.
-    setTimeout(() => {
-      const element = e.currentTarget;
-      element.classList.add('opacity-40');
-    }, 0);
-  };
-
-  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
-    e.currentTarget.classList.remove('opacity-40');
-
-    setDraggedSongId(null);
-    setDragOverSongId(null);
-  };
-
-  const handleDragOver = (
-    e: React.DragEvent<HTMLDivElement>,
-    songId: string
-  ) => {
-    e.preventDefault();
-
-    if (!draggedSongId || draggedSongId === songId) return;
-
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverSongId(songId);
-  };
-
-  const handleDrop = (
-    e: React.DragEvent<HTMLDivElement>,
-    targetSongId: string
-  ) => {
-    e.preventDefault();
-
-    const sourceSongId = e.dataTransfer.getData('text/plain');
-
-    if (!sourceSongId || sourceSongId === targetSongId) {
-      setDraggedSongId(null);
-      setDragOverSongId(null);
-      return;
-    }
-
-    const sourceIndex = upcoming.findIndex(s => s.id === sourceSongId);
-    const targetIndex = upcoming.findIndex(s => s.id === targetSongId);
-
-    if (sourceIndex === -1 || targetIndex === -1) {
-      setDraggedSongId(null);
-      setDragOverSongId(null);
-      return;
-    }
-
-    // Reorder ONLY the upcoming songs.
-    const reorderedUpcoming = [...upcoming];
-    const [movedSong] = reorderedUpcoming.splice(sourceIndex, 1);
-    reorderedUpcoming.splice(targetIndex, 0, movedSong);
-
-    // Keep everything before/current exactly where it was.
+  const handleReorderUpcoming = (newUpcoming: Song[]) => {
     const reorderedQueue = [
       ...queue.slice(0, currentIndex + 1),
-      ...reorderedUpcoming
+      ...newUpcoming
     ];
-
     onReorderQueue(reorderedQueue);
+  };
 
-    setDraggedSongId(null);
-    setDragOverSongId(null);
+  const handleMove = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= upcoming.length) return;
+
+    const reorderedUpcoming = [...upcoming];
+    const [movedSong] = reorderedUpcoming.splice(index, 1);
+    reorderedUpcoming.splice(targetIndex, 0, movedSong);
+
+    handleReorderUpcoming(reorderedUpcoming);
   };
 
   return (
@@ -118,7 +150,7 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
       animate={{ x: 0 }}
       exit={{ x: '100%' }}
       transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-      className="fixed top-0 right-0 bottom-0 w-full max-w-md z-[500] bg-[#080808]/90 backdrop-blur-3xl border-l border-white/5 flex flex-col shadow-2xl"
+      className="fixed top-0 right-0 bottom-0 w-full max-w-md z-[500] bg-[#080808]/90 backdrop-blur-3xl border-l border-white/5 flex flex-col shadow-2xl select-none"
     >
       {/* Header */}
       <div className="h-24 flex items-center justify-between px-8 border-b border-white/5">
@@ -131,7 +163,7 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
 
         <button
           onClick={onClose}
-          className="p-2 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-all"
+          className="p-2 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-all cursor-pointer outline-none"
         >
           <X size={24} />
         </button>
@@ -150,8 +182,9 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
               <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-lg">
                 <img
                   src={currentSong.coverUrl || '/default-cover.jpg'}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover pointer-events-none"
                   alt=""
+                  draggable={false}
                 />
               </div>
 
@@ -174,106 +207,43 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
             Up Next
           </p>
 
-          <div className="space-y-2">
-            {upcoming.length > 0 ? (
-              upcoming.map((song, idx) => {
-                const isDragged = draggedSongId === song.id;
-                const isDragOver = dragOverSongId === song.id;
-
-                return (
-                  <div
-                    key={song.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, song.id)}
-                    onDragEnd={handleDragEnd}
-                    onDragOver={(e) => handleDragOver(e, song.id)}
-                    onDragLeave={() => {
-                      if (dragOverSongId === song.id) {
-                        setDragOverSongId(null);
-                      }
-                    }}
-                    onDrop={(e) => handleDrop(e, song.id)}
-                    onClick={() => {
-                      // Don't accidentally play a song after dragging it.
-                      if (draggedSongId) return;
-
-                      onPlayFromQueue(song);
-                    }}
-                    className={`
-                      group relative flex items-center gap-3 p-3
-                      rounded-2xl transition-all cursor-grab
-                      active:cursor-grabbing
-                      border
-                      ${isDragOver
-                        ? 'border-brand-primary/60 bg-brand-primary/10'
-                        : 'border-transparent hover:border-white/5 hover:bg-white/5'
-                      }
-                      ${isDragged ? 'opacity-40' : ''}
-                    `}
-                  >
-                    {/* Drop indicator */}
-                    {isDragOver && (
-                      <div className="absolute -top-1 left-4 right-4 h-0.5 bg-brand-primary rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)]" />
-                    )}
-
-                    {/* Drag Handle */}
-                    <div className="shrink-0 text-white/10 group-hover:text-white/30 transition-colors">
-                      <GripVertical size={16} />
-                    </div>
-
-                    {/* Cover */}
-                    <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-white/5">
-                      <img
-                        src={song.coverUrl || '/default-cover.jpg'}
-                        className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity"
-                        alt=""
-                      />
-
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
-                        <Play
-                          size={16}
-                          fill="white"
-                          className="text-white"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Song Info */}
-                    <div className="overflow-hidden flex-1">
-                      <p className="text-sm font-bold text-white truncate group-hover:text-brand-primary transition-colors">
-                        {song.title}
-                      </p>
-
-                      <p className="text-[10px] font-bold uppercase text-white/30 tracking-wider truncate">
-                        {song.artist}
-                      </p>
-                    </div>
-
-                    {/* Position */}
-                    <div className="text-[10px] font-bold font-mono text-white/10 group-hover:text-white/20 shrink-0">
-                      #{(idx + 1).toString().padStart(2, '0')}
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="py-12 flex flex-col items-center justify-center opacity-20 grayscale">
-                <div className="relative">
-                  <Disc size={40} className="mb-3 animate-spin-slow" />
-                </div>
-
-                <p className="text-[10px] font-bold uppercase tracking-widest">
-                  End of Queue
-                </p>
+          {upcoming.length > 0 ? (
+            /* Lista Reordenable con Motion (Pointer Events nativos) */
+            <Reorder.Group
+              as="div"
+              axis="y"
+              values={upcoming}
+              onReorder={handleReorderUpcoming}
+              className="space-y-2"
+            >
+              {upcoming.map((song, idx) => (
+                <QueueItem
+                  key={song.id}
+                  song={song}
+                  idx={idx}
+                  total={upcoming.length}
+                  onPlay={() => onPlayFromQueue(song)}
+                  onMove={handleMove}
+                />
+              ))}
+            </Reorder.Group>
+          ) : (
+            <div className="py-12 flex flex-col items-center justify-center opacity-20 grayscale">
+              <div className="relative">
+                <Disc size={40} className="mb-3 animate-spin-slow" />
               </div>
-            )}
-          </div>
+
+              <p className="text-[10px] font-bold uppercase tracking-widest">
+                End of Queue
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="p-6 bg-black/40 border-t border-white/5 text-center">
         <p className="text-[8px] font-bold uppercase text-white/10 tracking-[0.4em]">
-          AURA Queue Engine v1.1
+          AURA Queue Engine v2.0 · Powered by Motion
         </p>
       </div>
     </motion.div>

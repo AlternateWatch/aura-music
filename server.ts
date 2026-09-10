@@ -144,16 +144,20 @@ app.get('/api/tracks', async (req, res) => {
 });
 
 app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { name: 'cover' }]), async (req: any, res: Response) => {
-    const { title, artist, album, tabs_url, track_number } = req.body;
+    // 1. Recogemos video_url del body:
+    const { title, artist, album, tabs_url, track_number, video_url } = req.body;
     if (!req.files['audio']) return res.status(400).send("No audio");
     const format = path.extname(req.files['audio'][0].originalname).includes('flac') ? 'flac' : 'mp3';
-    await pool.execute(
-        'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, track_number) VALUES (?, ?, ?, ?, ?, ?, "pending", ?, ?, ?)', 
-        [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, req.files['cover'] ? `/uploads/${req.files['cover'][0].filename}` : null, req.user.userId, format, tabs_url || null, track_number || null]
-    );
-    res.status(201).send();
-});
+    
+    const initialStatus = (req.user.role === 'admin' || req.user.role === 'moderator') ? 'approved' : 'pending';
 
+    // 2. Guardamos video_url en la base de datos:
+    const [result]: any = await pool.execute(
+        'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
+        [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, req.files['cover'] ? `/uploads/${req.files['cover'][0].filename}` : null, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+    );
+    res.status(201).json({ id: result.insertId });
+});
 app.post('/api/tracks/:id/like', authenticateToken, async (req: any, res: Response) => {
     try {
         const [exists]: any = await pool.execute('SELECT * FROM user_likes WHERE user_id = ? AND track_id = ?', [req.user.userId, req.params.id]);
@@ -169,7 +173,8 @@ app.post('/api/tracks/:id/like', authenticateToken, async (req: any, res: Respon
 
 app.patch('/api/tracks/:id', authenticateToken, upload.single('cover'), async (req: any, res: Response) => { 
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') return res.status(403).json({ error: "Forbidden" });
-    const { title, artist, album, track_number, tabs_url } = req.body;
+    // 1. Recogemos video_url del body:
+    const { title, artist, album, track_number, tabs_url, video_url } = req.body;
     let coverPath = req.body.cover_path;
     try {
         if (req.file) {
@@ -181,7 +186,12 @@ app.patch('/api/tracks/:id', authenticateToken, upload.single('cover'), async (r
             coverPath = `/uploads/${req.file.filename}`;
         }
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
-        await pool.execute('UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, cover_path = ? WHERE id = ?', [title, artist, album, cleanT, tabs_url || null, coverPath, req.params.id]); 
+        
+        // 2. Añadimos video_url al UPDATE de la base de datos:
+        await pool.execute(
+            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ? WHERE id = ?', 
+            [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, req.params.id]
+        ); 
         res.send(); 
     } catch (e) { res.status(500).send(); }
 });
@@ -201,8 +211,15 @@ app.post('/api/moderation/:id', authenticateToken, async (req: any, res: Respons
 });
 
 app.delete('/api/tracks/:id', authenticateToken, async (req: any, res: Response) => { 
-    if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden" }); 
     try { 
+        const [trackRows]: any = await pool.execute('SELECT added_by FROM tracks WHERE id = ?', [req.params.id]);
+        if (trackRows.length === 0) return res.status(404).json({ error: "Not found" });
+        
+        // Permite borrar si es admin O si es el dueño que la acaba de subir
+        if (req.user.role !== 'admin' && trackRows[0].added_by !== req.user.userId) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
         await deleteTrackFiles(req.params.id);
         await pool.execute('DELETE FROM tracks WHERE id = ?', [req.params.id]); 
         res.send(); 

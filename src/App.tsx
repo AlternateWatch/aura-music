@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent } from "react";
+import { useState, useEffect, useRef, useMemo, FormEvent } from "react";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
@@ -22,46 +22,43 @@ import { SessionOverlay } from "./components/SessionOverlay";
 import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
 
 // MODULED IMPORTS AND HOOKS
-
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSocketLogic } from "./hooks/useSocketLogic";
 import { SocialSidebar } from "./hooks/SocialSidebar";
 import { AuthForm } from "./hooks/AuthSection";
 
-
 export default function App() {
+  // --- DETECCIÓN Y ACCIONES DE ESCRITORIO ---
+  const isDesktop = typeof window !== 'undefined' && (
+    window.location.search.includes('app=desktop') ||
+    Boolean((window as any).__TAURI__) ||
+    Boolean((window as any).__TAURI_INTERNALS__)
+  );
+
+  const handleMinimize = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      getCurrentWindow().minimize();
+    } catch (e) {}
+  };
+
+  const handleMaximize = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      getCurrentWindow().toggleMaximize();
+    } catch (e) {}
+  };
+
+  const handleClose = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      getCurrentWindow().close();
+    } catch (e) {}
+  };
+
+  const API_BASE = "https://aura.basildo.me";
+
   // --- CORE STATE ---
-
-  // 1. Detectar si estamos en escritorio
-const isDesktop = typeof window !== 'undefined' && (
-  window.location.search.includes('app=desktop') ||
-  Boolean((window as any).__TAURI__) ||
-  Boolean((window as any).__TAURI_INTERNALS__)
-);
-
-// 2. Funciones para los botones de la ventana
-const handleMinimize = async () => {
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    getCurrentWindow().minimize();
-  } catch (e) {}
-};
-
-const handleMaximize = async () => {
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    getCurrentWindow().toggleMaximize();
-  } catch (e) {}
-};
-
-const handleClose = async () => {
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    getCurrentWindow().close();
-  } catch (e) {}
-};
-
-  const API_BASE = "https://aura.basildo.me"
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
   const [user, setUser] = useState<any>(localStorage.getItem('aura_user') ? JSON.parse(localStorage.getItem('aura_user')!) : null);
   const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");
@@ -107,7 +104,7 @@ const handleClose = async () => {
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [likedIds, setLikedIds] = useState<string[]>([]);
 
-  // --- MINIGAME STATE AND MISC---
+  // --- MINIGAME STATE ---
   const [isMinigameLobbyOpen, setIsMinigameLobbyOpen] = useState(false);
   const [isMinigameActive, setIsMinigameActive] = useState(false);
   const [minigameTargetSong, setMinigameTargetSong] = useState<Song | null>(null);
@@ -149,15 +146,20 @@ const handleClose = async () => {
     };
   }, [resolvedCoverUrl]);
 
-  // HEARTBEAT
+  // HEARTBEAT OPTIMIZADO (Sin saturar la CPU)
+  const currentTimeRef = useRef(audioObj.currentTime);
+  useEffect(() => {
+    currentTimeRef.current = audioObj.currentTime;
+  }, [audioObj.currentTime]);
+
   useEffect(() => {
     if (!socketObj.currentSession || !isPlaying || !currentSong) return;
     const heartbeat = setInterval(() => {
-        socketObj.emitCommand('sync-time', { position: audioObj.currentTime, songId: currentSong.id });
+        socketObj.emitCommand('sync-time', { position: currentTimeRef.current, songId: currentSong.id });
     }, 10000); 
     return () => clearInterval(heartbeat);
-  }, [socketObj.currentSession, isPlaying, currentSong?.id, audioObj.currentTime]);
-
+  }, [socketObj.currentSession, isPlaying, currentSong?.id]);
+  
   const handleLoginSuccess = (t: string, u: any, r: string) => {
     localStorage.setItem('aura_token', t); localStorage.setItem('aura_user', JSON.stringify(u)); localStorage.setItem('aura_role', r);
     window.location.reload(); 
@@ -175,18 +177,19 @@ const handleClose = async () => {
   const loadContent = async () => {
     setIsLoading(true);
     try {
-      let url = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
+      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       if (Array.isArray(data)) { 
         setSongs(data.map((s: any) => ({ 
-            ...s, id: s.id.toString(), coverUrl: s.cover_path, audioUrl: s.file_path, uploaderId: s.added_by?.toString(), tabs_url: s.tabs_url, track_number: s.track_number, format: s.format 
+            ...s, id: s.id.toString(), coverUrl: s.cover_path, audioUrl: s.file_path, uploaderId: s.added_by?.toString(), tabs_url: s.tabs_url, track_number: s.track_number, format: s.format, video_url: s.video_url
         }))); 
         setLikedIds(data.filter((s: any) => s.is_liked).map((s: any) => s.id.toString()));
       }
     } catch (e) { console.error("Load failed"); }
     setIsLoading(false);
   };
+
   const loadPlaylists = async () => {
     if (!token) return;
     try {
@@ -197,73 +200,56 @@ const handleClose = async () => {
   };
 
   const loadLastTrack = async () => {
-  if (!token) return;
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    if (!res.ok) {
-      console.error("Failed to load last track");
-      return;
+      const lastSong: Song = {
+        ...data,
+        id: data.id.toString(),
+        coverUrl: data.cover_path,
+        audioUrl: data.file_path,
+        uploaderId: data.added_by?.toString(),
+        tabs_url: data.tabs_url,
+        track_number: data.track_number,
+        format: data.format
+      };
+      setCurrentSong(lastSong);
+      setIsPlaying(false);
+    } catch (error) {
+      console.error("Error loading last track:", error);
     }
-
-    const data = await res.json();
-
-    if (!data) return;
-
-    const lastSong: Song = {
-      ...data,
-      id: data.id.toString(),
-      coverUrl: data.cover_path,
-      audioUrl: data.file_path,
-      uploaderId: data.added_by?.toString(),
-      tabs_url: data.tabs_url,
-      track_number: data.track_number,
-      format: data.format
-    };
-
-    setCurrentSong(lastSong);
-    setIsPlaying(false);
-
-  } catch (error) {
-    console.error("Error loading last track:", error);
-  }
-};
-
+  };
 
   useEffect(() => { loadContent(); }, [showModeration, activePlaylistId]);
   useEffect(() => { loadPlaylists(); }, [token]);
-
-  useEffect(() => {
-  if (token) {
-    loadLastTrack();
-  }
-}, [token]);
+  useEffect(() => { if (token) loadLastTrack(); }, [token]);
 
   // --- MINIGAME ENGINE ---
   useEffect(() => {
     if (minigameAudioRef.current) minigameAudioRef.current.volume = volume;
   }, [volume]);
 
-const mysterySong: Song = {
-  id: 'mystery-101',
-  title: '???',
-  artist: '???',
-  album: '???',
-  coverUrl: 'data:image/svg+xml;utf8,<svg ...',
-  audioUrl: '',
-  uploaderId: '',
-  format: 'mp3',
-  track_number: null,
-  tabs_url: null,
-  status: 'approved',
-  createdAt: '',
-  updatedAt: ''
-};
+  const mysterySong: Song = {
+    id: 'mystery-101',
+    title: '???',
+    artist: '???',
+    album: '???',
+    coverUrl: 'data:image/svg+xml;utf8,<svg ...',
+    audioUrl: '',
+    uploaderId: '',
+    format: 'mp3',
+    track_number: null,
+    tabs_url: null,
+    status: 'approved',
+    createdAt: '',
+    updatedAt: ''
+  };
 
   const playSfx = (type: 'correct' | 'wrong') => {
     try {
@@ -345,125 +331,99 @@ const mysterySong: Song = {
   // --- LIKES ---
   const handleToggleLike = async (songId: string) => {
     if (!token) return setIsAuthModalOpen(true);
-    const res = await fetch(`/api/tracks/${songId}/like`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const res = await fetch(`${API_BASE}/api/tracks/${songId}/like`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
     if (res.ok) {
         setLikedIds(prev => prev.includes(songId) ? prev.filter(id => id !== songId) : [...prev, songId]);
     }
   };
 
   // --- PLAYBACK ---
- const handlePlaySong = async (
-  song: Song,
-  fromSocket = false,
-  initialPos = 0,
-  preserveQueue = false
-) => {
-  if (currentSong?.id === song.id) {
-    const nextState = !isPlaying;
-    setIsPlaying(nextState);
+  const handlePlaySong = async (
+    song: Song,
+    fromSocket = false,
+    initialPos = 0,
+    preserveQueue = false
+  ) => {
+    if (currentSong?.id === song.id) {
+      const nextState = !isPlaying;
+      setIsPlaying(nextState);
+      if (!fromSocket) socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+      return;
+    }
+
+    let finalQueue = activeQueue;
+    if (!fromSocket && !preserveQueue) {
+      const flattened = getFlattenedSongs();
+      setActiveQueue(flattened);
+      finalQueue = flattened;
+    }
+
+    setRecentlyPlayed(prev => [song, ...prev.filter(s => s.id !== song.id)].slice(0, 4));
+    setCurrentSong(song);
+    setIsPlaying(true);
+    socketObj.setTrackId(song.id);
+
+    if (!fromSocket && token) {
+      fetch(`${API_BASE}/api/users/me/last-track`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ trackId: song.id })
+      }).catch(error => console.error("ERROR GUARDANDO LAST TRACK:", error));
+    }
+
+    if (initialPos > 0 && audioObj.audioRef.current) {
+      audioObj.audioRef.current.currentTime = initialPos;
+    }
 
     if (!fromSocket) {
-      socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+      socketObj.emitCommand('play-track', {
+        id: song.id,
+        song,
+        queue: finalQueue,
+        position: 0
+      });
     }
+  };
 
-    return;
-  }
-
-  let finalQueue = activeQueue;
-
-  if (!fromSocket && !preserveQueue) {
-    const flattened = getFlattenedSongs();
-    setActiveQueue(flattened);
-    finalQueue = flattened;
-  }
-
-  setRecentlyPlayed(prev =>
-    [song, ...prev.filter(s => s.id !== song.id)].slice(0, 4)
-  );
-
-  setCurrentSong(song);
-  setIsPlaying(true);
-
-  socketObj.setTrackId(song.id);
-
- if (!fromSocket && token) {
-  console.log("GUARDANDO ÚLTIMA CANCIÓN:", song.id);
-
-  fetch(`${API_BASE}/api/users/me/last-track`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      trackId: song.id
-    })
-  })
-    .then(async res => {
-      console.log("RESPUESTA LAST TRACK:", res.status, await res.text());
-    })
-    .catch(error => {
-      console.error("ERROR GUARDANDO LAST TRACK:", error);
-    });
-}
-
-  if (initialPos > 0 && audioObj.audioRef.current) {
-    audioObj.audioRef.current.currentTime = initialPos;
-  }
-
-  if (!fromSocket) {
-    socketObj.emitCommand('play-track', {
-      id: song.id,
-      song,
-      queue: finalQueue,
-      position: 0
-    });
-  }
-};
   const handleNext = () => {
-  const pool = socketObj.isShuffle
-    ? socketObj.shuffledQueue
-    : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
+    const pool = socketObj.isShuffle
+      ? socketObj.shuffledQueue
+      : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
-  if (pool.length === 0) return;
-
-  const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
-
-  if (currentIndex === -1) {
-    handlePlaySong(pool[0], false, 0, true);
-    return;
-  }
-
-  const nextSong = pool[(currentIndex + 1) % pool.length];
-
-  handlePlaySong(nextSong, false, 0, true);
-};
+    if (pool.length === 0) return;
+    const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
+    if (currentIndex === -1) {
+      handlePlaySong(pool[0], false, 0, true);
+      return;
+    }
+    const nextSong = pool[(currentIndex + 1) % pool.length];
+    handlePlaySong(nextSong, false, 0, true);
+  };
 
   const handlePrevious = () => {
-  const pool = socketObj.isShuffle
-    ? socketObj.shuffledQueue
-    : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
+    const pool = socketObj.isShuffle
+      ? socketObj.shuffledQueue
+      : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
-  if (pool.length === 0) return;
+    if (pool.length === 0) return;
+    const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
 
-  const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
-
-  if (audioObj.currentTime > 3) {
-    if (audioObj.audioRef.current) {
-      audioObj.audioRef.current.currentTime = 0;
+    if (audioObj.currentTime > 3) {
+      if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = 0;
+      return;
     }
-    return;
-  }
 
-  if (currentIndex === -1) {
-    handlePlaySong(pool[0], false, 0, true);
-    return;
-  }
+    if (currentIndex === -1) {
+      handlePlaySong(pool[0], false, 0, true);
+      return;
+    }
 
-  const previousSong = pool[(currentIndex - 1 + pool.length) % pool.length];
-
-  handlePlaySong(previousSong, false, 0, true);
-};
+    const previousSong = pool[(currentIndex - 1 + pool.length) % pool.length];
+    handlePlaySong(previousSong, false, 0, true);
+  };
 
   const toggleShuffle = () => {
       const nextShuffleState = !socketObj.isShuffle;
@@ -484,39 +444,46 @@ const mysterySong: Song = {
   };
 
   const handlePlayNext = (song: Song) => {
-    const currentPool = activeQueue.length > 0 ? [...activeQueue] : getFlattenedSongs();
-    const filteredPool = currentPool.filter(s => s.id !== song.id);
-    const currentIndex = filteredPool.findIndex(s => s.id === currentSong?.id);
-    filteredPool.splice(currentIndex + 1, 0, song);
-    setActiveQueue(filteredPool);
-    socketObj.emitCommand('play-track', { id: currentSong?.id, song: currentSong, queue: filteredPool, position: audioObj.currentTime });
+    const pool = activeQueue.length > 0 ? [...activeQueue] : [...getFlattenedSongs()];
+    const filtered = pool.filter(s => s.id !== song.id);
+    const curIdx = filtered.findIndex(s => s.id === currentSong?.id);
+    const insertIdx = curIdx !== -1 ? curIdx + 1 : 0;
+    filtered.splice(insertIdx, 0, song);
+    setActiveQueue(filtered);
+    socketObj.emitCommand('play-track', { 
+      id: currentSong?.id, 
+      song: currentSong, 
+      queue: filtered, 
+      position: audioObj.audioRef.current?.currentTime || audioObj.currentTime 
+    });
   };
 
   const handleAddToQueue = (song: Song) => {
-    const currentPool = activeQueue.length > 0 ? [...activeQueue] : getFlattenedSongs();
-    if (currentPool.some(s => s.id === song.id)) return; 
-    const newQueue = [...currentPool, song];
+    const pool = activeQueue.length > 0 ? [...activeQueue] : [...getFlattenedSongs()];
+    const filtered = pool.filter(s => s.id !== song.id);
+    const newQueue = [...filtered, song];
     setActiveQueue(newQueue);
-    socketObj.emitCommand('play-track', { id: currentSong?.id, song: currentSong, queue: newQueue, position: audioObj.currentTime });
+    socketObj.emitCommand('play-track', { 
+      id: currentSong?.id, 
+      song: currentSong, 
+      queue: newQueue, 
+      position: audioObj.audioRef.current?.currentTime || audioObj.currentTime 
+    });
   };
 
   const handleReorderQueue = (newQueue: Song[]) => {
-  setActiveQueue(newQueue);
-
-  if (socketObj.isShuffle) {
-    socketObj.setShuffledQueue(newQueue);
-  }
-
-  socketObj.emitCommand('play-track', {
-    id: currentSong?.id,
-    song: currentSong,
-    queue: newQueue,
-    position: audioObj.currentTime
-  });
-};
+    setActiveQueue(newQueue);
+    if (socketObj.isShuffle) socketObj.setShuffledQueue(newQueue);
+    socketObj.emitCommand('play-track', {
+      id: currentSong?.id,
+      song: currentSong,
+      queue: newQueue,
+      position: audioObj.currentTime
+    });
+  };
 
   const handleModerate = async (songId: string, status: string) => {
-      await fetch(`/api/moderation/${songId}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ status }) });
+      await fetch(`${API_BASE}/api/moderation/${songId}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ status }) });
       loadContent();
   };
 
@@ -529,15 +496,16 @@ const mysterySong: Song = {
     formData.append('album', songToEdit.album || "");
     formData.append('track_number', songToEdit.track_number ? String(songToEdit.track_number) : "");
     formData.append('tabs_url', songToEdit.tabs_url || "");
-    formData.append('cover_path', songToEdit.coverUrl || ""); 
+    formData.append('video_url', songToEdit.video_url || "");
+    formData.append('cover_path', songToEdit.coverUrl || "");
     if (newEditCover) { formData.append('cover', newEditCover); }
-    const res = await fetch(`/api/tracks/${songToEdit.id}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
+    const res = await fetch(`${API_BASE}/api/tracks/${songToEdit.id}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
     if (res.ok) { setSongToEdit(null); setNewEditCover(null); loadContent(); }
   };
 
   const confirmDeleteTrack = async () => {
     if (!trackToDelete) return;
-    const res = await fetch(`/api/tracks/${trackToDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    const res = await fetch(`${API_BASE}/api/tracks/${trackToDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
     if (res.ok) { setTrackToDelete(null); loadContent(); }
   };
 
@@ -560,44 +528,41 @@ const mysterySong: Song = {
 
   const handleDeletePlaylist = async (playlistId: string) => {
     if (!confirm("Delete playlist?")) return;
-    await fetch(`/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    await fetch(`${API_BASE}/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
     if (activePlaylistId === playlistId) setActivePlaylistId("all");
     loadPlaylists();
   };
+
   const handleRemoveFromPlaylist = async (songId: string) => {
-    await fetch(`/api/playlists/${activePlaylistId}/tracks/${songId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    await fetch(`${API_BASE}/api/playlists/${activePlaylistId}/tracks/${songId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
     loadContent();
   };
 
   const handleReorderPlaylist = async (newOrder: Song[]) => {
     if (activePlaylistId === 'all' || activePlaylistId === 'liked') return;
-
     try {
-        const res = await fetch(
-            `/api/playlists/${activePlaylistId}/tracks/reorder`,
+        await fetch(
+            `${API_BASE}/api/playlists/${activePlaylistId}/tracks/reorder`,
             {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    trackIds: newOrder.map(song => song.id)
-                })
+                body: JSON.stringify({ trackIds: newOrder.map(song => song.id) })
             }
         );
-
-        if (!res.ok) {
-            console.error("Error reordering playlist");
-        }
     } catch (err) {
         console.error("Error reordering playlist:", err);
     }
-};
-  const handleAddToPlaylist = async (songId: string, playlistId: string) => {
-    await fetch(`/api/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trackId: songId }) });
   };
-  const getFlattenedSongs = () => {
+
+  const handleAddToPlaylist = async (songId: string, playlistId: string) => {
+    await fetch(`${API_BASE}/api/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trackId: songId }) });
+  };
+
+  // --- MEMORIZACIÓN DE LA BIBLIOTECA ---
+  const flattenedSongs = useMemo(() => {
     let list = songs.filter(
         s => formatFilter === 'all' || s.format === formatFilter
     );
@@ -612,16 +577,13 @@ const mysterySong: Song = {
         list = list.filter(s => likedIds.includes(s.id));
     }
 
-    // LAS PLAYLISTS RESPETAN EL ORDEN GUARDADO EN LA BD
     if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') {
         if (selectedAlbumName) {
             return list.filter(s => s.album === selectedAlbumName);
         }
-
         return list;
     }
 
-    // Biblioteca global / liked tracks mantienen el sistema de orden actual
     const sorted = [...list].sort((a, b) =>
         sortBy === 'name'
             ? a.title.localeCompare(b.title)
@@ -633,23 +595,19 @@ const mysterySong: Song = {
     }
 
     return sorted;
-};
+  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, selectedAlbumName, sortBy]);
 
-const getDisplayItems = () => {
-    const list = getFlattenedSongs();
+  const displayItems = useMemo(() => {
+    const list = flattenedSongs;
 
-    // Las playlists muestran directamente sus canciones
-    // respetando el orden guardado en la BD.
     if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') {
         return list;
     }
 
     if (selectedAlbumName) {
-    return list;
-}
+        return list;
+    }
 
-    // Biblioteca global / liked:
-    // mantenemos la agrupación de canciones por álbum.
     const items: any[] = [];
     const grouped = new Set<string>();
 
@@ -670,7 +628,6 @@ const getDisplayItems = () => {
                     coverUrl: song.coverUrl,
                     trackCount: tracks.length
                 });
-
                 grouped.add(song.album);
             } else {
                 items.push(song);
@@ -684,55 +641,75 @@ const getDisplayItems = () => {
     });
 
     return items;
-};
+  }, [flattenedSongs, activePlaylistId, selectedAlbumName, searchQuery]);
 
+  const getFlattenedSongs = () => flattenedSongs;
 
-const canReorderPlaylist =
-    activePlaylistId !== 'all' &&
-    activePlaylistId !== 'liked' &&
-    !showModeration &&
-    !isMinigameActive &&
-    sortBy === 'first' &&
-    formatFilter === 'all' &&
-    !searchQuery.trim() &&
-    !selectedAlbumName;
-
-
+  const canReorderPlaylist =
+      activePlaylistId !== 'all' &&
+      activePlaylistId !== 'liked' &&
+      !showModeration &&
+      !isMinigameActive &&
+      sortBy === 'first' &&
+      formatFilter === 'all' &&
+      !searchQuery.trim() &&
+      !selectedAlbumName;
 
   const getCurrentPlayPool = () => {
     if (socketObj.isShuffle) return socketObj.shuffledQueue;
-    return activeQueue.length > 0 ? activeQueue : getFlattenedSongs();
+    return activeQueue.length > 0 ? activeQueue : flattenedSongs;
   };
 
-  const displayItems = getDisplayItems();
   const currentThemeConfig = THEMES.find(t => t.id === activeTheme) || THEMES[0];
   const getThemeBg = () => activeTheme === 'light' ? '#ffffff' : '#050505';
 
   return (
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
-    {/* Barra superior de escritorio (INVISBLE EN LA WEB) */}
-{isDesktop && (
-  <div 
-    data-tauri-drag-region 
-    className="h-8 bg-[#0a0a0a] border-b border-white/5 flex items-center justify-between px-3 select-none z-[999] shrink-0"
-  >
-    <div className="flex items-center gap-2 pointer-events-none">
-      <span className="text-[11px] font-bold tracking-widest uppercase text-white/40">AURA</span>
-    </div>
-    
-    <div className="flex items-center">
-      <button onClick={handleMinimize} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
-        ─
-      </button>
-      <button onClick={handleMaximize} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-colors cursor-pointer text-xs">
-        □
-      </button>
-      <button onClick={handleClose} className="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white hover:bg-red-500/80 transition-colors cursor-pointer">
-        ✕
-      </button>
-    </div>
-  </div>
-)}
+      {/* Barra superior de escritorio integrada con el fondo */}
+      {isDesktop && (
+        <div 
+          data-tauri-drag-region 
+          className={`h-8 border-b flex items-center justify-between px-3 select-none z-30 shrink-0 backdrop-blur-md transition-colors duration-1000 ${
+            activeTheme === 'light' 
+              ? 'border-black/5 bg-white/40 text-black' 
+              : 'border-white/5 bg-black/20 text-white'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 pointer-events-none">
+            <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">AURA</span>
+            <span className="text-brand-primary font-black text-xs leading-none">.</span>
+          </div>
+          
+          <div className="flex items-center">
+            <button 
+              type="button" 
+              onClick={handleMinimize} 
+              className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer outline-none ${
+                activeTheme === 'light' ? 'hover:bg-black/5 text-black/50 hover:text-black' : 'hover:bg-white/10 text-white/50 hover:text-white'
+              }`}
+            >
+              ─
+            </button>
+            <button 
+              type="button" 
+              onClick={handleMaximize} 
+              className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer text-xs outline-none ${
+                activeTheme === 'light' ? 'hover:bg-black/5 text-black/50 hover:text-black' : 'hover:bg-white/10 text-white/50 hover:text-white'
+              }`}
+            >
+              □
+            </button>
+            <button 
+              type="button" 
+              onClick={handleClose} 
+              className="w-9 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-600/90 transition-colors cursor-pointer outline-none"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Hidden Minigame Engine */}
       <audio 
         ref={minigameAudioRef} 
@@ -807,7 +784,7 @@ const canReorderPlaylist =
                     <div className="flex flex-col gap-6">
                         <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Aura Sync</h3>
                         <div className="h-24 border border-white/10 bg-white/5 rounded-2xl overflow-hidden p-4 w-full">
-                            <Visualizer analyser={audioObj.analyserRef.current} active={isPlaying} color={dynamicColor} />
+                            {/*<Visualizer analyser={audioObj.analyserRef.current} active={isPlaying} color={dynamicColor} />*/}
                         </div>
                     </div>
                     <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
@@ -845,7 +822,7 @@ const canReorderPlaylist =
               <>
                 <AnimatePresence>{showUpload && <MusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />}</AnimatePresence>
                 
-                {/* HERO BANNER - Hidden during minigame for cleaner UI */}
+                {/* HERO BANNER */}
                 {!isMinigameActive && (
                     <section className="relative h-48 md:h-72 shrink-0 flex flex-col justify-end p-6 md:p-10 rounded-[30px] md:rounded-[40px] overflow-hidden group shadow-2xl">
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent z-10" />
@@ -879,156 +856,101 @@ const canReorderPlaylist =
                         </div>
                         {selectedAlbumName && <button onClick={() => setSelectedAlbumName(null)} className="cursor-pointer text-[10px] font-bold text-brand-primary uppercase tracking-widest">Back</button>}
                     </div>
+
                     {/* RESPONSIVE GRID */}
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8">
                         {displayItems.map((item: any) => (
                             <div
-    key={item.id}
-    draggable={canReorderPlaylist && item.type !== 'album'}
-    onDragStart={(e) => {
-    if (canReorderPlaylist && item.type !== 'album') {
-        setDraggedSongId(item.id);
+                                key={item.id}
+                                draggable={canReorderPlaylist && item.type !== 'album'}
+                                onDragStart={(e) => {
+                                  if (canReorderPlaylist && item.type !== 'album') {
+                                      setDraggedSongId(item.id);
+                                      e.dataTransfer.effectAllowed = 'move';
+                                      e.dataTransfer.setData('text/plain', item.id);
+                                  }
+                                }}
+                                onDragOver={(e) => {
+                                  if (canReorderPlaylist && item.type !== 'album') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      e.dataTransfer.dropEffect = 'move';
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
 
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', item.id);
-    }
-}}
-    onDragOver={(e) => {
-    if (canReorderPlaylist && item.type !== 'album') {
-        e.preventDefault();
-        e.stopPropagation();
+                                  const draggedId = e.dataTransfer.getData('text/plain') || draggedSongId;
 
-        e.dataTransfer.dropEffect = 'move';
-    }
-}}
+                                  if (!canReorderPlaylist || !draggedId || draggedId === item.id || item.type === 'album') {
+                                      setDraggedSongId(null);
+                                      return;
+                                  }
 
-onDragEnter={(e) => {
-    if (canReorderPlaylist && item.type !== 'album') {
-        e.preventDefault();
+                                  const currentIndex = songs.findIndex(s => s.id === draggedId);
+                                  const targetIndex = songs.findIndex(s => s.id === item.id);
 
-        console.log("🟢 DRAG ENTER", item.id);
-    }
-}}
+                                  if (currentIndex === -1 || targetIndex === -1) {
+                                      setDraggedSongId(null);
+                                      return;
+                                  }
 
-onDragLeave={() => {
-    if (canReorderPlaylist && item.type !== 'album') {
-        console.log("🔴 DRAG LEAVE", item.id);
-    }
-}}
+                                  const newSongs = [...songs];
+                                  const [movedSong] = newSongs.splice(currentIndex, 1);
+                                  newSongs.splice(targetIndex, 0, movedSong);
 
-   onDrop={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-        console.log("🔥 DROP DETECTADO", item.id);
-
-    const draggedId = e.dataTransfer.getData('text/plain') || draggedSongId;
-
-    console.log('DROP:', {
-        draggedId,
-        targetId: item.id,
-        canReorderPlaylist,
-        itemType: item.type
-    });
-
-    if (
-        !canReorderPlaylist ||
-        !draggedId ||
-        draggedId === item.id ||
-        item.type === 'album'
-    ) {
-        setDraggedSongId(null);
-        return;
-    }
-
-    const currentIndex = songs.findIndex(
-        s => s.id === draggedId
-    );
-
-    const targetIndex = songs.findIndex(
-        s => s.id === item.id
-    );
-
-    console.log('INDICES:', {
-        currentIndex,
-        targetIndex
-    });
-
-    if (currentIndex === -1 || targetIndex === -1) {
-        setDraggedSongId(null);
-        return;
-    }
-
-    const newSongs = [...songs];
-
-    const [movedSong] = newSongs.splice(currentIndex, 1);
-
-    newSongs.splice(targetIndex, 0, movedSong);
-
-    console.log('NUEVO ORDEN:', newSongs.map(s => s.id));
-
-    setSongs(newSongs);
-
-    handleReorderPlaylist(newSongs);
-
-    setDraggedSongId(null);
-}}
-    onDragEnd={() => setDraggedSongId(null)}
-    className={`relative group ${
-        isMinigameActive
-            ? 'hover:scale-105 transition-transform'
-            : ''
-    } ${
-        draggedSongId === item.id
-            ? 'opacity-40'
-            : ''
-    } ${
-        canReorderPlaylist && item.type !== 'album'
-            ? 'cursor-grab active:cursor-grabbing'
-            : ''
-    }`}
->
+                                  setSongs(newSongs);
+                                  handleReorderPlaylist(newSongs);
+                                  setDraggedSongId(null);
+                                }}
+                                onDragEnd={() => setDraggedSongId(null)}
+                                className={`relative group ${
+                                    isMinigameActive ? 'hover:scale-105 transition-transform' : ''
+                                } ${draggedSongId === item.id ? 'opacity-40' : ''} ${
+                                    canReorderPlaylist && item.type !== 'album' ? 'cursor-grab active:cursor-grabbing' : ''
+                                }`}
+                            >
                                 {item.type === 'album' ? (
-                                    <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all"><div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative"><img src={item.coverUrl} className="w-full h-full object-cover transition-transform duration-700" alt={item.title} /></div><h3 className="text-xl md:text-sm font-bold truncate text-white">{item.title}</h3><p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40">{item.trackCount} Tracks Found</p></div>
+                                    <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
+                                      <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
+                                        <img src={item.coverUrl} className="w-full h-full object-cover transition-transform duration-700" alt={item.title} />
+                                      </div>
+                                      <h3 className="text-xl md:text-sm font-bold truncate text-white">{item.title}</h3>
+                                      <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40">{item.trackCount} Tracks Found</p>
+                                    </div>
                                 ) : (
                                     <div
-    className="relative"
-    style={{
-        pointerEvents:
-            draggedSongId && draggedSongId !== item.id
-                ? 'none'
-                : 'auto'
-    }}
->
+                                      className="relative"
+                                      style={{ pointerEvents: draggedSongId && draggedSongId !== item.id ? 'none' : 'auto' }}
+                                    >
                                       <MusicCard 
-    song={item}
-    isActive={!isMinigameActive && currentSong?.id === item.id}
-    isPlaying={!isMinigameActive && currentSong?.id === item.id && isPlaying}
-    playlists={playlists}
-    userRole={userRole}
-    isLiked={likedIds.includes(item.id)}
-    onToggleLike={() => handleToggleLike(item.id)}
-    onAddToPlaylist={(pid) => handleAddToPlaylist(item.id, pid)}
-
-    onRemoveFromPlaylist={
-        activePlaylistId !== 'all' && activePlaylistId !== 'liked'
-            ? () => handleRemoveFromPlaylist(item.id)
-            : undefined
-    }
-
-    onOpenTabs={() => setTabsSong(item)} 
-    onDelete={() => setTrackToDelete(item.id)}
-    onPlayNext={() => handlePlayNext(item)}
-    onAddToQueue={() => handleAddToQueue(item)}
-    onEdit={() => setSongToEdit(item)}
-    onClick={() => {
-        if (isMinigameActive) {
-            handleMinigameGuess(item);
-        } else {
-            handlePlaySong(item);
-        }
-    }} 
-/>
+                                        song={item}
+                                        isActive={!isMinigameActive && currentSong?.id === item.id}
+                                        isPlaying={!isMinigameActive && currentSong?.id === item.id && isPlaying}
+                                        playlists={playlists}
+                                        userRole={userRole}
+                                        isLiked={likedIds.includes(item.id)}
+                                        onToggleLike={() => handleToggleLike(item.id)}
+                                        onAddToPlaylist={(pid) => handleAddToPlaylist(item.id, pid)}
+                                        onRemoveFromPlaylist={
+                                            activePlaylistId !== 'all' && activePlaylistId !== 'liked'
+                                                ? () => handleRemoveFromPlaylist(item.id)
+                                                : undefined
+                                        }
+                                        onOpenTabs={() => setTabsSong(item)} 
+                                        onDelete={() => setTrackToDelete(item.id)}
+                                        onPlayNext={() => handlePlayNext(item)}
+                                        onAddToQueue={() => handleAddToQueue(item)}
+                                        onEdit={() => setSongToEdit(item)}
+                                        onClick={() => {
+                                            if (isMinigameActive) {
+                                                handleMinigameGuess(item);
+                                            } else {
+                                                handlePlaySong(item);
+                                            }
+                                        }} 
+                                      />
                                       {showModeration && (
                                         <div className="absolute top-2 left-1/2 -translate-x-1/2 flex gap-2 z-50 animate-in fade-in zoom-in duration-200">
                                           <button onClick={(e) => { e.stopPropagation(); handleModerate(item.id, 'approved'); }} className="cursor-pointer bg-green-500 text-black px-3 py-1.5 rounded-full text-[8px] md:text-[9px] font-black uppercase shadow-xl hover:scale-105 transition-all">Approve</button>
@@ -1071,115 +993,99 @@ onDragLeave={() => {
 
       <audio ref={audioObj.audioRef} src={resolvedAudioUrl || undefined} onTimeUpdate={(e) => audioObj.setCurrentTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => audioObj.setDuration(e.currentTarget.duration)} onEnded={handleNext} crossOrigin="anonymous" />
       
-      {/* MODIFIED: multiplexing props into the PlayerBar depending on minigame state */}
+      {/* PLAYER BAR */}
       <AnimatePresence initial={false}>
-  {!isFocusMode && (currentSong || isMinigameActive) && (
-    <motion.div
-  initial={{ opacity: 0, y: 20 }}
-  animate={{ opacity: 1, y: 0 }}
-  exit={{ opacity: 0, y: 20 }}
-  transition={{ type: "spring", damping: 25, stiffness: 120 }}
-  className="relative z-[100] w-full shrink-0 overflow-visible"
->
-  <PlayerBar
-    currentSong={isMinigameActive ? mysterySong : currentSong!}
-    isPlaying={isMinigameActive ? isMinigamePlaying : isPlaying}
-    currentTime={isMinigameActive ? minigameTime : audioObj.currentTime}
-    duration={isMinigameActive ? 10 : audioObj.duration}
-    volume={volume}
-    onTogglePlay={(e: any) => {
-      e.stopPropagation();
-      if (isMinigameActive) {
-        if (isMinigamePlaying) {
-          minigameAudioRef.current?.pause();
-          if (minigameTimeoutRef.current) {
-            clearTimeout(minigameTimeoutRef.current);
-          }
-        } else {
-          minigameAudioRef.current?.play();
-          const remaining = 10000 - (minigameTime * 1000);
-          if (remaining > 0) {
-            minigameTimeoutRef.current = setTimeout(() => {
-              minigameAudioRef.current?.pause();
-            }, remaining);
-          } else {
-            replayMinigameSnippet();
-          }
-        }
-      } else {
-        handlePlaySong(currentSong!);
-      }
-    }}
-    onNext={isMinigameActive ? () => {} : handleNext}
-    onPrevious={isMinigameActive ? () => {} : handlePrevious}
-    isShuffle={socketObj.isShuffle}
-    isLoop={socketObj.isLoop}
-    onToggleShuffle={(e: any) => {
-      e.stopPropagation();
-      if (!isMinigameActive) {
-        toggleShuffle();
-      }
-    }}
-    onToggleLoop={(e: any) => {
-      e.stopPropagation();
-      if (!isMinigameActive) {
-        toggleLoop();
-      }
-    }}
-    onSeek={(t: any) => {
-      if (isMinigameActive) {
-        if (minigameAudioRef.current && t <= 10) {
-          minigameAudioRef.current.currentTime = t;
-        }
-      } else {
-        if (audioObj.audioRef.current) {
-          audioObj.audioRef.current.currentTime = t;
-          socketObj.emitCommand("seek", { time: t });
-        }
-      }
-    }}
-    onVolumeChange={setVolume}
-    onToggleLyrics={(e: any) => {
-      e.stopPropagation();
-      if (!isMinigameActive) {
-        setIsLyricsOpen(!isLyricsOpen);
-      }
-    }}
-    onOpenFullPlayer={() => {
-      if (!isMinigameActive) {
-        setIsFullPlayerOpen(true);
-      }
-    }}
-    onToggleFocusMode={() => {
-      if (!isMinigameActive) {
-        setIsFocusMode(!isFocusMode);
-      }
-    }}
-    isFocusMode={isFocusMode}
-    activeTheme={activeTheme}
-  />
-</motion.div>
-  )}
-</AnimatePresence>
+        {!isFocusMode && (currentSong || isMinigameActive) && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ type: "spring", damping: 25, stiffness: 120 }}
+            className="relative z-[100] w-full shrink-0 overflow-visible"
+          >
+            <PlayerBar
+              currentSong={isMinigameActive ? mysterySong : currentSong!}
+              isPlaying={isMinigameActive ? isMinigamePlaying : isPlaying}
+              currentTime={isMinigameActive ? minigameTime : audioObj.currentTime}
+              duration={isMinigameActive ? 10 : audioObj.duration}
+              volume={volume}
+              onTogglePlay={(e: any) => {
+                e.stopPropagation();
+                if (isMinigameActive) {
+                  if (isMinigamePlaying) {
+                    minigameAudioRef.current?.pause();
+                    if (minigameTimeoutRef.current) clearTimeout(minigameTimeoutRef.current);
+                  } else {
+                    minigameAudioRef.current?.play();
+                    const remaining = 10000 - (minigameTime * 1000);
+                    if (remaining > 0) {
+                      minigameTimeoutRef.current = setTimeout(() => {
+                        minigameAudioRef.current?.pause();
+                      }, remaining);
+                    } else {
+                      replayMinigameSnippet();
+                    }
+                  }
+                } else {
+                  handlePlaySong(currentSong!);
+                }
+              }}
+              onNext={isMinigameActive ? () => {} : handleNext}
+              onPrevious={isMinigameActive ? () => {} : handlePrevious}
+              isShuffle={socketObj.isShuffle}
+              isLoop={socketObj.isLoop}
+              onToggleShuffle={(e: any) => {
+                e.stopPropagation();
+                if (!isMinigameActive) toggleShuffle();
+              }}
+              onToggleLoop={(e: any) => {
+                e.stopPropagation();
+                if (!isMinigameActive) toggleLoop();
+              }}
+              onSeek={(t: any) => {
+                if (isMinigameActive) {
+                  if (minigameAudioRef.current && t <= 10) minigameAudioRef.current.currentTime = t;
+                } else {
+                  if (audioObj.audioRef.current) {
+                    audioObj.audioRef.current.currentTime = t;
+                    socketObj.emitCommand("seek", { time: t });
+                  }
+                }
+              }}
+              onVolumeChange={setVolume}
+              onToggleLyrics={(e: any) => {
+                e.stopPropagation();
+                if (!isMinigameActive) setIsLyricsOpen(!isLyricsOpen);
+              }}
+              onOpenFullPlayer={() => {
+                if (!isMinigameActive) setIsFullPlayerOpen(true);
+              }}
+              onToggleFocusMode={() => {
+                if (!isMinigameActive) setIsFocusMode(!isFocusMode);
+              }}
+              isFocusMode={isFocusMode}
+              activeTheme={activeTheme}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <MinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} />
       <AnimatePresence>{tabsSong && <TabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence>
       <AnimatePresence>{isLyricsOpen && <LyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.currentTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence>
       <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} currentTime={audioObj.currentTime} duration={audioObj.duration} onSeek={(t) => {
-    if (audioObj.audioRef.current) {
-        audioObj.audioRef.current.currentTime = t;
-    }
-}} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+          if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
+      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <AnimatePresence>{isQueueOpen && <QueueOverlay
-  isOpen={isQueueOpen}
-  onClose={() => setIsQueueOpen(false)}
-  queue={getCurrentPlayPool()}
-  currentSong={currentSong}
-  onPlayFromQueue={handlePlaySong}
-  onReorderQueue={handleReorderQueue}
-  isShuffle={socketObj.isShuffle}
-  activeTheme={activeTheme}
-/>}</AnimatePresence>
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        queue={getCurrentPlayPool()}
+        currentSong={currentSong}
+        onPlayFromQueue={handlePlaySong}
+        onReorderQueue={handleReorderQueue}
+        isShuffle={socketObj.isShuffle}
+        activeTheme={activeTheme}
+      />}</AnimatePresence>
       <AnimatePresence>{isSocialOpen && <SocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
@@ -1206,7 +1112,80 @@ onDragLeave={() => {
         </div> 
       )}</AnimatePresence>
 
-      <AnimatePresence>{songToEdit && ( <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 text-white overflow-y-auto py-10"><motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-3xl p-8 w-full max-w-lg relative text-white shadow-2xl"><button onClick={() => setSongToEdit(null)} className="absolute top-6 right-6 cursor-pointer text-white/40 hover:text-white transition-colors"><X size={24}/></button><form onSubmit={handleUpdateMetadata} className="space-y-6"><h3 className="text-2xl uppercase font-bold font-serif italic mb-8">Edit Track Metadata</h3><div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Title</label><input value={songToEdit.title} onChange={e => setSongToEdit({...songToEdit, title: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" /></div><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Artist</label><input value={songToEdit.artist} onChange={e => setSongToEdit({...songToEdit, artist: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" /></div></div><div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Album</label><input value={songToEdit.album || ""} onChange={e => setSongToEdit({...songToEdit, album: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" /></div><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Track Number</label><input type="number" value={songToEdit.track_number || ""} onChange={e => setSongToEdit({...songToEdit, track_number: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" /></div></div><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Tabs URL</label><input placeholder="Songsterr / Ultimate Guitar URL" value={songToEdit.tabs_url || ""} onChange={e => setSongToEdit({...songToEdit, tabs_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" /></div><div className="space-y-1"><label className="text-[10px] uppercase font-bold text-white/30 ml-2">Cover Art</label><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10">{newEditCover ? ( <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" /> ) : ( <img src={songToEdit.coverUrl} className="w-full h-full object-cover" /> )}</div><label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center hover:bg-white/10 transition-all"><ImageIcon size={20} className="text-white/20 mb-1"/><span className="text-[10px] font-bold uppercase text-white/40">Change Artwork</span><input type="file" accept="image/*" onChange={e => e.target.files && setNewEditCover(e.target.files[0])} className="hidden" /></label></div></div><div className="pt-4 flex gap-4"><button type="button" onClick={() => setSongToEdit(null)} className="flex-1 bg-white/5 py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:bg-white/10 transition-all">Cancel</button><button type="submit" className="flex-1 bg-white text-black py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:scale-[1.02] transition-all">Save Changes</button></div></form></motion.div></div> )}</AnimatePresence>
+      {/* FORMULARIO EDITAR METADATOS LIMPIO Y CORREGIDO */}
+      <AnimatePresence>{songToEdit && ( 
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 text-white overflow-y-auto py-10">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-3xl p-8 w-full max-w-lg relative text-white shadow-2xl">
+            <button onClick={() => setSongToEdit(null)} className="absolute top-6 right-6 cursor-pointer text-white/40 hover:text-white transition-colors">
+              <X size={24}/>
+            </button>
+            <form onSubmit={handleUpdateMetadata} className="space-y-6">
+              <h3 className="text-2xl uppercase font-bold font-serif italic mb-8">Edit Track Metadata</h3>
+              
+              {/* 1. Título y Artista */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Title</label>
+                  <input value={songToEdit.title} onChange={e => setSongToEdit({...songToEdit, title: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Artist</label>
+                  <input value={songToEdit.artist} onChange={e => setSongToEdit({...songToEdit, artist: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
+                </div>
+              </div>
+
+              {/* 2. Álbum y Número de pista */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Album</label>
+                  <input value={songToEdit.album || ""} onChange={e => setSongToEdit({...songToEdit, album: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Track Number</label>
+                  <input type="number" value={songToEdit.track_number || ""} onChange={e => setSongToEdit({...songToEdit, track_number: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
+                </div>
+              </div>
+
+              {/* 3. Enlaces externos (Tabs y YouTube) en 2 columnas perfectas */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Tabs URL</label>
+                  <input placeholder="Songsterr / Tabs URL" value={songToEdit.tabs_url || ""} onChange={e => setSongToEdit({...songToEdit, tabs_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-red-400 ml-2">YouTube Video URL</label>
+                  <input placeholder="https://www.youtube.com/watch?v=..." value={songToEdit.video_url || ""} onChange={e => setSongToEdit({...songToEdit, video_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-red-500 transition-all font-bold" />
+                </div>
+              </div>
+
+              {/* 4. Cover Art separado y limpio sin elementos invasores */}
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Cover Art</label>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0">
+                    {newEditCover ? ( 
+                      <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" /> 
+                    ) : ( 
+                      <img src={songToEdit.coverUrl} className="w-full h-full object-cover" /> 
+                    )}
+                  </div>
+                  <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center hover:bg-white/10 transition-all">
+                    <ImageIcon size={20} className="text-white/20 mb-1"/>
+                    <span className="text-[10px] font-bold uppercase text-white/40">Change Artwork</span>
+                    <input type="file" accept="image/*" onChange={e => e.target.files && setNewEditCover(e.target.files[0])} className="hidden" />
+                  </label>
+                </div>
+              </div>
+
+              {/* 5. Botones */}
+              <div className="pt-4 flex gap-4">
+                <button type="button" onClick={() => setSongToEdit(null)} className="flex-1 bg-white/5 py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:bg-white/10 transition-all">Cancel</button>
+                <button type="submit" className="flex-1 bg-white text-black py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:scale-[1.02] transition-all">Save Changes</button>
+              </div>
+            </form>
+          </motion.div>
+        </div> 
+      )}</AnimatePresence>
 
       <AnimatePresence>{trackToDelete && ( 
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 text-white">

@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import { Play, Pause, ListPlus, Guitar, Trash2, SquarePlay, Edit2, ListMusic, Heart } from 'lucide-react';
+import { 
+  Play, Pause, ListPlus, Guitar, Trash2, 
+  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check 
+} from 'lucide-react';
 import { type Song } from '../constants';
 
 interface MusicCardProps {
@@ -28,118 +31,268 @@ interface MusicCardProps {
 export const MusicCard: React.FC<MusicCardProps> = ({ 
   song, isActive, isPlaying, playlists = [], userRole, isLiked, onToggleLike,
   onAddToPlaylist, onRemoveFromPlaylist, onOpenTabs, onDelete, onPlayNext, onAddToQueue, onEdit, onClick, onDragStart,
-onDragOver,
-onDrop,
-isDragging
+  onDragOver, onDrop, isDragging
 }) => {
-  const [showDropdown, setShowDropdown] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState(false);
+  
+  // Feedback visual al añadir a la cola o reproducir siguiente
+  const [addedToQueue, setAddedToQueue] = useState(false);
+  const [playedNext, setPlayedNext] = useState(false);
+
+  const handleQueueClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onAddToQueue();
+    setAddedToQueue(true);
+    setTimeout(() => setAddedToQueue(false), 1500);
+  };
+
+  const handlePlayNextClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onPlayNext();
+    setPlayedNext(true);
+    setTimeout(() => setPlayedNext(false), 1500);
+  };
+
+  const handleOpenVideo = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const videoUrl = (song as any).video_url;
+    if (videoUrl && videoUrl.trim()) {
+      window.open(videoUrl, '_blank');
+    } else {
+      alert("Esta canción aún no tiene un vídeo oficial vinculado. Puedes añadirlo editando los metadatos.");
+    }
+  };
+
+  const hasVideo = Boolean((song as any).video_url && (song as any).video_url.trim());
 
   return (
     <div
-  draggable={!!onDragStart}
-  onDragStart={(e) => {
-    e.stopPropagation();
-    onDragStart?.();
-  }}
-  onDragOver={(e) => {
-    if (onDragOver) {
-      e.preventDefault();
-      e.stopPropagation();
-      onDragOver(e);
-    }
-  }}
-  onDrop={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onDrop?.();
-  }}
-  className={`group relative p-6 md:p-4 rounded-[40px] md:rounded-3xl transition-all duration-300 ${
-    isDragging
-      ? 'opacity-30 scale-95'
-      : isActive
-        ? 'bg-white/10'
-        : 'bg-white/5 hover:bg-white/[0.08]'
-  } ${
-    onDragStart
-      ? 'cursor-grab active:cursor-grabbing'
-      : ''
-  }`}
->
-      
-      {/* ELIMINAR - TOP RIGHT (Escalado móvil) */}
-      {userRole === 'admin' && (
-          <button 
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="absolute top-8 right-8 md:top-6 md:right-6 z-30 p-4 md:p-2 rounded-full bg-black/60 backdrop-blur-md text-white/40 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all border border-white/10 shadow-xl"
-          >
-              <Trash2 size={24} className="md:w-3.5 md:h-3.5" />
-          </button>
-      )}
-
-      {/* CLUSTER ACCIONES - TOP LEFT */}
-      <div className="absolute top-8 left-8 md:top-6 md:left-6 z-30 flex gap-4 md:gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
-          {(userRole === 'admin' || userRole === 'moderator') && (
-              <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-4 md:p-2 rounded-full bg-black/60 backdrop-blur-md text-white/40 hover:text-white border border-white/10 shadow-xl"><Edit2 size={24} className="md:w-3.5 md:h-3.5" /></button>
-          )}
-          <button onClick={(e) => { e.stopPropagation(); onPlayNext(); }} className="p-4 md:p-2 rounded-full bg-black/60 backdrop-blur-md text-white/40 hover:text-white border border-white/10 shadow-xl"><SquarePlay size={24} className="md:w-3.5 md:h-3.5" /></button>
-          <button onClick={(e) => { e.stopPropagation(); onAddToQueue(); }} className="p-4 md:p-2 rounded-full bg-black/60 backdrop-blur-md text-white/40 hover:text-white border border-white/10 shadow-xl"><ListMusic size={24} className="md:w-3.5 md:h-3.5" /></button>
-      </div>
-
-      {/* PORTADA (Grande y táctil) */}
-      <div onClick={onClick} className="relative aspect-square rounded-[32px] md:rounded-2xl overflow-hidden mb-8 md:mb-4 cursor-pointer">
-        <img src={song.coverUrl || '/default-cover.jpg'} className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'}`} alt={song.title} />
+      draggable={!!onDragStart}
+      onDragStart={(e) => {
+        e.stopPropagation();
+        onDragStart?.();
+      }}
+      onDragOver={(e) => {
+        if (onDragOver) {
+          e.preventDefault();
+          e.stopPropagation();
+          onDragOver(e);
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDrop?.();
+      }}
+      className={`group relative p-5 md:p-4 rounded-[32px] md:rounded-3xl transition-all duration-300 flex flex-col justify-between ${
+        isDragging
+          ? 'opacity-30 scale-95'
+          : isActive
+            ? 'bg-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)]'
+            : 'bg-white/5 hover:bg-white/[0.08]'
+      } ${
+        onDragStart ? 'cursor-grab active:cursor-grabbing' : ''
+      }`}
+    >
+      {/* PORTADA LIMPIA (Solo con el botón de Play/Pause central al pasar el ratón) */}
+      <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
+        <img 
+          src={song.coverUrl || '/default-cover.jpg'} 
+          className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'}`} 
+          alt={song.title} 
+          draggable={false}
+        />
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
-          {isPlaying && isActive ? <Pause size={64} fill="white" className="md:w-8 md:h-8" /> : <Play size={64} fill="white" className="ml-2 md:w-8 md:h-8 md:ml-1" />}
+          {isPlaying && isActive ? <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white" /> : <Play size={48} fill="white" className="ml-1.5 md:w-8 md:h-8 md:ml-1 text-white" />}
         </div>
       </div>
 
-      {/* INFO - TEXTOS GRANDES */}
-      <div className="pr-12 space-y-3 md:space-y-1">
-        <h3 className="text-2xl md:text-sm font-bold text-white truncate leading-tight tracking-tight">{song.title}</h3>
-        <p className="text-lg md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate">{song.artist}</p>
-      </div>
+      {/* FILA INFERIOR: INFORMACIÓN + BOTÓN DE 3 PUNTOS SIEMPRE ACTIVO */}
+      <div className="flex items-end justify-between gap-3 min-w-0 w-full pt-1">
+        
+        {/* TÍTULO Y ARTISTA (Espacio maximizado con puntos suspensivos sin solapes) */}
+        <div className="min-w-0 flex-1 space-y-1 md:space-y-0.5">
+          <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
+            {song.title}
+          </h3>
+          <p className="text-sm md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate" title={song.artist}>
+            {song.artist}
+          </p>
+        </div>
 
-      {/* ACCIONES INFERIORES */}
-<div className="absolute bottom-6 right-6 md:bottom-4 md:right-4 flex gap-4 md:gap-2">
+        {/* MENÚ DE 3 PUNTOS (Universal para cualquier pantalla) */}
+        <div className="relative flex items-center shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+              setShowPlaylistSubmenu(false);
+            }}
+            className={`p-2.5 md:p-2 rounded-full border transition-all cursor-pointer outline-none ${
+              showMenu 
+                ? 'bg-brand-primary text-black border-brand-primary shadow-lg' 
+                : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border-white/5'
+            }`}
+            title="Opciones de la canción"
+          >
+            <MoreVertical size={18} className="md:w-4 md:h-4" />
+          </button>
 
-  {/* QUITAR DE PLAYLIST */}
-  {onRemoveFromPlaylist && (
-    <button
-        onClick={(e) => {
-            e.stopPropagation();
-            onRemoveFromPlaylist();
-        }}
-        className="p-4 md:p-2 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-500/60 hover:text-red-500 transition-all border border-red-500/10"
-        title="Remove from playlist"
-    >
-        <Trash2 size={24} className="md:w-4 md:h-4" />
-    </button>
-)}
-  {/* BOTÓN LIKE */}
-  <button
-    onClick={(e) => { e.stopPropagation(); onToggleLike(); }}
-    className={`p-4 md:p-2 rounded-full border border-white/5 transition-all hover:scale-110 ${isLiked ? 'bg-red-500/20 text-red-500 border-red-500/20' : 'bg-white/5 text-white/20 hover:text-white/40'}`}
-  >
-    <Heart size={24} fill={isLiked ? "currentColor" : "none"} className="md:w-4 md:h-4" />
-  </button>
-
-        <button onClick={(e) => { e.stopPropagation(); onOpenTabs(); }} className="p-4 md:p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-brand-primary transition-all border border-white/5"><Guitar size={24} className="md:w-4 md:h-4" /></button>
-        <div className="relative">
-          <button onClick={(e) => { e.stopPropagation(); setShowDropdown(!showDropdown); }} className={`p-4 md:p-2 rounded-full transition-all border border-white/5 ${showDropdown ? 'bg-white/20 text-white border-white/20' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white'}`}><ListPlus size={24} className="md:w-4 md:h-4" /></button>
-          {showDropdown && (
+          {/* DESPLEGABLE CON TODAS LAS ACCIONES */}
+          {showMenu && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} />
-              <div className="absolute bottom-full right-0 mb-4 w-72 md:w-48 bg-[#1a1a1a] border border-white/10 rounded-[24px] md:rounded-xl overflow-hidden z-50 shadow-2xl animate-in fade-in slide-in-from-bottom-2">
-                <p className="px-6 py-4 md:px-4 md:py-2 text-xs md:text-[8px] font-bold text-white/20 uppercase tracking-widest border-b border-white/5 bg-black/20 text-center">Add to Playlist</p>
-                <div className="max-h-80 md:max-h-48 overflow-y-auto">
-                    {playlists.map(p => (
-                        <button key={p.id} onClick={(e) => { e.stopPropagation(); onAddToPlaylist(p.id.toString()); setShowDropdown(false); }} className="w-full text-left px-6 py-5 md:px-4 md:py-3 text-base md:text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/5 transition-colors border-b border-white/5 last:border-0">{p.name}</button>
-                    ))}
+              {/* Capa invisible para cerrar al hacer clic fuera */}
+              <div 
+                className="fixed inset-0 z-40" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  setShowPlaylistSubmenu(false);
+                }} 
+              />
+
+              <div 
+                className="absolute bottom-full right-0 mb-2 w-64 bg-[#161616]/95 backdrop-blur-2xl border border-white/10 rounded-2xl overflow-hidden z-50 shadow-2xl p-1.5 text-xs select-none animate-in fade-in zoom-in-95 duration-150"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* 1. LIKE / FAVORITOS */}
+                <button
+                  type="button"
+                  onClick={() => { onToggleLike(); setShowMenu(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                >
+                  <Heart size={15} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
+                  <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+                </button>
+
+                {/* 2. VER TABS / ACORDES */}
+                <button
+                  type="button"
+                  onClick={() => { onOpenTabs(); setShowMenu(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-brand-primary hover:bg-white/10 transition-colors cursor-pointer text-left"
+                >
+                  <Guitar size={15} />
+                  <span>Ver Acordes / Tabs</span>
+                </button>
+
+                {/* 3. VÍDEO OFICIAL YOUTUBE */}
+                <button
+                  type="button"
+                  onClick={() => { setShowMenu(false); handleOpenVideo(); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
+                    hasVideo ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
+                  }`}
+                >
+                  <Youtube size={15} />
+                  <span>{hasVideo ? 'Vídeo Oficial (YouTube)' : 'Sin vídeo oficial'}</span>
+                </button>
+
+                {/* 4. REPRODUCIR SIGUIENTE */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    handlePlayNextClick(e);
+                    setShowMenu(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                >
+                  {playedNext ? <Check size={15} className="text-green-400" /> : <ListMusic size={15} />}
+                  <span>{playedNext ? '¡Se reproducirá siguiente!' : 'Reproducir siguiente'}</span>
+                </button>
+
+                {/* 5. AÑADIR A LA COLA */}
+                <button
+                  type="button"
+                  onClick={(e) => { 
+                    handleQueueClick(e);
+                    setShowMenu(false); 
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                >
+                  {addedToQueue ? <Check size={15} className="text-green-400" /> : <ListPlus size={15} />}
+                  <span>{addedToQueue ? '¡Añadida a la cola!' : 'Añadir a la cola'}</span>
+                </button>
+
+                {/* 6. AÑADIR A PLAYLIST */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPlaylistSubmenu(!showPlaylistSubmenu)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ListPlus size={15} />
+                      <span>Añadir a Playlist</span>
+                    </div>
+                    <span className="text-[10px] text-white/30">{showPlaylistSubmenu ? '▲' : '▼'}</span>
+                  </button>
+
+                  {/* Submenú de Playlists */}
+                  {showPlaylistSubmenu && (
+                    <div className="max-h-36 overflow-y-auto pl-8 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5">
+                      {playlists.length > 0 ? (
+                        playlists.map(p => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              onAddToPlaylist(p.id.toString());
+                              setShowMenu(false);
+                              setShowPlaylistSubmenu(false);
+                            }}
+                            className="w-full text-left py-1.5 px-2 text-[11px] font-medium text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer truncate"
+                          >
+                            {p.name}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="py-2 text-[10px] text-white/30 text-center">No hay playlists</p>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* 7. QUITAR DE LA PLAYLIST */}
+                {onRemoveFromPlaylist && (
+                  <button
+                    type="button"
+                    onClick={() => { onRemoveFromPlaylist(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1"
+                  >
+                    <Trash2 size={15} />
+                    <span>Quitar de esta lista</span>
+                  </button>
+                )}
+
+                {/* 8. OPCIONES DE ADMINISTRACIÓN */}
+                {(userRole === 'admin' || userRole === 'moderator') && (
+                  <button
+                    type="button"
+                    onClick={() => { onEdit(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1"
+                  >
+                    <Edit2 size={15} />
+                    <span>Editar metadatos</span>
+                  </button>
+                )}
+
+                {userRole === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => { onDelete(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+                  >
+                    <Trash2 size={15} />
+                    <span>Eliminar canción</span>
+                  </button>
+                )}
               </div>
             </>
           )}
         </div>
+
       </div>
     </div>
   );
