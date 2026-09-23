@@ -7,3 +7,10 @@ coverage/
 .env*
 !.env.example
 public/
+
+# Android Studio
+.idea/
+*.iml
+
+# Windows
+desktop.ini

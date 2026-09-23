@@ -27,6 +27,7 @@ import { SessionOverlay } from "./components/SessionOverlay";
 import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
 import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
+import AuraMedia from './plugins/auraMedia';
 
 
 // MODULED IMPORTS AND HOOKS
@@ -911,12 +912,30 @@ useEffect(() => {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     const pool = socketObj.isShuffle
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
     if (pool.length === 0) return;
+
+    if (socketObj.isLoop && currentSong) {
+      if (audioObj.audioRef.current) {
+        audioObj.audioRef.current.currentTime = 0;
+
+        try {
+          await audioObj.audioRef.current.play();
+        } catch (error) {
+          console.error(
+            'Error reiniciando canción en loop:',
+            error
+          );
+        }
+      }
+
+      setIsPlaying(true);
+      return;
+    }
 
     const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
 
@@ -972,9 +991,35 @@ useEffect(() => {
     handlePlaySong(previousSong, false, 0, true);
   };
 
-  const toggleShuffle = () => {
-    const nextShuffleState = !socketObj.isShuffle;
+  const toggleShuffle = (forcedState?: boolean) => {
+    const nextShuffleState =
+      forcedState !== undefined
+        ? forcedState
+        : !socketObj.isShuffle;
+    console.log(
+      '[SHUFFLE] toggleShuffle ejecutado:',
+      nextShuffleState
+    );
     socketObj.setIsShuffle(nextShuffleState);
+    console.log(
+      '[AURA MEDIA] Enviando shuffle a Android:',
+      nextShuffleState
+    );
+
+    AuraMedia.setShuffle({
+      enabled: nextShuffleState
+    })
+      .then(() => {
+        console.log(
+          '[AURA MEDIA] Shuffle enviado correctamente'
+        );
+      })
+      .catch((error) => {
+        console.error(
+          '[AURA MEDIA] Error enviando shuffle:',
+          error
+        );
+      });
     let newShuffled: Song[] = [];
 
     if (nextShuffleState) {
@@ -1011,10 +1056,39 @@ useEffect(() => {
     socketObj.emitCommand('toggle-shuffle', { isShuffle: nextShuffleState, shuffledQueue: newShuffled });
   };
 
-  const toggleLoop = () => {
-      const nextLoop = !socketObj.isLoop;
-      socketObj.setIsLoop(nextLoop);
-      socketObj.emitCommand('toggle-loop', { isLoop: nextLoop });
+  const toggleLoop = (forcedState?: boolean) => {
+    const nextLoop =
+      forcedState !== undefined
+        ? forcedState
+        : !socketObj.isLoop;
+
+    console.log(
+      '[LOOP] toggleLoop ejecutado:',
+      nextLoop
+    );
+    socketObj.setIsLoop(nextLoop);
+    console.log(
+      '[AURA MEDIA] Enviando repeat a Android:',
+      nextLoop
+    );
+
+    AuraMedia.setRepeat({
+      enabled: nextLoop
+    })
+      .then(() => {
+        console.log(
+          '[AURA MEDIA] Repeat enviado correctamente'
+        );
+      })
+      .catch((error) => {
+        console.error(
+          '[AURA MEDIA] Error enviando repeat:',
+          error
+        );
+      });
+    socketObj.emitCommand('toggle-loop', {
+      isLoop: nextLoop
+    });
   };
 
   const handlePlayNext = (song: Song) => {
@@ -1330,7 +1404,216 @@ useEffect(() => {
   const currentThemeConfig = THEMES.find(t => t.id === activeTheme) || THEMES[0];
   const getThemeBg = () => activeTheme === 'light' ? '#ffffff' : '#050505';
 
- 
+  useEffect(() => {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  let removed = false;
+  let listeners: Array<{ remove: () => Promise<void> }> = [];
+
+  const setupAuraMedia = async () => {
+    try {
+      await AuraMedia.start();
+
+      const playListener = await AuraMedia.addListener(
+        'play',
+        () => {
+          setIsPlaying(true);
+        }
+      );
+
+      const pauseListener = await AuraMedia.addListener(
+        'pause',
+        () => {
+          setIsPlaying(false);
+        }
+      );
+
+      const nextListener = await AuraMedia.addListener(
+        'next',
+        () => {
+          handleNext();
+        }
+      );
+
+      const previousListener = await AuraMedia.addListener(
+        'previous',
+        () => {
+          handlePrevious();
+        }
+      );
+
+      const shuffleListener = await AuraMedia.addListener(
+        'shuffleChanged',
+        (data) => {
+          const enabled = Boolean(data?.enabled);
+
+          if (enabled === socketObj.isShuffle) {
+            return;
+          }
+
+          toggleShuffle(enabled);
+        }
+      );
+
+      const repeatListener = await AuraMedia.addListener(
+        'repeatChanged',
+        (data) => {
+          const repeatMode = Number(data?.repeatMode);
+          const enabled = repeatMode !== 0;
+
+          if (enabled === socketObj.isLoop) {
+            return;
+          }
+
+          toggleLoop(enabled);
+        }
+      );
+
+      const seekListener = await AuraMedia.addListener(
+        'seek',
+        (data) => {
+          const positionMs = Number(data?.positionMs);
+
+          if (!Number.isFinite(positionMs)) {
+            return;
+          }
+
+          if (audioObj.audioRef.current) {
+            audioObj.audioRef.current.currentTime =
+              positionMs / 1000;
+          }
+        }
+      );
+
+      listeners = [
+        playListener,
+        pauseListener,
+        nextListener,
+        previousListener,
+        shuffleListener,
+        repeatListener,
+        seekListener
+      ];
+
+      if (removed) {
+        for (const listener of listeners) {
+          await listener.remove();
+        }
+      }
+    } catch (error) {
+      console.error(
+        'Error iniciando controles multimedia de Android:',
+        error
+      );
+    }
+  };
+
+  setupAuraMedia();
+
+  return () => {
+    removed = true;
+
+    for (const listener of listeners) {
+      listener.remove().catch(() => {});
+    }
+  };
+}, [
+  handleNext,
+  handlePrevious
+]);
+
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!currentSong) {
+    return;
+  }
+
+  const durationMs = Math.max(
+    0,
+    Math.round((audioObj.duration || 0) * 1000)
+  );
+
+  const artworkUrl = currentSong.coverUrl || undefined;
+  AuraMedia.setTrack({
+    id: String(currentSong.id),
+    title: currentSong.title || 'Aura Music',
+    artist: currentSong.artist || '',
+    album: currentSong.album || '',
+    artworkUrl,
+    durationMs
+  }).catch((error) => {
+    console.error(
+      'Error actualizando canción en Android:',
+      error
+    );
+  });
+}, [
+  currentSong?.id,
+  currentSong?.title,
+  currentSong?.artist,
+  currentSong?.album,
+  audioObj.duration
+]);
+
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!currentSong) {
+    return;
+  }
+
+  AuraMedia.setPlaying({
+    playing: isPlaying
+  }).catch((error) => {
+    console.error(
+      'Error sincronizando Play/Pause con Android:',
+      error
+    );
+  });
+}, [
+  currentSong?.id,
+  isPlaying
+]);
+
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!currentSong) {
+    return;
+  }
+
+  const syncPosition = () => {
+    const positionMs = Math.max(
+      0,
+      Math.round(audioObj.getCurrentTime() * 1000)
+    );
+
+    AuraMedia.setPosition({
+      positionMs
+    }).catch(() => {});
+  };
+
+  syncPosition();
+
+  const unsubscribe = audioObj.subscribeToTime(
+    syncPosition
+  );
+
+  return unsubscribe;
+}, [
+  currentSong?.id,
+  audioObj.getCurrentTime,
+  audioObj.subscribeToTime
+]);
 
   return (
 
