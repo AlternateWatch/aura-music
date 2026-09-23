@@ -8,9 +8,14 @@ import { LyricsOverlay } from "./components/LyricsOverlay";
 import { MusicUpload } from "./components/MusicUpload";
 import { useFileUrl } from "./hooks/useFileUrl";
 import { 
-  Music2, Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users, 
-  MinusCircle, ListPlus, SquarePlay, DoorOpen, X, ArrowUpDown, Filter, Clock, Image as ImageIcon,
-  ChevronLeft, Menu, Heart, Play, Trophy, User, Disc, FileText, Film
+ Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users, 
+  MinusCircle, ListPlus, SquarePlay, DoorOpen, ArrowUpDown, Filter, Clock, Image as ImageIcon,
+  ChevronLeft, Menu, Heart, Play, Trophy, Disc, FileText, Film,Library,
+Music2,
+MessageCircle,
+Settings,
+User,
+X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TabsOverlay } from "./components/TabsOverlay"; 
@@ -21,6 +26,7 @@ import { QueueOverlay } from "./components/QueueOverlay";
 import { SessionOverlay } from "./components/SessionOverlay";
 import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
 import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 
 
 // MODULED IMPORTS AND HOOKS
@@ -62,6 +68,14 @@ export default function App() {
       }
     } catch (err) {}
   };
+
+  useEffect(() => {
+  const timer = setTimeout(() => {
+    setShowSplash(false);
+  }, 2000);
+
+  return () => clearTimeout(timer);
+}, []);
 
   const handleMaximize = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -146,6 +160,7 @@ export default function App() {
   const [newBioText, setNewBioText] = useState("");
   const [isBioExpanded, setIsBioExpanded] = useState(false);
   const [mobileNavVisible, setMobileNavVisible] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   // ESTADO DE FOTOS DE PERFIL DE ARTISTAS
   const [artistImageUrl, setArtistImageUrl] = useState<string | null>(null);
@@ -159,6 +174,7 @@ export default function App() {
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('aura_theme') || 'dark');
   const [customBg, setCustomBg] = useState(user?.custom_bg_path || null);
   const [isSocialOpen, setIsSocialOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
@@ -177,6 +193,7 @@ export default function App() {
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [heroImageError, setHeroImageError] = useState(false);
+  const isGoingBackRef = useRef(false);
 
   // HISTORIAL
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>(() => {
@@ -188,6 +205,46 @@ export default function App() {
     }
   });
 
+  const navigationHistoryRef = useRef<
+  Array<{
+    playlistId: string;
+    albumName: string | null;
+    artistName: string | null;
+  }>
+>([]);
+
+const previousNavigationRef = useRef({
+  playlistId: activePlaylistId,
+  albumName: selectedAlbumName,
+  artistName: selectedArtistName,
+});
+
+useEffect(() => {
+  const previous = previousNavigationRef.current;
+
+  const changed =
+    previous.playlistId !== activePlaylistId ||
+    previous.albumName !== selectedAlbumName ||
+    previous.artistName !== selectedArtistName;
+
+  if (!changed) return;
+
+  if (isGoingBackRef.current) {
+    isGoingBackRef.current = false;
+  } else {
+    navigationHistoryRef.current.push(previous);
+  }
+
+  previousNavigationRef.current = {
+    playlistId: activePlaylistId,
+    albumName: selectedAlbumName,
+    artistName: selectedArtistName,
+  };
+}, [
+  activePlaylistId,
+  selectedAlbumName,
+  selectedArtistName,
+]);
   const [dynamicColor, setDynamicColor] = useState<string>('#6366f1');
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -277,6 +334,103 @@ export default function App() {
     }
   };
 }, []);
+
+
+useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  const handleBackButton = async () => {
+    // 1. Overlays/modales: cerrar primero
+    if (isLyricsOpen) {
+      setIsLyricsOpen(false);
+      return;
+    }
+
+    if (isQueueOpen) {
+      setIsQueueOpen(false);
+      return;
+    }
+
+    if (isFullPlayerOpen) {
+      setIsFullPlayerOpen(false);
+      return;
+    }
+
+    if (isSocialOpen) {
+      setIsSocialOpen(false);
+      return;
+    }
+
+    if (isSessionOpen) {
+      setIsSessionOpen(false);
+      return;
+    }
+
+    if (isProfileOpen) {
+      setIsProfileOpen(false);
+      return;
+    }
+
+    if (isPersonalizationOpen) {
+      setIsPersonalizationOpen(false);
+      return;
+    }
+
+    if (showUpload) {
+      setShowUpload(false);
+      return;
+    }
+
+    if (isCreatePlaylistOpen) {
+      setIsCreatePlaylistOpen(false);
+      return;
+    }
+
+    if (tabsSong) {
+      setTabsSong(null);
+      return;
+    }
+
+    if (songToEdit) {
+      setSongToEdit(null);
+      return;
+    }
+
+    // 2. Si tenemos navegación anterior, volver a ella
+    const previous = navigationHistoryRef.current.pop();
+
+    if (previous) {
+  isGoingBackRef.current = true;
+
+  setActivePlaylistId(previous.playlistId);
+  setSelectedAlbumName(previous.albumName);
+  setSelectedArtistName(previous.artistName);
+
+  return;
+}
+
+    // 3. Si no hay navegación interna, comportamiento normal de Android
+    CapacitorApp.exitApp();
+  };
+
+  const listener = CapacitorApp.addListener("backButton", handleBackButton);
+
+  return () => {
+    listener.then(handle => handle.remove());
+  };
+}, [
+  isLyricsOpen,
+  isQueueOpen,
+  isFullPlayerOpen,
+  isSocialOpen,
+  isSessionOpen,
+  isProfileOpen,
+  isPersonalizationOpen,
+  showUpload,
+  isCreatePlaylistOpen,
+  tabsSong,
+  songToEdit,
+]);
   
 
   // COLOR DINÁMICO
@@ -1179,6 +1333,8 @@ useEffect(() => {
  
 
   return (
+
+    
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
       {/* Barra superior de escritorio integrada con el fondo */}
       {isDesktop && (
@@ -1241,6 +1397,35 @@ useEffect(() => {
           <div className="absolute inset-0 pointer-events-none transition-opacity duration-1000 z-[1]" style={{ backgroundImage: `url(${resolvedCustomBg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
       )}
 
+      <AnimatePresence>
+    {showSplash && (
+      <motion.div
+        initial={{ opacity: 1 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{
+          duration: 0.7,
+          ease: "easeInOut",
+        }}
+        className="fixed inset-0 z-[99999] bg-black flex items-center justify-center"
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{
+            duration: 0.45,
+            ease: "easeOut",
+          }}
+          className="flex items-center justify-center"
+        >
+          <div className="text-5xl md:text-6xl font-bold tracking-tighter text-white">
+            AURA<span className="text-brand-primary">.</span>
+          </div>
+        </motion.div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+
       {/* TOP NAVIGATION */}
       <AnimatePresence>
         {!isFocusMode && (
@@ -1278,18 +1463,420 @@ useEffect(() => {
             </div>
             <div className="flex items-center gap-3 md:gap-6">
               {token ? (
-                <div className="flex items-center gap-2 md:gap-4">
-                  <button onClick={() => setShowUpload(true)} className="bg-brand-primary text-black px-3 md:px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"><Plus size={14}/> <span className="hidden xs:inline">Upload</span></button>
-                  <button onClick={handleLogout} className="cursor-pointer text-white/40 hover:text-red-400"><LogOut size={16}/></button>
-                  <div onClick={() => setIsProfileOpen(true)} className={`w-7 h-7 md:w-8 md:h-8 rounded-full border border-white/10 bg-white/5 flex items-center justify-center cursor-pointer overflow-hidden text-[10px] font-bold`}>
-                    {resolvedProfilePic ? <img src={resolvedProfilePic} className="w-full h-full object-cover" /> : (user?.username?.[0] || "U")}
-                  </div>
-                  <button onClick={() => setIsSocialOpen(true)} className="lg:hidden text-white/40"><Menu size={20}/></button>
-                </div>
+                   <div className="flex items-center gap-2 md:gap-4">
+  <button
+    onClick={() => setShowUpload(true)}
+    className="bg-brand-primary text-black px-3 md:px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"
+  >
+    <Plus size={14}/>
+    <span className="hidden xs:inline">Upload</span>
+  </button>
+
+  <button
+    onClick={() => setIsMobileMenuOpen(prev => !prev)}
+    className="lg:hidden text-white/40 hover:text-white transition-colors"
+  >
+    <Menu size={20}/>
+  </button>
+</div>
               ) : ( <button onClick={() => setIsAuthModalOpen(true)} className="px-5 py-2 rounded-full text-[10px] font-bold uppercase bg-white text-black hover:scale-105 transition-all cursor-pointer">Sign In</button> )}
             </div>
           </motion.nav>
+          
+          
         )}
+<AnimatePresence>
+  {isMobileMenuOpen && (
+    <>
+      {/* Fondo oscuro detrás del menú */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="fixed inset-0 z-[9998] bg-black/40 md:hidden"
+        onClick={() => setIsMobileMenuOpen(false)}
+      />
+
+      {/* MENÚ */}
+      <motion.div
+        initial={{ opacity: 0, y: -6 }}
+animate={{ opacity: 1, y: 0 }}
+exit={{ opacity: 0, y: -6 }}
+transition={{
+  duration: 0.12,
+  ease: "easeOut",
+}}
+        className={`fixed top-[5.5rem] left-3 right-3 z-[9999] md:hidden rounded-2xl border shadow-lg overflow-hidden ${
+          activeTheme === "light"
+            ? "bg-white border-black/10 text-black"
+            : "bg-[#080808] border-white/10 text-white"
+        }`}
+      >
+
+        {/* CABECERA */}
+        <div
+          className={`px-4 py-4 border-b ${
+            activeTheme === "light"
+              ? "border-black/5"
+              : "border-white/10"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-40">
+                Aura
+              </div>
+
+              <div className="text-lg font-bold tracking-tight">
+                Menu
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                activeTheme === "light"
+                  ? "bg-black/5 hover:bg-black/10"
+                  : "bg-white/5 hover:bg-white/10"
+              }`}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* CONTENIDO */}
+        <div className="max-h-[calc(100vh-7rem)] overflow-y-auto scrollbar-hide">
+
+          {/* LIBRARY */}
+          <button
+            onClick={() => {
+              setShowModeration(false);
+              setActivePlaylistId("all");
+              setSelectedAlbumName(null);
+              setSelectedArtistName(null);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+              activePlaylistId === "all" && !showModeration
+                ? "text-brand-primary bg-brand-primary/10"
+                : activeTheme === "light"
+                  ? "hover:bg-black/5"
+                  : "hover:bg-white/5"
+            }`}
+          >
+            <Library size={18} />
+
+            <div className="flex-1">
+              <div className="text-sm font-semibold">
+                Library
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                Your music collection
+              </div>
+            </div>
+          </button>
+
+          {/* PLAYLISTS */}
+          <div
+            className={`px-4 pt-4 pb-2 ${
+              activeTheme === "light"
+                ? "border-t border-black/5"
+                : "border-t border-white/5"
+            }`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-[0.18em] font-bold opacity-40">
+                Playlists
+              </div>
+
+              <button
+                onClick={() => {
+                  setIsCreatePlaylistOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-6 h-6 rounded-full bg-brand-primary text-black flex items-center justify-center hover:scale-105 transition-transform"
+              >
+                <Plus size={13} />
+              </button>
+            </div>
+
+            <div className="max-h-40 overflow-y-auto scrollbar-hide">
+
+              {playlists.length === 0 ? (
+                <button
+                  onClick={() => {
+                    setIsCreatePlaylistOpen(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg text-xs opacity-40 hover:opacity-70 transition-opacity ${
+                    activeTheme === "light"
+                      ? "hover:bg-black/5"
+                      : "hover:bg-white/5"
+                  }`}
+                >
+                  No playlists yet. Create one.
+                </button>
+              ) : (
+                playlists.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`flex items-center rounded-lg group ${
+                      activePlaylistId === p.id.toString()
+                        ? "bg-brand-primary/10"
+                        : activeTheme === "light"
+                          ? "hover:bg-black/5"
+                          : "hover:bg-white/5"
+                    }`}
+                  >
+                    <button
+                      onClick={() => {
+                        setActivePlaylistId(p.id.toString());
+                        setShowModeration(false);
+                        setSelectedAlbumName(null);
+                        setSelectedArtistName(null);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={`flex-1 min-w-0 text-left px-3 py-2.5 text-xs truncate transition-colors ${
+                        activePlaylistId === p.id.toString()
+                          ? "text-brand-primary font-semibold"
+                          : activeTheme === "light"
+                            ? "text-black/60 hover:text-black"
+                            : "text-white/60 hover:text-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Music2 size={13} className="shrink-0 opacity-50" />
+                        <span className="truncate">
+                          {p.name}
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeletePlaylist(p.id);
+                      }}
+                      className="mr-2 p-1.5 text-red-500/40 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))
+              )}
+
+            </div>
+          </div>
+
+          {/* CREATE PLAYLIST */}
+          <button
+            onClick={() => {
+              setIsCreatePlaylistOpen(true);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              activeTheme === "light"
+                ? "hover:bg-black/5"
+                : "hover:bg-white/5"
+            }`}
+          >
+            <div className="w-8 h-8 rounded-lg bg-brand-primary/10 text-brand-primary flex items-center justify-center">
+              <Plus size={16} />
+            </div>
+
+            <div>
+              <div className="text-sm font-semibold">
+                Create playlist
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                Make a new collection
+              </div>
+            </div>
+          </button>
+
+          {/* SEPARADOR */}
+          <div
+            className={`mx-4 h-px ${
+              activeTheme === "light"
+                ? "bg-black/5"
+                : "bg-white/5"
+            }`}
+          />
+
+          {/* SESSION */}
+          <button
+            onClick={() => {
+              setIsSessionOpen(true);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              activeTheme === "light"
+                ? "hover:bg-black/5"
+                : "hover:bg-white/5"
+            }`}
+          >
+            <Users size={18} />
+
+            <div className="flex-1">
+              <div className="text-sm font-semibold">
+                Session
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                Listen together
+              </div>
+            </div>
+
+            {socketObj.currentSession && (
+              <span className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
+            )}
+          </button>
+
+          {/* SOCIAL */}
+          {token && (
+            <button
+              onClick={() => {
+                setIsSocialOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                activeTheme === "light"
+                  ? "hover:bg-black/5"
+                  : "hover:bg-white/5"
+              }`}
+            >
+              <MessageCircle size={18} />
+
+              <div className="flex-1">
+                <div className="text-sm font-semibold">
+                  Social
+                </div>
+
+                <div className="text-[10px] opacity-40">
+                  Friends and messages
+                </div>
+              </div>
+
+              {socketObj.unreadSenders.length > 0 && (
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              )}
+            </button>
+          )}
+
+          {/* PERSONALIZATION */}
+          <button
+            onClick={() => {
+              setIsPersonalizationOpen(true);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              activeTheme === "light"
+                ? "hover:bg-black/5"
+                : "hover:bg-white/5"
+            }`}
+          >
+            <Settings size={18} />
+
+            <div>
+              <div className="text-sm font-semibold">
+                Personalization
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                Appearance and preferences
+              </div>
+            </div>
+          </button>
+
+          {/* MODERATION */}
+          {(userRole === "admin" || userRole === "moderator") && (
+            <button
+              onClick={() => {
+                setShowModeration(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                activeTheme === "light"
+                  ? "hover:bg-black/5"
+                  : "hover:bg-white/5"
+              }`}
+            >
+              <ShieldCheck size={18} className="text-amber-500" />
+
+              <div>
+                <div className="text-sm font-semibold">
+                  Moderation
+                </div>
+
+                <div className="text-[10px] opacity-40">
+                  Manage Aura
+                </div>
+              </div>
+            </button>
+          )}
+
+          {/* PROFILE */}
+          {token && (
+            <button
+              onClick={() => {
+                setIsProfileOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                activeTheme === "light"
+                  ? "hover:bg-black/5"
+                  : "hover:bg-white/5"
+              }`}
+            >
+              <User size={18} />
+
+              <div>
+                <div className="text-sm font-semibold">
+                  Profile
+                </div>
+
+                <div className="text-[10px] opacity-40">
+                  Your Aura profile
+                </div>
+              </div>
+            </button>
+          )}
+
+          {/* LOGOUT */}
+          {token && (
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                handleLogout();
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <LogOut size={18} />
+
+              <div>
+                <div className="text-sm font-semibold">
+                  Log out
+                </div>
+
+                <div className="text-[10px] text-red-400/50">
+                  Sign out of Aura
+                </div>
+              </div>
+            </button>
+          )}
+
+          {/* ESPACIO INFERIOR */}
+          <div className="h-2" />
+
+        </div>
+      </motion.div>
+    </>
+  )}
+</AnimatePresence>
       </AnimatePresence>
 
       <div className="flex flex-1 min-h-0 overflow-hidden z-10">
