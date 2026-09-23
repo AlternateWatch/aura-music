@@ -6,18 +6,22 @@ import {
   Volume2, Mic2, ListMusic, VolumeX, Volume1
 } from 'lucide-react';
 import { type Song } from '../constants';
+import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
 
 interface FullPlayerOverlayProps {
   isOpen: boolean;
   onClose: () => void;
   currentSong: Song | null;
+  animatedCoverUrl?: string | null;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onNext: () => void;
   onPrevious: () => void;
-  currentTime: number;
+  liveCurrentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  getCurrentTime: () => number;
+  subscribeToTime: (listener: () => void) => () => void;
   volume: number;
   onVolumeChange: (val: number) => void;
   isShuffle: boolean;
@@ -30,17 +34,47 @@ interface FullPlayerOverlayProps {
   onOpenMinigameLobby: () => void; 
 }
 
+const isVideoUrl = (url?: string | null) => {
+  if (!url) return false;
+  return /\.(mp4|webm|mov|mkv)($|\?)/i.test(url);
+};
+
 export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
-  const { 
-    isOpen, onClose, currentSong, isPlaying, onTogglePlay, onNext, onPrevious,
-    currentTime, duration, onSeek, volume, onVolumeChange, isShuffle, isLoop,
-    onToggleShuffle, onToggleLoop, onToggleLyrics, onToggleQueue, activeTheme,
-    onOpenMinigameLobby
-  } = props;
+  const {
+  isOpen,
+  onClose,
+  currentSong,
+  animatedCoverUrl,
+  isPlaying,
+  onTogglePlay,
+  onNext,
+  onPrevious,
+  duration,
+  onSeek,
+  volume,
+  onVolumeChange,
+  isShuffle,
+  isLoop,
+  onToggleShuffle,
+  onToggleLoop,
+  onToggleLyrics,
+  onToggleQueue,
+  activeTheme,
+  onOpenMinigameLobby,
+  getCurrentTime,
+  subscribeToTime,
+} = props;
+
+const liveCurrentTime = useAudioPlaybackTime(
+  getCurrentTime,
+  subscribeToTime
+);
+
+  
 
   if (!isOpen || !currentSong) return null;
 
-  const progress = (currentTime / (duration || 1)) * 100;
+  const progress = (liveCurrentTime / (duration || 1)) * 100;
 
   const formatTime = (time: number) => {
     if (!Number.isFinite(time) || time < 0) return "0:00";
@@ -48,6 +82,9 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
     const secs = Math.floor(time % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const animUrl = animatedCoverUrl || (currentSong as any)?.animated_cover_path || (currentSong as any)?.animatedCoverUrl;
+  const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
 
   return (
     <motion.div 
@@ -57,20 +94,19 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
       transition={{ type: 'spring', damping: 30, stiffness: 120 }}
       className="fixed inset-0 z-[400] bg-[#050505] overflow-y-auto overflow-x-hidden font-sans no-tap-highlight"
     >
-      {/* Inyección de CSS para erradicar el highlight de móvil */}
       <style>{`
         .no-tap-highlight * {
           -webkit-tap-highlight-color: transparent !important;
         }
       `}</style>
 
-      {/* Background Ambient Glow (fijo de fondo) */}
+      {/* Background Ambient Glow */}
       <div 
         className="fixed inset-0 opacity-40 blur-[140px] pointer-events-none transition-all duration-1000"
         style={{ background: `radial-gradient(circle at center, #6366f1 0%, transparent 80%)` }}
       />
 
-      {/* Contenedor principal para que TODO fluya como una sola página en scroll */}
+      {/* Contenedor principal que fluye completo */}
       <div className="flex flex-col min-h-full w-full relative z-10">
         
         {/* Header Area */}
@@ -94,17 +130,48 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
           </button>
         </div>
 
-        {/* Main Content Area (Ahora empuja hacia abajo el footer si necesita espacio) */}
+        {/* Main Content Area */}
         <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-10 w-full py-6 md:py-10">
           <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-8 md:gap-16">
             
-            {/* Big Cover Art */}
+            {/* Big Cover Art (SOPORTE PARA VÍDEO EN BUCLE / PORTADA ANIMADA) */}
             <motion.div 
               animate={{ scale: isPlaying ? 1 : 0.94, rotate: isPlaying ? 0 : -1 }}
               transition={{ duration: 0.8, ease: "easeInOut" }}
-              className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0"
+              className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0 bg-black"
             >
-              <img src={currentSong.coverUrl || '/default-cover.jpg'} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" alt={currentSong.title} />
+              {animUrl ? (
+                isVideo ? (
+                  <video 
+                    ref={(el) => {
+                      if (el) {
+                        el.muted = true;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    key={animUrl}
+                    src={animUrl} 
+                    autoPlay 
+                    loop 
+                    muted 
+                    playsInline 
+                    className="w-full h-full object-cover pointer-events-none" 
+                  />
+                ) : (
+                  <img 
+                    key={animUrl}
+                    src={animUrl} 
+                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
+                    alt={currentSong.title} 
+                  />
+                )
+              ) : (
+                <img 
+                  src={currentSong.coverUrl || '/default-cover.jpg'} 
+                  className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
+                  alt={currentSong.title} 
+                />
+              )}
             </motion.div>
 
             <div className="flex-1 w-full max-w-xl flex flex-col justify-center">
@@ -123,11 +190,11 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
                 <div className="relative w-full h-2 group flex items-center">
                     <div className="absolute inset-0 bg-white/10 rounded-full w-full h-full" />
                     <div className="absolute left-0 h-full bg-white rounded-full transition-all shadow-[0_0_15px_rgba(255,255,255,0.5)] pointer-events-none" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
-                    <input type="range" min="0" max={duration || 0} step="0.1" value={currentTime} onChange={(e) => onSeek(parseFloat(e.target.value))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 outline-none" />
+                    <input type="range" min="0" max={duration || 0} step="0.1" value={liveCurrentTime} onChange={(e) => onSeek(parseFloat(e.target.value))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 outline-none" />
                     <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 bg-white rounded-full shadow-2xl scale-0 group-hover:scale-100 transition-transform pointer-events-none z-10" style={{ left: `calc(${Math.min(100, Math.max(0, progress))}% - 8px)` }} />
                 </div>
                 <div className="flex justify-between mt-3 md:mt-4 text-[10px] md:text-[11px] font-bold font-mono text-white/40 tracking-widest pointer-events-none">
-                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(liveCurrentTime)}</span>
                   <span>{formatTime(duration)}</span>
                 </div>
               </div>
@@ -142,7 +209,10 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
                     <button onClick={onPrevious} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
                       <SkipBack size={36} className="md:w-12 md:h-12" fill="currentColor" />
                     </button>
-                    <button onClick={onTogglePlay} className="w-20 h-20 md:w-28 md:h-28 bg-white cursor-pointer rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all shadow-[0_15px_35px_rgba(255,255,255,0.15)] shrink-0 outline-none">
+                    <button 
+                        onClick={onTogglePlay} 
+                        className="w-20 h-20 md:w-28 md:h-28 bg-white cursor-pointer rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all shadow-[0_15px_35px_rgba(255,255,255,0.15)] shrink-0 outline-none"
+                    >
                         {isPlaying ? <Pause size={32} className="md:w-11 md:h-11" fill="black" /> : <Play size={32} className="md:w-11 md:h-11 ml-1.5 md:ml-2" fill="black" />}
                     </button>
                     <button onClick={onNext} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
@@ -161,7 +231,7 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
         {/* Footer Utility Bar */}
         <div className="h-24 md:h-32 flex items-center justify-between px-6 md:px-20 shrink-0 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-transparent w-full">
               
-              {/* Botón LYRICS con su cuadrado gris */}
+              {/* Botón LYRICS con cuadrado gris */}
               <button onClick={onToggleLyrics} className="flex items-center gap-2 md:gap-3 text-white/40 cursor-pointer hover:text-white transition-all group shrink-0 active:scale-95 outline-none">
                   <div className="p-3 bg-white/5 rounded-xl md:rounded-2xl group-hover:bg-brand-primary group-hover:text-black transition-all">
                       <Mic2 size={18} className="md:w-5 md:h-5" />
@@ -185,7 +255,7 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
                   <span className="hidden md:inline text-[10px] font-bold font-mono text-white/30 w-8 shrink-0 pointer-events-none">{Math.round(volume * 100)}%</span>
               </div>
 
-              {/* Botón UP NEXT con su cuadrado gris */}
+              {/* Botón UP NEXT con cuadrado gris */}
               <button onClick={onToggleQueue} className="flex items-center gap-2 md:gap-3 text-white/40 hover:text-white cursor-pointer transition-all group shrink-0 active:scale-95 outline-none">
                   <span className="hidden sm:inline text-[9px] md:text-[10px] font-bold uppercase tracking-[0.3em]">Up Next</span>
                   <div className="p-3 bg-white/5 rounded-xl md:rounded-2xl group-hover:bg-white group-hover:text-black transition-all">

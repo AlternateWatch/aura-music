@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useAudioPlaybackTime } from '../hooks/useAudioEngine';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Music2, Loader2 } from 'lucide-react';
 import { type Song } from '../constants';
@@ -9,6 +10,7 @@ interface LyricsOverlayProps {
   currentSong: Song | null;
   currentTime: number;
   onSeek: (time: number) => void;
+  getCurrentTime: () => number;subscribeToTime: (listener: () => void) => () => void;
 }
 
 interface LyricLine {
@@ -17,8 +19,13 @@ interface LyricLine {
 }
 
 export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({ 
-  isOpen, onClose, currentSong, currentTime, onSeek 
+  isOpen, onClose, currentSong, currentTime, onSeek, getCurrentTime, subscribeToTime
 }) => {
+
+  const liveCurrentTime = useAudioPlaybackTime(
+  getCurrentTime,
+  subscribeToTime
+);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,18 +103,17 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   };
 
   useEffect(() => {
-    if (activeLineRef.current && scrollContainerRef.current) {
-      activeLineRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
-  }, [currentTime, lyrics]);
-
+  if (activeLineRef.current && scrollContainerRef.current) {
+    activeLineRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }
+}, [liveCurrentTime, lyrics]);
   if (!isOpen) return null;
 
   const activeIndex = lyrics.reduce((prev, curr, idx) => {
-    return curr.time <= currentTime ? idx : prev;
+    return curr.time <= liveCurrentTime ? idx : prev;
   }, -1);
 
   return (

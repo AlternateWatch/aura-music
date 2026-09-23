@@ -10,7 +10,7 @@ import { useFileUrl } from "./hooks/useFileUrl";
 import { 
   Music2, Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users, 
   MinusCircle, ListPlus, SquarePlay, DoorOpen, X, ArrowUpDown, Filter, Clock, Image as ImageIcon,
-  ChevronLeft, Menu, Heart, Play, Trophy
+  ChevronLeft, Menu, Heart, Play, Trophy, User, Disc, FileText, Film
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TabsOverlay } from "./components/TabsOverlay"; 
@@ -27,6 +27,18 @@ import { useSocketLogic } from "./hooks/useSocketLogic";
 import { SocialSidebar } from "./hooks/SocialSidebar";
 import { AuthForm } from "./hooks/AuthSection";
 
+// HELPER: Extrae múltiples artistas separados por punto y coma (;)
+const parseArtists = (artistStr?: string | null): string[] => {
+  if (!artistStr) return [];
+  return artistStr.split(';').map(a => a.trim()).filter(Boolean);
+};
+
+// HELPER: Detecta si un archivo es vídeo (.mp4, .webm)
+const isVideoUrl = (url?: string | null) => {
+  if (!url) return false;
+  return /\.(mp4|webm|mov)($|\?)/i.test(url);
+};
+
 export default function App() {
   // --- DETECCIÓN Y ACCIONES DE ESCRITORIO ---
   const isDesktop = typeof window !== 'undefined' && (
@@ -35,25 +47,46 @@ export default function App() {
     Boolean((window as any).__TAURI_INTERNALS__)
   );
 
-  const handleMinimize = async () => {
+  const handleMinimize = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      getCurrentWindow().minimize();
-    } catch (e) {}
+      await getCurrentWindow().minimize();
+      return;
+    } catch (err) {}
+    try {
+      if ((window as any).__TAURI_INTERNALS__?.invoke) {
+        await (window as any).__TAURI_INTERNALS__.invoke('plugin:window|minimize');
+      }
+    } catch (err) {}
   };
 
-  const handleMaximize = async () => {
+  const handleMaximize = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      getCurrentWindow().toggleMaximize();
-    } catch (e) {}
+      await getCurrentWindow().toggleMaximize();
+      return;
+    } catch (err) {}
+    try {
+      if ((window as any).__TAURI_INTERNALS__?.invoke) {
+        await (window as any).__TAURI_INTERNALS__.invoke('plugin:window|toggle_maximize');
+      }
+    } catch (err) {}
   };
 
-  const handleClose = async () => {
+  const handleClose = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      getCurrentWindow().close();
-    } catch (e) {}
+      await getCurrentWindow().close();
+      return;
+    } catch (err) {}
+    try {
+      if ((window as any).__TAURI_INTERNALS__?.invoke) {
+        await (window as any).__TAURI_INTERNALS__.invoke('plugin:window|close');
+      }
+    } catch (err) {}
   };
 
   const API_BASE = "https://aura.basildo.me";
@@ -64,7 +97,17 @@ export default function App() {
   const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
-  const [currentSong, setCurrentSong] = useState<Song | null>(null);
+
+  // 1. CARGA INMEDIATA DE LA ÚLTIMA CANCIÓN DESDE DISCO
+  const [currentSong, setCurrentSong] = useState<Song | null>(() => {
+    try {
+      const saved = localStorage.getItem('aura_last_song');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
   const [isNormalizerEnabled, setIsNormalizerEnabled] = useState(localStorage.getItem('aura_norm') === 'true');
@@ -74,6 +117,17 @@ export default function App() {
   const [showUpload, setShowUpload] = useState(false);
   const [showModeration, setShowModeration] = useState(false);
   const [selectedAlbumName, setSelectedAlbumName] = useState<string | null>(null);
+  const [selectedArtistName, setSelectedArtistName] = useState<string | null>(null);
+  const [artistBio, setArtistBio] = useState<string | null>(null);
+  const [isEditingBio, setIsEditingBio] = useState(false);
+  const [newBioText, setNewBioText] = useState("");
+  const [isBioExpanded, setIsBioExpanded] = useState(false);
+
+  // ESTADO DE FOTOS DE PERFIL DE ARTISTAS
+  const [artistImageUrl, setArtistImageUrl] = useState<string | null>(null);
+  const resolvedArtistImageUrl = useFileUrl(artistImageUrl);
+  const [artistsMap, setArtistsMap] = useState<Record<string, { bio: string | null; image_url: string | null }>>({});
+
   const [formatFilter, setFormatFilter] = useState<'all' | 'mp3' | 'flac'>('all');
   const [sortBy, setSortBy] = useState<string>('first');
   const [searchQuery, setSearchQuery] = useState(""); 
@@ -84,8 +138,12 @@ export default function App() {
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
+  
+  // METADATA EDITING STATES
   const [songToEdit, setSongToEdit] = useState<any | null>(null);
   const [newEditCover, setNewEditCover] = useState<File | null>(null);
+  const [newEditAnimatedCover, setNewEditAnimatedCover] = useState<File | null>(null);
+  
   const [trackToDelete, setTrackToDelete] = useState<string | null>(null);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
@@ -95,14 +153,24 @@ export default function App() {
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [heroImageError, setHeroImageError] = useState(false);
+
+  // HISTORIAL
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>(() => {
-    const saved = localStorage.getItem('aura_recent');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('aura_recent');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   const [dynamicColor, setDynamicColor] = useState<string>('#6366f1');
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [likedIds, setLikedIds] = useState<string[]>([]);
+
+  // --- REGLAS DE COLA: CONTEXTO DE REPRODUCCIÓN ---
+  const [playbackContext, setPlaybackContext] = useState<'library' | 'album' | 'playlist'>('library');
+  const [contextAlbumName, setContextAlbumName] = useState<string | null>(null);
 
   // --- MINIGAME STATE ---
   const [isMinigameLobbyOpen, setIsMinigameLobbyOpen] = useState(false);
@@ -119,6 +187,7 @@ export default function App() {
 
   const handlePlaySongRef = useRef<any>(null);
   const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
+  const resolvedAnimatedCoverUrl = useFileUrl((currentSong as any)?.animated_cover_path || (currentSong as any)?.animatedCoverUrl);
   const resolvedAudioUrl = useFileUrl(currentSong?.audioUrl);
   const resolvedCustomBg = useFileUrl(customBg);
   const resolvedProfilePic = useFileUrl(user?.profile_pic_path);
@@ -146,19 +215,106 @@ export default function App() {
     };
   }, [resolvedCoverUrl]);
 
-  // HEARTBEAT OPTIMIZADO (Sin saturar la CPU)
-  const currentTimeRef = useRef(audioObj.currentTime);
-  useEffect(() => {
-    currentTimeRef.current = audioObj.currentTime;
-  }, [audioObj.currentTime]);
 
   useEffect(() => {
     if (!socketObj.currentSession || !isPlaying || !currentSong) return;
     const heartbeat = setInterval(() => {
-        socketObj.emitCommand('sync-time', { position: currentTimeRef.current, songId: currentSong.id });
+        socketObj.emitCommand('sync-time', { position: audioObj.getCurrentTime(), songId: currentSong.id });
     }, 10000); 
     return () => clearInterval(heartbeat);
   }, [socketObj.currentSession, isPlaying, currentSong?.id]);
+
+  // CARGAR BIOGRAFÍA Y FOTO DEL ARTISTA
+  useEffect(() => {
+    if (!selectedArtistName) {
+      setArtistBio(null);
+      setArtistImageUrl(null);
+      return;
+    }
+    setIsBioExpanded(false);
+
+    const cached = artistsMap[selectedArtistName];
+    if (cached) {
+      setArtistBio(cached.bio);
+      setNewBioText(cached.bio || "");
+      setArtistImageUrl(cached.image_url);
+    } else {
+      setArtistBio(null);
+      setArtistImageUrl(null);
+    }
+
+    fetch(`${API_BASE}/api/artists/${encodeURIComponent(selectedArtistName)}`)
+      .then(res => res.json())
+      .then(data => {
+        setArtistBio(data.bio || null);
+        setNewBioText(data.bio || "");
+        setArtistImageUrl(data.image_url || null);
+        setArtistsMap(prev => ({
+          ...prev,
+          [selectedArtistName]: { bio: data.bio || null, image_url: data.image_url || null }
+        }));
+      })
+      .catch(() => {
+        setArtistBio(null);
+        setArtistImageUrl(null);
+      });
+  }, [selectedArtistName]);
+
+  const handleSaveArtistBio = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedArtistName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/artists/${encodeURIComponent(selectedArtistName)}/bio`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ bio: newBioText })
+      });
+      if (res.ok) {
+        setArtistBio(newBioText);
+        setArtistsMap(prev => ({
+          ...prev,
+          [selectedArtistName]: { ...prev[selectedArtistName], bio: newBioText }
+        }));
+        setIsEditingBio(false);
+      }
+    } catch (err) {
+      console.error("Error guardando biografía:", err);
+    }
+  };
+
+  const handleUploadArtistImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedArtistName) return;
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/artists/${encodeURIComponent(selectedArtistName)}/image`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setArtistImageUrl(data.image_url);
+        setArtistsMap(prev => ({
+          ...prev,
+          [selectedArtistName]: { ...prev[selectedArtistName], image_url: data.image_url }
+        }));
+      } else {
+        alert("No se pudo subir la foto del artista.");
+      }
+    } catch (err) {
+      console.error("Error al subir foto del artista:", err);
+    }
+  };
   
   const handleLoginSuccess = (t: string, u: any, r: string) => {
     localStorage.setItem('aura_token', t); localStorage.setItem('aura_user', JSON.stringify(u)); localStorage.setItem('aura_role', r);
@@ -167,7 +323,8 @@ export default function App() {
   const handleLogout = () => { localStorage.clear(); window.location.reload(); };
 
   const handleStartSession = async () => {
-    const res = await fetch(`${API_BASE}/api/sessions/create`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const activeToken = token || localStorage.getItem('aura_token');
+    const res = await fetch(`${API_BASE}/api/sessions/create`, { method: 'POST', headers: { 'Authorization': `Bearer ${activeToken}` } });
     const data = await res.json();
     if (res.ok) { socketObj.setCurrentSession(data.code); socketObj.socketRef.current?.emit('join-session', { code: data.code, user }); }
   };
@@ -177,33 +334,64 @@ export default function App() {
   const loadContent = async () => {
     setIsLoading(true);
     try {
+      const activeToken = token || localStorage.getItem('aura_token');
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
-      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
       const data = await res.json();
       if (Array.isArray(data)) { 
         setSongs(data.map((s: any) => ({ 
-            ...s, id: s.id.toString(), coverUrl: s.cover_path, audioUrl: s.file_path, uploaderId: s.added_by?.toString(), tabs_url: s.tabs_url, track_number: s.track_number, format: s.format, video_url: s.video_url
+            ...s, 
+            id: s.id.toString(), 
+            coverUrl: s.cover_path, 
+            animatedCoverUrl: s.animated_cover_path, 
+            audioUrl: s.file_path, 
+            uploaderId: s.added_by?.toString(), 
+            tabs_url: s.tabs_url, 
+            track_number: s.track_number, 
+            format: s.format, 
+            video_url: s.video_url
         }))); 
         setLikedIds(data.filter((s: any) => s.is_liked).map((s: any) => s.id.toString()));
+
+        const allIndividualArtists = Array.from(new Set(
+          data.flatMap((s: any) => parseArtists(s.artist))
+        ));
+
+        allIndividualArtists.forEach((artistName: any) => {
+          fetch(`${API_BASE}/api/artists/${encodeURIComponent(artistName)}`)
+            .then(r => r.json())
+            .then(artistData => {
+              if (artistData && (artistData.image_url || artistData.bio)) {
+                setArtistsMap(prev => ({
+                  ...prev,
+                  [artistName]: { bio: artistData.bio, image_url: artistData.image_url }
+                }));
+              }
+            })
+            .catch(() => {});
+        });
       }
     } catch (e) { console.error("Load failed"); }
     setIsLoading(false);
   };
 
   const loadPlaylists = async () => {
-    if (!token) return;
+    const activeToken = token || localStorage.getItem('aura_token');
+    if (!activeToken) return;
     try {
-      const res = await fetch(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
       const data = await res.json();
       if (Array.isArray(data)) setPlaylists(data);
     } catch (e) { console.error("Playlists failed"); }
   };
 
   const loadLastTrack = async () => {
-    if (!token) return;
+    const activeToken = token || localStorage.getItem('aura_token');
+    if (!activeToken) return;
+
     try {
       const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${activeToken}` }
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -213,22 +401,26 @@ export default function App() {
         ...data,
         id: data.id.toString(),
         coverUrl: data.cover_path,
+        animatedCoverUrl: data.animated_cover_path,
         audioUrl: data.file_path,
         uploaderId: data.added_by?.toString(),
         tabs_url: data.tabs_url,
         track_number: data.track_number,
-        format: data.format
+        format: data.format,
+        video_url: data.video_url
       };
+      
       setCurrentSong(lastSong);
       setIsPlaying(false);
+      localStorage.setItem('aura_last_song', JSON.stringify(lastSong));
     } catch (error) {
-      console.error("Error loading last track:", error);
+      console.error("Error loading last track from server:", error);
     }
   };
 
   useEffect(() => { loadContent(); }, [showModeration, activePlaylistId]);
   useEffect(() => { loadPlaylists(); }, [token]);
-  useEffect(() => { if (token) loadLastTrack(); }, [token]);
+  useEffect(() => { loadLastTrack(); }, [token]);
 
   // --- MINIGAME ENGINE ---
   useEffect(() => {
@@ -248,7 +440,7 @@ export default function App() {
     tabs_url: null,
     status: 'approved',
     createdAt: '',
-    updatedAt: ''
+    updatedAt: '',
   };
 
   const playSfx = (type: 'correct' | 'wrong') => {
@@ -330,14 +522,15 @@ export default function App() {
 
   // --- LIKES ---
   const handleToggleLike = async (songId: string) => {
-    if (!token) return setIsAuthModalOpen(true);
-    const res = await fetch(`${API_BASE}/api/tracks/${songId}/like`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const activeToken = token || localStorage.getItem('aura_token');
+    if (!activeToken) return setIsAuthModalOpen(true);
+    const res = await fetch(`${API_BASE}/api/tracks/${songId}/like`, { method: 'POST', headers: { 'Authorization': `Bearer ${activeToken}` } });
     if (res.ok) {
         setLikedIds(prev => prev.includes(songId) ? prev.filter(id => id !== songId) : [...prev, songId]);
     }
   };
 
-  // --- PLAYBACK ---
+  // --- PLAYBACK ENGINE Y GUARDADO DE ÚLTIMA CANCIÓN ---
   const handlePlaySong = async (
     song: Song,
     fromSocket = false,
@@ -352,26 +545,92 @@ export default function App() {
     }
 
     let finalQueue = activeQueue;
+
     if (!fromSocket && !preserveQueue) {
-      const flattened = getFlattenedSongs();
-      setActiveQueue(flattened);
-      finalQueue = flattened;
+      // 1. DESDE UN ÁLBUM
+      if (selectedAlbumName) {
+        setPlaybackContext('album');
+        setContextAlbumName(selectedAlbumName);
+
+        const albumTracks = songs
+          .filter(s => s.album === selectedAlbumName)
+          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
+
+        const libraryTracks = songs
+          .filter(s => s.album !== selectedAlbumName)
+          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+
+        if (socketObj.isShuffle) {
+          const otherAlbumSongs = albumTracks.filter(s => s.id !== song.id).sort(() => Math.random() - 0.5);
+          const shuffledAlbum = [song, ...otherAlbumSongs];
+          const shuffledLibrary = [...libraryTracks].sort(() => Math.random() - 0.5);
+          finalQueue = [...shuffledAlbum, ...shuffledLibrary];
+          socketObj.setShuffledQueue(finalQueue);
+        } else {
+          finalQueue = [...albumTracks, ...libraryTracks];
+        }
+        setActiveQueue(finalQueue);
+
+      // 2. DESDE UNA PLAYLIST
+      } else if (activePlaylistId !== 'all') {
+        setPlaybackContext('playlist');
+        setContextAlbumName(null);
+
+        const playlistSongs = getFlattenedSongs();
+
+        if (socketObj.isShuffle) {
+          const otherSongs = playlistSongs.filter(s => s.id !== song.id).sort(() => Math.random() - 0.5);
+          finalQueue = [song, ...otherSongs];
+          socketObj.setShuffledQueue(finalQueue);
+        } else {
+          finalQueue = playlistSongs;
+        }
+        setActiveQueue(finalQueue);
+
+      // 3. DESDE LA BIBLIOTECA GENERAL
+      } else {
+        setPlaybackContext('library');
+        setContextAlbumName(null);
+
+        const allSongs = getFlattenedSongs();
+
+        if (socketObj.isShuffle) {
+          const otherSongs = allSongs.filter(s => s.id !== song.id).sort(() => Math.random() - 0.5);
+          finalQueue = [song, ...otherSongs];
+          socketObj.setShuffledQueue(finalQueue);
+        } else {
+          finalQueue = allSongs;
+        }
+        setActiveQueue(finalQueue);
+      }
     }
 
-    setRecentlyPlayed(prev => [song, ...prev.filter(s => s.id !== song.id)].slice(0, 4));
+    try {
+      localStorage.setItem('aura_last_song', JSON.stringify(song));
+    } catch (e) {}
+
+    setRecentlyPlayed(prev => {
+      const nextRecent = [song, ...prev.filter(s => s.id !== song.id)].slice(0, 4);
+      try {
+        localStorage.setItem('aura_recent', JSON.stringify(nextRecent));
+      } catch (e) {}
+      return nextRecent;
+    });
+
     setCurrentSong(song);
     setIsPlaying(true);
     socketObj.setTrackId(song.id);
 
-    if (!fromSocket && token) {
+    const activeToken = token || localStorage.getItem('aura_token');
+    if (!fromSocket && activeToken) {
       fetch(`${API_BASE}/api/users/me/last-track`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify({ trackId: song.id })
-      }).catch(error => console.error("ERROR GUARDANDO LAST TRACK:", error));
+      }).catch(error => console.error("ERROR GUARDANDO LAST TRACK EN SERVIDOR:", error));
     }
 
     if (initialPos > 0 && audioObj.audioRef.current) {
@@ -394,11 +653,30 @@ export default function App() {
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
     if (pool.length === 0) return;
+
     const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
+
+    if (playbackContext === 'playlist' && currentIndex >= pool.length - 1) {
+      if (!socketObj.isLoop) {
+        setIsPlaying(false);
+        setCurrentSong(null);
+        try { localStorage.removeItem('aura_last_song'); } catch (e) {}
+        setActiveQueue([]);
+        socketObj.setShuffledQueue([]);
+        if (audioObj.audioRef.current) {
+          audioObj.audioRef.current.pause();
+          audioObj.audioRef.current.currentTime = 0;
+        }
+        socketObj.emitCommand('toggle-play', { isPlaying: false });
+        return;
+      }
+    }
+
     if (currentIndex === -1) {
       handlePlaySong(pool[0], false, 0, true);
       return;
     }
+
     const nextSong = pool[(currentIndex + 1) % pool.length];
     handlePlaySong(nextSong, false, 0, true);
   };
@@ -409,14 +687,19 @@ export default function App() {
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
     if (pool.length === 0) return;
+
     const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
 
-    if (audioObj.currentTime > 3) {
+    if (audioObj.getCurrentTime() > 3) {
       if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = 0;
       return;
     }
 
-    if (currentIndex === -1) {
+    if (currentIndex === -1 || currentIndex === 0) {
+      if (playbackContext === 'playlist') {
+        if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = 0;
+        return;
+      }
       handlePlaySong(pool[0], false, 0, true);
       return;
     }
@@ -426,15 +709,42 @@ export default function App() {
   };
 
   const toggleShuffle = () => {
-      const nextShuffleState = !socketObj.isShuffle;
-      socketObj.setIsShuffle(nextShuffleState);
-      let newShuffled: Song[] = [];
-      if (nextShuffleState) {
-          const currentPool = activeQueue.length > 0 ? activeQueue : getFlattenedSongs();
-          newShuffled = [...currentPool].sort(() => Math.random() - 0.5);
-          socketObj.setShuffledQueue(newShuffled);
+    const nextShuffleState = !socketObj.isShuffle;
+    socketObj.setIsShuffle(nextShuffleState);
+    let newShuffled: Song[] = [];
+
+    if (nextShuffleState) {
+      if (playbackContext === 'album' && contextAlbumName) {
+        const albumTracks = songs
+          .filter(s => s.album === contextAlbumName)
+          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
+        const libraryTracks = songs
+          .filter(s => s.album !== contextAlbumName)
+          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+
+        const otherAlbumSongs = albumTracks.filter(s => s.id !== currentSong?.id).sort(() => Math.random() - 0.5);
+        const shuffledAlbum = currentSong ? [currentSong, ...otherAlbumSongs] : otherAlbumSongs;
+        const shuffledLibrary = [...libraryTracks].sort(() => Math.random() - 0.5);
+        newShuffled = [...shuffledAlbum, ...shuffledLibrary];
+      } else {
+        const currentPool = activeQueue.length > 0 ? activeQueue : getFlattenedSongs();
+        const otherSongs = currentPool.filter(s => s.id !== currentSong?.id).sort(() => Math.random() - 0.5);
+        newShuffled = currentSong ? [currentSong, ...otherSongs] : [...currentPool].sort(() => Math.random() - 0.5);
       }
-      socketObj.emitCommand('toggle-shuffle', { isShuffle: nextShuffleState, shuffledQueue: newShuffled });
+      socketObj.setShuffledQueue(newShuffled);
+    } else {
+      if (playbackContext === 'album' && contextAlbumName) {
+        const albumTracks = songs
+          .filter(s => s.album === contextAlbumName)
+          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
+        const libraryTracks = songs
+          .filter(s => s.album !== contextAlbumName)
+          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+        setActiveQueue([...albumTracks, ...libraryTracks]);
+      }
+    }
+
+    socketObj.emitCommand('toggle-shuffle', { isShuffle: nextShuffleState, shuffledQueue: newShuffled });
   };
 
   const toggleLoop = () => {
@@ -454,7 +764,7 @@ export default function App() {
       id: currentSong?.id, 
       song: currentSong, 
       queue: filtered, 
-      position: audioObj.audioRef.current?.currentTime || audioObj.currentTime 
+      position: audioObj.audioRef.current?.currentTime || audioObj.getCurrentTime() 
     });
   };
 
@@ -467,7 +777,7 @@ export default function App() {
       id: currentSong?.id, 
       song: currentSong, 
       queue: newQueue, 
-      position: audioObj.audioRef.current?.currentTime || audioObj.currentTime 
+      position: audioObj.audioRef.current?.currentTime || audioObj.getCurrentTime() 
     });
   };
 
@@ -478,18 +788,20 @@ export default function App() {
       id: currentSong?.id,
       song: currentSong,
       queue: newQueue,
-      position: audioObj.currentTime
+      position: audioObj.getCurrentTime()
     });
   };
 
   const handleModerate = async (songId: string, status: string) => {
-      await fetch(`${API_BASE}/api/moderation/${songId}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ status }) });
+      const activeToken = token || localStorage.getItem('aura_token');
+      await fetch(`${API_BASE}/api/moderation/${songId}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` }, body: JSON.stringify({ status }) });
       loadContent();
   };
 
   const handleUpdateMetadata = async (e: FormEvent) => {
     e.preventDefault();
     if (!songToEdit) return;
+    const activeToken = token || localStorage.getItem('aura_token');
     const formData = new FormData();
     formData.append('title', songToEdit.title);
     formData.append('artist', songToEdit.artist);
@@ -498,24 +810,35 @@ export default function App() {
     formData.append('tabs_url', songToEdit.tabs_url || "");
     formData.append('video_url', songToEdit.video_url || "");
     formData.append('cover_path', songToEdit.coverUrl || "");
+    formData.append('animated_cover_path', songToEdit.animated_cover_path || "");
+    
     if (newEditCover) { formData.append('cover', newEditCover); }
-    const res = await fetch(`${API_BASE}/api/tracks/${songToEdit.id}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
-    if (res.ok) { setSongToEdit(null); setNewEditCover(null); loadContent(); }
+    if (newEditAnimatedCover) { formData.append('animated_cover', newEditAnimatedCover); }
+    
+    const res = await fetch(`${API_BASE}/api/tracks/${songToEdit.id}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${activeToken}` }, body: formData });
+    if (res.ok) { 
+      setSongToEdit(null); 
+      setNewEditCover(null); 
+      setNewEditAnimatedCover(null);
+      loadContent(); 
+    }
   };
 
   const confirmDeleteTrack = async () => {
     if (!trackToDelete) return;
-    const res = await fetch(`${API_BASE}/api/tracks/${trackToDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    const activeToken = token || localStorage.getItem('aura_token');
+    const res = await fetch(`${API_BASE}/api/tracks/${trackToDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
     if (res.ok) { setTrackToDelete(null); loadContent(); }
   };
 
   const handleCreatePlaylist = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlaylistName.trim()) return;
+    const activeToken = token || localStorage.getItem('aura_token');
     try {
         const res = await fetch(`${API_BASE}/api/playlists`, { 
             method: 'POST', 
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` }, 
             body: JSON.stringify({ name: newPlaylistName }) 
         });
         if (res.ok) {
@@ -528,18 +851,21 @@ export default function App() {
 
   const handleDeletePlaylist = async (playlistId: string) => {
     if (!confirm("Delete playlist?")) return;
-    await fetch(`${API_BASE}/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    const activeToken = token || localStorage.getItem('aura_token');
+    await fetch(`${API_BASE}/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
     if (activePlaylistId === playlistId) setActivePlaylistId("all");
     loadPlaylists();
   };
 
   const handleRemoveFromPlaylist = async (songId: string) => {
-    await fetch(`${API_BASE}/api/playlists/${activePlaylistId}/tracks/${songId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    const activeToken = token || localStorage.getItem('aura_token');
+    await fetch(`${API_BASE}/api/playlists/${activePlaylistId}/tracks/${songId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
     loadContent();
   };
 
   const handleReorderPlaylist = async (newOrder: Song[]) => {
     if (activePlaylistId === 'all' || activePlaylistId === 'liked') return;
+    const activeToken = token || localStorage.getItem('aura_token');
     try {
         await fetch(
             `${API_BASE}/api/playlists/${activePlaylistId}/tracks/reorder`,
@@ -547,7 +873,7 @@ export default function App() {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${activeToken}`
                 },
                 body: JSON.stringify({ trackIds: newOrder.map(song => song.id) })
             }
@@ -558,90 +884,166 @@ export default function App() {
   };
 
   const handleAddToPlaylist = async (songId: string, playlistId: string) => {
-    await fetch(`${API_BASE}/api/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ trackId: songId }) });
+    const activeToken = token || localStorage.getItem('aura_token');
+    await fetch(`${API_BASE}/api/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` }, body: JSON.stringify({ trackId: songId }) });
   };
 
-  // --- MEMORIZACIÓN DE LA BIBLIOTECA ---
+  // --- MEMORIZACIÓN DE LA BIBLIOTECA (ORDENADA POR PISTA) ---
   const flattenedSongs = useMemo(() => {
-    let list = songs.filter(
-        s => formatFilter === 'all' || s.format === formatFilter
-    );
+    if (selectedAlbumName) {
+      return songs
+        .filter(s => s.album === selectedAlbumName)
+        .sort((a, b) => {
+          const numA = Number(a.track_number);
+          const numB = Number(b.track_number);
+          if (numA && numB) return numA - numB;
+          if (numA && !numB) return -1;
+          if (!numA && numB) return 1;
+          return parseInt(a.id) - parseInt(b.id);
+        });
+    }
 
-    list = list.filter(
-        s =>
-            s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            s.artist.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    if (activePlaylistId === 'liked') {
-        list = list.filter(s => likedIds.includes(s.id));
+    if (selectedArtistName) {
+      return songs
+        .filter(s => parseArtists(s.artist).includes(selectedArtistName))
+        .sort((a, b) => {
+          const albumDiff = (a.album || '').localeCompare(b.album || '');
+          if (albumDiff !== 0) return albumDiff;
+          return (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999);
+        });
     }
 
     if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') {
-        if (selectedAlbumName) {
-            return list.filter(s => s.album === selectedAlbumName);
-        }
-        return list;
+      return songs.filter(s => formatFilter === 'all' || s.format === formatFilter);
     }
 
-    const sorted = [...list].sort((a, b) =>
-        sortBy === 'name'
-            ? a.title.localeCompare(b.title)
-            : parseInt(a.id) - parseInt(b.id)
+    let list = songs.filter(
+      s => formatFilter === 'all' || s.format === formatFilter
     );
 
-    if (selectedAlbumName) {
-        return sorted.filter(s => s.album === selectedAlbumName);
+    if (searchQuery.trim().length > 0) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        s =>
+          s.title.toLowerCase().includes(q) ||
+          s.artist.toLowerCase().includes(q) ||
+          (s.album && s.album.toLowerCase().includes(q))
+      );
     }
 
-    return sorted;
-  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, selectedAlbumName, sortBy]);
+    if (activePlaylistId === 'liked') {
+      list = list.filter(s => likedIds.includes(s.id));
+    }
 
+    const sorted = [...list].sort((a, b) => {
+      if (sortBy === 'name') return a.title.localeCompare(b.title);
+      if (sortBy === 'album') {
+        const albumDiff = (a.album || '').localeCompare(b.album || '');
+        if (albumDiff !== 0) return albumDiff;
+        return (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999);
+      }
+      if (sortBy === 'artist') {
+        const artistDiff = a.artist.localeCompare(b.artist);
+        if (artistDiff !== 0) return artistDiff;
+        return (a.album || '').localeCompare(b.album || '');
+      }
+      return parseInt(a.id) - parseInt(b.id);
+    });
+
+    return sorted;
+  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, selectedAlbumName, selectedArtistName, sortBy]);
+
+  // ELEMENTOS PARA LA CUADRÍCULA
   const displayItems = useMemo(() => {
     const list = flattenedSongs;
 
-    if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') {
-        return list;
-    }
-
-    if (selectedAlbumName) {
-        return list;
-    }
+    if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') return list;
+    if (selectedAlbumName || selectedArtistName) return list;
 
     const items: any[] = [];
-    const grouped = new Set<string>();
+    const groupedAlbums = new Set<string>();
+    const groupedArtists = new Set<string>();
+    const queryLower = searchQuery.trim().toLowerCase();
 
+    // 1. ARTISTAS COINCIDENTES EN BÚSQUEDA
+    if (queryLower.length > 1) {
+      songs.forEach(song => {
+        const artists = parseArtists(song.artist);
+
+        artists.forEach(individualArtist => {
+          if (
+            individualArtist.toLowerCase().includes(queryLower) &&
+            !groupedArtists.has(individualArtist)
+          ) {
+            const artistTracks = songs.filter(s => parseArtists(s.artist).includes(individualArtist));
+            const artistAlbums = new Set(artistTracks.map(s => s.album).filter(Boolean));
+            const customArtistPhoto = artistsMap[individualArtist]?.image_url;
+
+            items.push({
+              id: `artist-${individualArtist}`,
+              type: 'artist',
+              title: individualArtist,
+              artist: 'Artista Oficial',
+              coverUrl: customArtistPhoto || artistTracks[0]?.coverUrl,
+              trackCount: artistTracks.length,
+              albumCount: artistAlbums.size
+            });
+
+            groupedArtists.add(individualArtist);
+          }
+        });
+      });
+    }
+
+    // 2. AGRUPACIÓN Y BÚSQUEDA DE ÁLBUMES
     list.forEach(song => {
-        if (
-            song.album &&
-            song.album.toLowerCase().includes(searchQuery.toLowerCase()) &&
-            !grouped.has(song.album)
-        ) {
-            const tracks = list.filter(s => s.album === song.album);
+      if (song.album && !groupedAlbums.has(song.album)) {
+        const albumMatchesSearch = queryLower.length > 0 && song.album.toLowerCase().includes(queryLower);
+        const allAlbumTracks = songs.filter(s => s.album === song.album);
 
-            if (tracks.length > 1) {
-                items.push({
-                    id: `album-${song.album}`,
-                    type: 'album',
-                    title: song.album,
-                    artist: song.artist,
-                    coverUrl: song.coverUrl,
-                    trackCount: tracks.length
-                });
-                grouped.add(song.album);
-            } else {
-                items.push(song);
-            }
-        } else if (
-            !song.album ||
-            !song.album.toLowerCase().includes(searchQuery.toLowerCase())
-        ) {
-            items.push(song);
+        if (albumMatchesSearch || (queryLower.length === 0 && allAlbumTracks.length > 1)) {
+          items.push({
+            id: `album-${song.album}`,
+            type: 'album',
+            title: song.album,
+            artist: song.artist,
+            coverUrl: song.coverUrl,
+            trackCount: allAlbumTracks.length
+          });
+          groupedAlbums.add(song.album);
+        } else if (queryLower.length === 0) {
+          items.push(song);
+        } else if (!albumMatchesSearch) {
+          items.push(song);
         }
+      } else if (!song.album) {
+        items.push(song);
+      }
     });
 
     return items;
-  }, [flattenedSongs, activePlaylistId, selectedAlbumName, searchQuery]);
+  }, [flattenedSongs, songs, artistsMap, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
+
+  // ÁLBUMES DEL ARTISTA SELECCIONADO
+  const artistAlbums = useMemo(() => {
+    if (!selectedArtistName) return [];
+    const artistTracks = songs.filter(s => 
+      parseArtists(s.artist).includes(selectedArtistName) && s.album
+    );
+    const map = new Map<string, any>();
+
+    artistTracks.forEach(t => {
+      if (!map.has(t.album!)) {
+        map.set(t.album!, {
+          title: t.album,
+          coverUrl: t.coverUrl,
+          trackCount: artistTracks.filter(s => s.album === t.album).length
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [selectedArtistName, songs]);
 
   const getFlattenedSongs = () => flattenedSongs;
 
@@ -653,7 +1055,8 @@ export default function App() {
       sortBy === 'first' &&
       formatFilter === 'all' &&
       !searchQuery.trim() &&
-      !selectedAlbumName;
+      !selectedAlbumName &&
+      !selectedArtistName;
 
   const getCurrentPlayPool = () => {
     if (socketObj.isShuffle) return socketObj.shuffledQueue;
@@ -668,19 +1071,20 @@ export default function App() {
       {/* Barra superior de escritorio integrada con el fondo */}
       {isDesktop && (
         <div 
-          data-tauri-drag-region 
-          className={`h-8 border-b flex items-center justify-between px-3 select-none z-30 shrink-0 backdrop-blur-md transition-colors duration-1000 ${
+          className={`h-8 border-b flex items-center justify-between pl-3 pr-0 select-none z-50 shrink-0 backdrop-blur-md transition-colors duration-1000 ${
             activeTheme === 'light' 
               ? 'border-black/5 bg-white/40 text-black' 
               : 'border-white/5 bg-black/20 text-white'
           }`}
         >
-          <div className="flex items-center gap-1.5 pointer-events-none">
-            <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">AURA</span>
-            <span className="text-brand-primary font-black text-xs leading-none">.</span>
+          {/* ZONA DE ARRASTRE */}
+          <div data-tauri-drag-region className="flex-1 h-full flex items-center gap-1.5 cursor-default">
+            <span className="text-[10px] font-bold tracking-widest uppercase opacity-40 pointer-events-none">AURA</span>
+            <span className="text-brand-primary font-black text-xs leading-none pointer-events-none">.</span>
           </div>
           
-          <div className="flex items-center">
+          {/* BOTONES DE VENTANA */}
+          <div className="flex items-center shrink-0 z-50">
             <button 
               type="button" 
               onClick={handleMinimize} 
@@ -725,7 +1129,7 @@ export default function App() {
           <div className="absolute inset-0 pointer-events-none transition-opacity duration-1000 z-[1]" style={{ backgroundImage: `url(${resolvedCustomBg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
       )}
 
-      {/* TOP NAVIGATION (Responsive) */}
+      {/* TOP NAVIGATION */}
       <AnimatePresence>
         {!isFocusMode && (
           <motion.nav 
@@ -733,16 +1137,16 @@ export default function App() {
             className={`h-16 flex items-center justify-between px-4 md:px-8 border-b z-20 backdrop-blur-md transition-all duration-1000 ${activeTheme === 'light' ? 'border-black/5 bg-white/60' : 'border-white/10 bg-black/40'}`}
           >
             <div className="flex items-center gap-4 md:gap-12 flex-1">
-              <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => setSelectedAlbumName(null)}>AURA<span className="text-brand-primary">.</span></span>
+              <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => { setSelectedAlbumName(null); setSelectedArtistName(null); }}>AURA<span className="text-brand-primary">.</span></span>
               <div className={`hidden lg:flex gap-8 text-[10px] font-bold uppercase`}>
-                <button onClick={() => {setShowModeration(false); setActivePlaylistId("all"); setSelectedAlbumName(null);}} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
+                <button onClick={() => {setShowModeration(false); setActivePlaylistId("all"); setSelectedAlbumName(null); setSelectedArtistName(null);}} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
                 {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 ${showModeration ? 'text-amber-500 border-b border-amber-500 pb-1' : ''}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
               </div>
               <div className="flex-1 max-w-md ml-8 relative hidden sm:block">
                 <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30`} />
-                <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-4 text-[11px] outline-none text-white focus:bg-white/10" placeholder="Search frequency..." />
+                <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-4 text-[11px] outline-none text-white focus:bg-white/10" placeholder="Search frequency or artist..." />
               </div>
             </div>
             <div className="flex items-center gap-3 md:gap-6">
@@ -769,8 +1173,8 @@ export default function App() {
                     <div>
                       <div className="flex items-center justify-between mb-6"><h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3><Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} /></div>
                       <ul className="space-y-4 text-[13px] font-medium">
-                        <li key="stream-all" className={`cursor-pointer transition-all ${activePlaylistId === "all" ? "text-brand-primary" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("all"); setShowModeration(false); setSelectedAlbumName(null); }}>Global Stream</li>
-                        <li key="liked-songs" className={`flex items-center gap-2 cursor-pointer transition-all ${activePlaylistId === "liked" ? "text-red-500 font-bold" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("liked"); setShowModeration(false); setSelectedAlbumName(null); }}>
+                        <li key="stream-all" className={`cursor-pointer transition-all ${activePlaylistId === "all" ? "text-brand-primary" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("all"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>Global Stream</li>
+                        <li key="liked-songs" className={`flex items-center gap-2 cursor-pointer transition-all ${activePlaylistId === "liked" ? "text-red-500 font-bold" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("liked"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>
                             <Heart size={14} fill={activePlaylistId === "liked" ? "currentColor" : "none"} /> Liked Tracks
                         </li>
                         {playlists.map(p => (
@@ -795,35 +1199,163 @@ export default function App() {
         </AnimatePresence>
 
         <main className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${isFocusMode ? 'items-center justify-center pt-0' : ''}`}>
-            {/* MINIGAME HUD */}
-            <AnimatePresence>
-                {isMinigameActive && (
-                    <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="w-full bg-orange-500/10 border border-orange-500/30 rounded-3xl p-6 flex items-center justify-between shadow-[0_0_40px_rgba(249,115,22,0.15)] relative overflow-hidden backdrop-blur-md">
-                        <div className="absolute inset-0 bg-gradient-to-r from-orange-500/0 via-orange-500/5 to-orange-500/0 pointer-events-none animate-pulse" />
-                        <div className="flex items-center gap-6 z-10">
-                            <div className="text-orange-500 flex items-center gap-2">
-                                <Trophy size={20} /> <span className="font-black text-2xl font-mono">{minigameScore}</span>
-                            </div>
-                            <div className="flex items-center gap-2 border-l border-white/10 pl-6">
-                                {[...Array(3)].map((_, i) => (
-                                    <Heart key={i} size={20} className={i < minigameLives ? "text-red-500 fill-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]" : "text-white/10"} />
-                                ))}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-4 z-10">
-                            <button onClick={replayMinigameSnippet} className="bg-white/5 border border-white/10 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10 transition-all flex items-center gap-2 cursor-pointer"><Play size={14} /> Replay</button>
-                            <button onClick={() => endMinigame(minigameScore)} className="text-white/30 hover:text-red-500 transition-colors cursor-pointer"><X size={20} /></button>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            
+            {/* VISTA ESPECIAL: PERFIL DE ARTISTA */}
+            {selectedArtistName ? (
+              <section className="space-y-10 animate-in fade-in duration-500">
+                <div className="relative p-8 md:p-12 rounded-[40px] bg-white/[0.03] border border-white/10 overflow-hidden flex flex-col md:flex-row items-center gap-8 shadow-2xl">
+                  <div className="relative group/avatar w-36 h-36 md:w-48 md:h-48 rounded-full overflow-hidden shrink-0 border-2 border-brand-primary/40 shadow-[0_0_50px_rgba(99,102,241,0.2)] bg-white/5">
+                    <img 
+                      key={selectedArtistName}
+                      src={resolvedArtistImageUrl || flattenedSongs[0]?.coverUrl || '/default-cover.jpg'} 
+                      alt={selectedArtistName} 
+                      className="w-full h-full object-cover"
+                    />
+                    
+                    {(userRole === 'admin' || userRole === 'moderator') && (
+                      <label 
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity duration-300 text-white select-none"
+                        title="Cambiar foto de perfil del artista"
+                      >
+                        <ImageIcon size={28} className="text-brand-primary mb-1" />
+                        <span className="text-[9px] uppercase font-bold tracking-widest text-white">Cambiar Foto</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handleUploadArtistImage} 
+                        />
+                      </label>
+                    )}
+                  </div>
 
-            {!isFocusMode ? (
+                  <div className="flex-1 text-center md:text-left space-y-3">
+                    <div className="flex items-center justify-center md:justify-start gap-2">
+                      <User size={14} className="text-brand-primary" />
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-primary">Perfil de Artista Oficial</span>
+                    </div>
+                    <h1 className="text-4xl md:text-7xl font-serif italic font-bold text-white tracking-tight">{selectedArtistName}</h1>
+                    <p className="text-xs font-mono text-white/40 uppercase tracking-widest">
+                      {artistAlbums.length} Álbumes · {flattenedSongs.length} Pistas en AURA
+                    </p>
+                    <div className="pt-2 flex flex-wrap items-center justify-center md:justify-start gap-3">
+                      <button 
+                        onClick={() => flattenedSongs[0] && handlePlaySong(flattenedSongs[0])} 
+                        className="px-6 py-2.5 rounded-full bg-white text-black font-bold text-[10px] uppercase tracking-wider hover:scale-105 transition-all shadow-xl cursor-pointer flex items-center gap-2"
+                      >
+                        <Play size={14} fill="black" /> Reproducir Todo
+                      </button>
+                      <button 
+                        onClick={() => setSelectedArtistName(null)} 
+                        className="px-6 py-2.5 rounded-full bg-white/5 border border-white/10 text-white/60 hover:text-white font-bold text-[10px] uppercase tracking-wider hover:bg-white/10 transition-all cursor-pointer"
+                      >
+                        Volver a Biblioteca
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECCIÓN BIOGRAFÍA CON "VER MÁS" */}
+                <div className="p-6 md:p-8 rounded-3xl bg-white/[0.02] border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white/40 flex items-center gap-2">
+                      <FileText size={14} /> Biografía / Información
+                    </h3>
+                    {(userRole === 'admin' || userRole === 'moderator') && (
+                      <button 
+                        onClick={() => setIsEditingBio(true)}
+                        className="text-[9px] font-bold uppercase text-brand-primary hover:underline flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Edit2 size={12} /> {artistBio ? 'Editar Descripción' : 'Añadir Descripción'}
+                      </button>
+                    )}
+                  </div>
+
+                  {artistBio ? (
+                    <div>
+                      <p className={`text-sm md:text-base text-white/70 leading-relaxed font-normal italic whitespace-pre-line transition-all duration-300 ${
+                        !isBioExpanded ? 'line-clamp-3' : ''
+                      }`}>
+                        {artistBio}
+                      </p>
+                      
+                      {artistBio.length > 180 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsBioExpanded(!isBioExpanded)}
+                          className="mt-2 text-xs font-bold text-orange-400 hover:text-orange-300 transition-colors cursor-pointer inline-flex items-center gap-1 outline-none"
+                        >
+                          {isBioExpanded ? 'Ver menos' : '... Ver más'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm md:text-base text-white/40 leading-relaxed font-normal italic">
+                      {userRole === 'admin' || userRole === 'moderator' 
+                        ? "Este artista aún no tiene una biografía. Haz clic en 'Añadir Descripción' para escribirla." 
+                        : "Este artista aún no tiene una biografía disponible."}
+                    </p>
+                  )}
+                </div>
+
+                {/* ÁLBUMES DEL ARTISTA */}
+                {artistAlbums.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40 flex items-center gap-2">
+                      <Disc size={14} /> Discografía ({artistAlbums.length})
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                      {artistAlbums.map(alb => (
+                        <div 
+                          key={alb.title} 
+                          onClick={() => { setSelectedArtistName(null); setSelectedAlbumName(alb.title); }}
+                          className="group p-4 rounded-3xl bg-white/5 border border-white/5 hover:border-brand-primary/40 cursor-pointer transition-all flex flex-col"
+                        >
+                          <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-white/5">
+                            <img src={alb.coverUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="" />
+                          </div>
+                          <p className="text-sm font-bold text-white truncate">{alb.title}</p>
+                          <p className="text-[10px] text-white/40 font-mono mt-0.5">{alb.trackCount} Pistas</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* CANCIONES DEL ARTISTA */}
+                <div className="space-y-4">
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40">
+                    Todas las canciones ({flattenedSongs.length})
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    {flattenedSongs.map(song => (
+                      <MusicCard 
+                        key={song.id}
+                        song={song}
+                        isActive={!isMinigameActive && currentSong?.id === song.id}
+                        isPlaying={!isMinigameActive && currentSong?.id === song.id && isPlaying}
+                        playlists={playlists}
+                        userRole={userRole}
+                        isLiked={likedIds.includes(song.id)}
+                        onToggleLike={() => handleToggleLike(song.id)}
+                        onAddToPlaylist={(pid) => handleAddToPlaylist(song.id, pid)}
+                        onOpenTabs={() => setTabsSong(song)} 
+                        onDelete={() => setTrackToDelete(song.id)}
+                        onPlayNext={() => handlePlayNext(song)}
+                        onAddToQueue={() => handleAddToQueue(song)}
+                        onEdit={() => setSongToEdit(song)}
+                        onClick={() => handlePlaySong(song)} 
+                      />
+                    ))}
+                  </div>
+                </div>
+              </section>
+            ) : !isFocusMode ? (
               <>
                 <AnimatePresence>{showUpload && <MusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />}</AnimatePresence>
                 
                 {/* HERO BANNER */}
-                {!isMinigameActive && (
+                {!isMinigameActive && !selectedAlbumName && (
                     <section className="relative h-48 md:h-72 shrink-0 flex flex-col justify-end p-6 md:p-10 rounded-[30px] md:rounded-[40px] overflow-hidden group shadow-2xl">
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent z-10" />
                         <motion.div key={currentSong?.id} initial={{ scale: 1.1, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="absolute inset-0 -z-10 bg-[#0a0a0a]">
@@ -862,16 +1394,16 @@ export default function App() {
                         {displayItems.map((item: any) => (
                             <div
                                 key={item.id}
-                                draggable={canReorderPlaylist && item.type !== 'album'}
+                                draggable={canReorderPlaylist && item.type !== 'album' && item.type !== 'artist'}
                                 onDragStart={(e) => {
-                                  if (canReorderPlaylist && item.type !== 'album') {
+                                  if (canReorderPlaylist && item.type !== 'album' && item.type !== 'artist') {
                                       setDraggedSongId(item.id);
                                       e.dataTransfer.effectAllowed = 'move';
                                       e.dataTransfer.setData('text/plain', item.id);
                                   }
                                 }}
                                 onDragOver={(e) => {
-                                  if (canReorderPlaylist && item.type !== 'album') {
+                                  if (canReorderPlaylist && item.type !== 'album' && item.type !== 'artist') {
                                       e.preventDefault();
                                       e.stopPropagation();
                                       e.dataTransfer.dropEffect = 'move';
@@ -883,7 +1415,7 @@ export default function App() {
 
                                   const draggedId = e.dataTransfer.getData('text/plain') || draggedSongId;
 
-                                  if (!canReorderPlaylist || !draggedId || draggedId === item.id || item.type === 'album') {
+                                  if (!canReorderPlaylist || !draggedId || draggedId === item.id || item.type === 'album' || item.type === 'artist') {
                                       setDraggedSongId(null);
                                       return;
                                   }
@@ -908,10 +1440,40 @@ export default function App() {
                                 className={`relative group ${
                                     isMinigameActive ? 'hover:scale-105 transition-transform' : ''
                                 } ${draggedSongId === item.id ? 'opacity-40' : ''} ${
-                                    canReorderPlaylist && item.type !== 'album' ? 'cursor-grab active:cursor-grabbing' : ''
+                                    canReorderPlaylist && item.type !== 'album' && item.type !== 'artist' ? 'cursor-grab active:cursor-grabbing' : ''
                                 }`}
                             >
-                                {item.type === 'album' ? (
+                                {/* 1. TARJETA DE ARTISTA (REDONDA CON FOTO PERSONALIZADA) */}
+                                {item.type === 'artist' ? (
+                                    <div 
+                                      onClick={() => setSelectedArtistName(item.title)} 
+                                      className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-300 flex flex-col justify-between shadow-lg"
+                                    >
+                                      <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
+                                        <img 
+                                          src={item.coverUrl || '/default-cover.jpg'} 
+                                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 pointer-events-none" 
+                                          alt={item.title} 
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-300">
+                                          <div className="w-12 h-12 md:w-10 md:h-10 rounded-full bg-white text-black flex items-center justify-center shadow-2xl">
+                                            <Play size={20} fill="black" className="ml-0.5 md:w-4 md:h-4" />
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1 md:space-y-0.5 min-w-0 w-full pt-1">
+                                        <h3 className="text-lg md:text-sm font-bold truncate text-white leading-tight tracking-tight" title={item.title}>
+                                          {item.title}
+                                        </h3>
+                                        <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-brand-primary truncate">
+                                          Artista · {item.albumCount} Álbumes · {item.trackCount} Pistas
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                /* 2. TARJETA DE ÁLBUM */
+                                ) : item.type === 'album' ? (
                                     <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
                                         <img src={item.coverUrl} className="w-full h-full object-cover transition-transform duration-700" alt={item.title} />
@@ -919,6 +1481,8 @@ export default function App() {
                                       <h3 className="text-xl md:text-sm font-bold truncate text-white">{item.title}</h3>
                                       <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40">{item.trackCount} Tracks Found</p>
                                     </div>
+
+                                /* 3. TARJETA DE CANCIÓN */
                                 ) : (
                                     <div
                                       className="relative"
@@ -965,6 +1529,7 @@ export default function App() {
                 </section>
               </>
             ) : (
+              /* MODO FOCUS (CON SOPORTE PARA PORTADA ANIMADA) */
               <div className="relative w-full h-full flex items-center justify-center">
                 <button 
                   onClick={() => setIsFocusMode(false)} 
@@ -976,7 +1541,24 @@ export default function App() {
                 <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex flex-col items-center gap-12 w-full max-w-4xl text-center px-10">
                   <div className="relative group">
                     <div className="absolute -inset-20 blur-[120px] rounded-full animate-pulse transition-all duration-1000" style={{ backgroundColor: `${dynamicColor}33` }} />
-                    <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] rounded-[60px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10"><img src={resolvedCoverUrl || undefined} className="w-full h-full object-cover" /></div>
+                    <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] rounded-[60px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 bg-black">
+                      {resolvedAnimatedCoverUrl ? (
+                        isVideoUrl(resolvedAnimatedCoverUrl) ? (
+                          <video
+                            src={resolvedAnimatedCoverUrl}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <img src={resolvedAnimatedCoverUrl} className="w-full h-full object-cover" alt="" />
+                        )
+                      ) : (
+                        <img src={resolvedCoverUrl || undefined} className="w-full h-full object-cover" alt="" />
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-4">
                     <h2 className="text-6xl md:text-8xl font-serif italic text-white tracking-tighter leading-none">{currentSong?.title}</h2>
@@ -991,7 +1573,18 @@ export default function App() {
         </main>
       </div>
 
-      <audio ref={audioObj.audioRef} src={resolvedAudioUrl || undefined} onTimeUpdate={(e) => audioObj.setCurrentTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => audioObj.setDuration(e.currentTarget.duration)} onEnded={handleNext} crossOrigin="anonymous" />
+     <audio
+  ref={audioObj.audioRef}
+  src={resolvedAudioUrl || undefined}
+  onTimeUpdate={(e) =>
+    audioObj.handleTimeUpdate(e.currentTarget.currentTime)
+  }
+  onLoadedMetadata={(e) =>
+    audioObj.setDuration(e.currentTarget.duration)
+  }
+  onEnded={handleNext}
+  crossOrigin="anonymous"
+/>
       
       {/* PLAYER BAR */}
       <AnimatePresence initial={false}>
@@ -1006,8 +1599,10 @@ export default function App() {
             <PlayerBar
               currentSong={isMinigameActive ? mysterySong : currentSong!}
               isPlaying={isMinigameActive ? isMinigamePlaying : isPlaying}
-              currentTime={isMinigameActive ? minigameTime : audioObj.currentTime}
+              currentTime={isMinigameActive ? minigameTime : audioObj.getCurrentTime()}
               duration={isMinigameActive ? 10 : audioObj.duration}
+              getCurrentTime={audioObj.getCurrentTime}
+              subscribeToTime={audioObj.subscribeToTime}
               volume={volume}
               onTogglePlay={(e: any) => {
                 e.stopPropagation();
@@ -1072,8 +1667,11 @@ export default function App() {
 
       <MinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} />
       <AnimatePresence>{tabsSong && <TabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence>
-      <AnimatePresence>{isLyricsOpen && <LyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.currentTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence>
-      <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} currentTime={audioObj.currentTime} duration={audioObj.duration} onSeek={(t) => {
+      <AnimatePresence>{isLyricsOpen && <LyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
+  subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence>
+      <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} liveCurrentTime={audioObj.getCurrentTime()} subscribeToTime={audioObj.subscribeToTime}
+getCurrentTime={audioObj.getCurrentTime}
+ onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
           if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
       }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <AnimatePresence>{isQueueOpen && <QueueOverlay
@@ -1093,6 +1691,7 @@ export default function App() {
       <AnimatePresence>{isProfileOpen && ( <ProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence>
       <AnimatePresence>{isSessionOpen && ( <SessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => { socketObj.setCurrentSession(null); socketObj.setSessionMessages([]); }} /> )}</AnimatePresence>
 
+      {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 text-white">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl">
@@ -1112,7 +1711,32 @@ export default function App() {
         </div> 
       )}</AnimatePresence>
 
-      {/* FORMULARIO EDITAR METADATOS LIMPIO Y CORREGIDO */}
+      {/* MODAL EDITAR BIOGRAFÍA DE ARTISTA */}
+      <AnimatePresence>{isEditingBio && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 text-white">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-3xl p-8 w-full max-w-lg relative text-white shadow-2xl space-y-6">
+            <div className="flex items-center justify-between border-b border-white/5 pb-4">
+              <h3 className="text-xl uppercase font-bold font-serif italic">Editar Biografía: {selectedArtistName}</h3>
+              <button onClick={() => setIsEditingBio(false)} className="text-white/40 hover:text-white cursor-pointer"><X size={20}/></button>
+            </div>
+            <form onSubmit={handleSaveArtistBio} className="space-y-4">
+              <textarea 
+                rows={6}
+                value={newBioText}
+                onChange={e => setNewBioText(e.target.value)}
+                placeholder="Escribe la historia o información del artista aquí..."
+                className="w-full bg-white/5 p-4 rounded-2xl text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-sans leading-relaxed resize-none"
+              />
+              <div className="flex gap-4">
+                <button type="button" onClick={() => setIsEditingBio(false)} className="flex-1 bg-white/5 py-3 rounded-xl uppercase font-bold text-[10px] tracking-widest hover:bg-white/10 transition-all cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 bg-brand-primary text-black py-3 rounded-xl uppercase font-bold text-[10px] tracking-widest hover:scale-105 transition-all cursor-pointer">Guardar Biografía</button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}</AnimatePresence>
+
+      {/* MODAL EDITAR METADATOS DE CANCIÓN CON PORTADA ANIMADA */}
       <AnimatePresence>{songToEdit && ( 
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 text-white overflow-y-auto py-10">
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-3xl p-8 w-full max-w-lg relative text-white shadow-2xl">
@@ -1122,7 +1746,6 @@ export default function App() {
             <form onSubmit={handleUpdateMetadata} className="space-y-6">
               <h3 className="text-2xl uppercase font-bold font-serif italic mb-8">Edit Track Metadata</h3>
               
-              {/* 1. Título y Artista */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Title</label>
@@ -1134,7 +1757,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 2. Álbum y Número de pista */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Album</label>
@@ -1146,38 +1768,68 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3. Enlaces externos (Tabs y YouTube) en 2 columnas perfectas */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Tabs URL</label>
                   <input placeholder="Songsterr / Tabs URL" value={songToEdit.tabs_url || ""} onChange={e => setSongToEdit({...songToEdit, tabs_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-red-400 ml-2">YouTube Video URL</label>
-                  <input placeholder="https://www.youtube.com/watch?v=..." value={songToEdit.video_url || ""} onChange={e => setSongToEdit({...songToEdit, video_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-red-500 transition-all font-bold" />
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">YouTube Video URL</label>
+                  <input placeholder="https://www.youtube.com/watch?v=..." value={songToEdit.video_url || ""} onChange={e => setSongToEdit({...songToEdit, video_url: e.target.value})} className="bg-white/5 p-4 rounded-2xl w-full text-sm text-white outline-none border border-white/10 focus:border-brand-primary transition-all font-bold" />
                 </div>
               </div>
 
-              {/* 4. Cover Art separado y limpio sin elementos invasores */}
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Cover Art</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0">
-                    {newEditCover ? ( 
-                      <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" /> 
-                    ) : ( 
-                      <img src={songToEdit.coverUrl} className="w-full h-full object-cover" /> 
-                    )}
+              {/* SECCIÓN DE PORTADAS: ESTÁTICA Y ANIMADA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Cover Art (Estática)</label>
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0">
+                      {newEditCover ? ( 
+                        <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" /> 
+                      ) : ( 
+                        <img src={songToEdit.coverUrl} className="w-full h-full object-cover" /> 
+                      )}
+                    </div>
+                    <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-3 flex flex-col items-center justify-center hover:bg-white/10 transition-all text-center">
+                      <ImageIcon size={18} className="text-white/20 mb-1"/>
+                      <span className="text-[9px] font-bold uppercase text-white/40">Cambiar Foto</span>
+                      <input type="file" accept="image/*" onChange={e => e.target.files && setNewEditCover(e.target.files[0])} className="hidden" />
+                    </label>
                   </div>
-                  <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center hover:bg-white/10 transition-all">
-                    <ImageIcon size={20} className="text-white/20 mb-1"/>
-                    <span className="text-[10px] font-bold uppercase text-white/40">Change Artwork</span>
-                    <input type="file" accept="image/*" onChange={e => e.target.files && setNewEditCover(e.target.files[0])} className="hidden" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-brand-primary ml-2 flex items-center gap-1">
+                    <Film size={12} /> Portada Animada (Focus)
                   </label>
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0 flex items-center justify-center bg-black">
+                      {newEditAnimatedCover ? (
+                        newEditAnimatedCover.type.startsWith('video') ? (
+                          <video src={URL.createObjectURL(newEditAnimatedCover)} autoPlay loop muted className="w-full h-full object-cover" />
+                        ) : (
+                          <img src={URL.createObjectURL(newEditAnimatedCover)} className="w-full h-full object-cover" />
+                        )
+                      ) : songToEdit.animated_cover_path ? (
+                        isVideoUrl(songToEdit.animated_cover_path) ? (
+                          <video src={songToEdit.animated_cover_path.startsWith('/') ? songToEdit.animated_cover_path : `/${songToEdit.animated_cover_path}`} autoPlay loop muted className="w-full h-full object-cover" />
+                        ) : (
+                          <img src={songToEdit.animated_cover_path.startsWith('/') ? songToEdit.animated_cover_path : `/${songToEdit.animated_cover_path}`} className="w-full h-full object-cover" />
+                        )
+                      ) : (
+                        <Film size={20} className="text-white/20" />
+                      )}
+                    </div>
+                    <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-brand-primary/20 rounded-2xl p-3 flex flex-col items-center justify-center hover:bg-brand-primary/5 transition-all text-center">
+                      <Film size={18} className="text-brand-primary/40 mb-1"/>
+                      <span className="text-[9px] font-bold uppercase text-brand-primary/60">Subir MP4/GIF</span>
+                      <input type="file" accept="video/mp4,video/webm,image/gif" onChange={e => e.target.files && setNewEditAnimatedCover(e.target.files[0])} className="hidden" />
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              {/* 5. Botones */}
               <div className="pt-4 flex gap-4">
                 <button type="button" onClick={() => setSongToEdit(null)} className="flex-1 bg-white/5 py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:bg-white/10 transition-all">Cancel</button>
                 <button type="submit" className="flex-1 bg-white text-black py-4 rounded-2xl uppercase font-bold text-[10px] tracking-widest hover:scale-[1.02] transition-all">Save Changes</button>

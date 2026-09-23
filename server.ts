@@ -73,7 +73,7 @@ const authenticateToken = (req: any, res: Response, next: NextFunction) => {
 
 const deleteTrackFiles = async (trackId: string) => {
     try {
-        const [rows]: any = await pool.execute('SELECT file_path, cover_path FROM tracks WHERE id = ?', [trackId]);
+        const [rows]: any = await pool.execute('SELECT file_path, cover_path, animated_cover_path FROM tracks WHERE id = ?', [trackId]);
         if (rows[0]) {
             const track = rows[0];
             const audioPath = path.join(__dirname, 'public', track.file_path.startsWith('/') ? track.file_path.substring(1) : track.file_path);
@@ -82,10 +82,13 @@ const deleteTrackFiles = async (trackId: string) => {
                 const coverPath = path.join(__dirname, 'public', track.cover_path.startsWith('/') ? track.cover_path.substring(1) : track.cover_path);
                 if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
             }
+            if (track.animated_cover_path) {
+                const animPath = path.join(__dirname, 'public', track.animated_cover_path.startsWith('/') ? track.animated_cover_path.substring(1) : track.animated_cover_path);
+                if (fs.existsSync(animPath)) fs.unlinkSync(animPath);
+            }
         }
     } catch (e) { console.error("Cleanup failed", e); }
 };
-
 // --- AUTH ---
 app.post('/api/auth/register', async (req: Request, res: Response) => {
     const { username, email, password, turnstileToken } = req.body;
@@ -171,29 +174,43 @@ app.post('/api/tracks/:id/like', authenticateToken, async (req: any, res: Respon
     } catch (e) { res.status(500).send(); }
 });
 
-app.patch('/api/tracks/:id', authenticateToken, upload.single('cover'), async (req: any, res: Response) => { 
+app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'animated_cover', maxCount: 1 }]), async (req: any, res: Response) => { 
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') return res.status(403).json({ error: "Forbidden" });
-    // 1. Recogemos video_url del body:
     const { title, artist, album, track_number, tabs_url, video_url } = req.body;
     let coverPath = req.body.cover_path;
+    let animatedCoverPath = req.body.animated_cover_path;
+
     try {
-        if (req.file) {
+        if (req.files && req.files['cover']) {
+            const coverFile = req.files['cover'][0];
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
             if (rows[0]?.cover_path) {
                 const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             }
-            coverPath = `/uploads/${req.file.filename}`;
+            coverPath = `/uploads/${coverFile.filename}`;
         }
+
+        if (req.files && req.files['animated_cover']) {
+            const animFile = req.files['animated_cover'][0];
+            const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
+            if (rows[0]?.animated_cover_path) {
+                const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
+                if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
+            }
+            animatedCoverPath = `/uploads/${animFile.filename}`;
+        }
+
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
-        
-        // 2. Añadimos video_url al UPDATE de la base de datos:
         await pool.execute(
-            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ? WHERE id = ?', 
-            [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, req.params.id]
+            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?', 
+            [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null, req.params.id]
         ); 
         res.send(); 
-    } catch (e) { res.status(500).send(); }
+    } catch (e) { 
+        console.error("Error updating track:", e);
+        res.status(500).send(); 
+    }
 });
 
 app.post('/api/moderation/:id', authenticateToken, async (req: any, res: Response) => {
@@ -224,6 +241,66 @@ app.delete('/api/tracks/:id', authenticateToken, async (req: any, res: Response)
         await pool.execute('DELETE FROM tracks WHERE id = ?', [req.params.id]); 
         res.send(); 
     } catch (e) { res.status(500).send(); } 
+});
+
+// --- ARTIST PROFILE & BIO ---
+app.get('/api/artists/:name', async (req: Request, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute('SELECT * FROM artists WHERE name = ?', [req.params.name]);
+        if (rows.length > 0) {
+            res.json(rows[0]);
+        } else {
+            res.json({ name: req.params.name, bio: null });
+        }
+    } catch (e) {
+        res.status(500).json({ error: "Error fetching artist" });
+    }
+});
+
+app.put('/api/artists/:name/bio', authenticateToken, async (req: any, res: Response) => {
+    // Solo admins y moderadores pueden guardar/editar la biografía
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { bio } = req.body;
+    try {
+        await pool.execute(
+            'INSERT INTO artists (name, bio) VALUES (?, ?) ON DUPLICATE KEY UPDATE bio = VALUES(bio)',
+            [req.params.name, bio]
+        );
+        res.json({ success: true, bio });
+    } catch (e) {
+        res.status(500).json({ error: "Error saving artist bio" });
+    }
+});
+
+// SUBIR FOTO DE PERFIL DE ARTISTA
+app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') return res.status(403).json({ error: "Forbidden" });
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
+    const newImagePath = `/uploads/${req.file.filename}`;
+
+    try {
+        // Borramos la imagen vieja del disco si ya tenía una
+        const [rows]: any = await pool.execute('SELECT image_url FROM artists WHERE name = ?', [req.params.name]);
+        if (rows.length > 0 && rows[0].image_url) {
+            const oldPath = path.join(__dirname, 'public', rows[0].image_url.startsWith('/') ? rows[0].image_url.substring(1) : rows[0].image_url);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+
+        // Guardamos o actualizamos la foto en la base de datos
+        await pool.execute(
+            'INSERT INTO artists (name, image_url) VALUES (?, ?) ON DUPLICATE KEY UPDATE image_url = VALUES(image_url)',
+            [req.params.name, newImagePath]
+        );
+
+        res.json({ image_url: newImagePath });
+    } catch (e) {
+        console.error("Error subiendo foto de artista:", e);
+        res.status(500).json({ error: "Error al guardar foto del artista" });
+    }
 });
 
 // --- USERS & PROFILE ---
@@ -391,7 +468,7 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
 });
 
 // --- PLAYLISTS & SESSIONS ---
-// --- PLAYLISTS & SESSIONS ---
+
 
 app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => {
     try {

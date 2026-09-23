@@ -12,6 +12,7 @@ import {
   MonitorPlay,
 } from "lucide-react";
 import { type Song } from "../constants";
+import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
 import { motion } from "motion/react";
 
 interface PlayerBarProps {
@@ -20,6 +21,10 @@ interface PlayerBarProps {
   currentTime: number;
   duration: number;
   volume: number;
+
+  getCurrentTime: () => number;
+  subscribeToTime: (listener: () => void) => () => void;
+
   onTogglePlay: (e: any) => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -42,6 +47,8 @@ export function PlayerBar({
   currentTime,
   duration,
   volume,
+  getCurrentTime,
+  subscribeToTime,
   onTogglePlay,
   onNext,
   onPrevious,
@@ -57,14 +64,15 @@ export function PlayerBar({
   isFocusMode,
   activeTheme,
 }: PlayerBarProps) {
-  const [localProgress, setLocalProgress] = useState(currentTime);
-  const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
-    if (!isDragging) {
-      setLocalProgress(currentTime);
-    }
-  }, [currentTime, isDragging]);
+  const liveCurrentTime = useAudioPlaybackTime(
+  getCurrentTime,
+  subscribeToTime
+);
+
+const [localProgress, setLocalProgress] = useState(currentTime);
+const [isDragging, setIsDragging] = useState(false);
+
 
   const formatTime = (time: number) => {
     if (!Number.isFinite(time) || time < 0) return "0:00";
@@ -78,17 +86,20 @@ export function PlayerBar({
   };
 
   const handleSeekStart = (e?: React.MouseEvent | React.TouchEvent) => {
-    if (e) e.stopPropagation();
-    setIsDragging(true);
-  };
+  if (e) e.stopPropagation();
 
-  const handleSeekEnd = (e?: React.MouseEvent | React.TouchEvent) => {
-    if (e) e.stopPropagation();
-    setIsDragging(false);
-    onSeek(localProgress);
-  };
+  setLocalProgress(liveCurrentTime);
+  setIsDragging(true);
+};
 
-  const progressValue = isDragging ? localProgress : currentTime;
+ const handleSeekEnd = (e?: React.MouseEvent | React.TouchEvent) => {
+  if (e) e.stopPropagation();
+
+  setIsDragging(false);
+  onSeek(localProgress);
+};
+
+  const progressValue = isDragging ? localProgress : liveCurrentTime;
   const progressPercent = ((progressValue || 0) / (duration || 1)) * 100;
 
   const glassClasses =
@@ -114,25 +125,7 @@ export function PlayerBar({
         overflow-hidden outline-none select-none
         ${glassClasses}
       `}
-    >
-      {/* Inyección CSS directa e inviolable para navegadores móviles */}
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-          *, *::before, *::after, button, input {
-            -webkit-tap-highlight-color: transparent !important;
-            -webkit-tap-highlight-color: rgba(0,0,0,0) !important;
-            -webkit-touch-callout: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-          }
-          button:focus, button:active, button:focus-visible {
-            outline: none !important;
-            box-shadow: none !important;
-          }
-        `,
-        }}
-      />
+ >
 
       {/* =========================================================
           MOBILE LAYOUT
