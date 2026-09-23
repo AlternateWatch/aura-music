@@ -39,6 +39,26 @@ const isVideoUrl = (url?: string | null) => {
   return /\.(mp4|webm|mov|mkv)($|\?)/i.test(url);
 };
 
+const resolveMediaUrl = (url?: string | null): string | undefined => {
+  if (!url) return undefined;
+
+  if (
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:') ||
+    url.startsWith('firestore-file://')
+  ) {
+    return url;
+  }
+
+  if (url.startsWith('/uploads/')) {
+    return `https://aura.basildo.me${url}`;
+  }
+
+  return url;
+};
+
 export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
   const {
   isOpen,
@@ -83,7 +103,11 @@ const liveCurrentTime = useAudioPlaybackTime(
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const animUrl = animatedCoverUrl || (currentSong as any)?.animated_cover_path || (currentSong as any)?.animatedCoverUrl;
+  const animUrl = resolveMediaUrl(
+  animatedCoverUrl ||
+  (currentSong as any)?.animated_cover_path ||
+  (currentSong as any)?.animatedCoverUrl
+);
   const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
 
   return (
@@ -135,9 +159,18 @@ const liveCurrentTime = useAudioPlaybackTime(
           <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-8 md:gap-16">
             
             {/* Big Cover Art (SOPORTE PARA VÍDEO EN BUCLE / PORTADA ANIMADA) */}
-            <motion.div 
-              animate={{ scale: isPlaying ? 1 : 0.94, rotate: isPlaying ? 0 : -1 }}
-              transition={{ duration: 0.8, ease: "easeInOut" }}
+            <motion.div
+  initial={{ opacity: 0 }}
+  animate={{
+    opacity: 1,
+    scale: isPlaying ? 1 : 0.94,
+    rotate: isPlaying ? 0 : -1,
+  }}
+  transition={{
+    opacity: { duration: 0.12 },
+    scale: { duration: 0.8, ease: "easeInOut" },
+    rotate: { duration: 0.8, ease: "easeInOut" },
+  }}
               className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0 bg-black"
             >
               {animUrl ? (
@@ -167,7 +200,7 @@ const liveCurrentTime = useAudioPlaybackTime(
                 )
               ) : (
                 <img 
-                  src={currentSong.coverUrl || '/default-cover.jpg'} 
+                  src={resolveMediaUrl(currentSong.coverUrl) || '/default-cover.jpg'} 
                   className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
                   alt={currentSong.title} 
                 />

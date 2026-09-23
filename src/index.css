@@ -13,9 +13,15 @@
 }
 
 @layer base {
+  html,
   body {
     @apply bg-[#050505] text-white antialiased font-sans overflow-hidden;
   }
+}
+html,
+body,
+#root {
+  background-color: #050505;
 }
 
 .glass {

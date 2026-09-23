@@ -20,6 +20,8 @@ import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
 import { QueueOverlay } from "./components/QueueOverlay";
 import { SessionOverlay } from "./components/SessionOverlay";
 import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
+import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
+
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
@@ -90,6 +92,26 @@ export default function App() {
   };
 
   const API_BASE = "https://aura.basildo.me";
+
+  const resolveMediaUrl = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+
+  if (
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:') ||
+    url.startsWith('firestore-file://')
+  ) {
+    return url;
+  }
+
+  if (url.startsWith('/uploads/')) {
+    return `${API_BASE}${url}`;
+  }
+
+  return url;
+};
 
   // --- CORE STATE ---
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
@@ -198,6 +220,8 @@ export default function App() {
   
   useEffect(() => { handlePlaySongRef.current = handlePlaySong; });
 
+  
+
   // COLOR DINÁMICO
   useEffect(() => {
     if (!resolvedCoverUrl) return;
@@ -214,6 +238,16 @@ export default function App() {
       setDynamicColor(`rgb(${r}, ${g}, ${b})`);
     };
   }, [resolvedCoverUrl]);
+
+ useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  SystemBars.setStyle({
+    style: SystemBarsStyle.Dark,
+  });
+
+  SystemBars.hide();
+}, []);
 
 
   useEffect(() => {
@@ -342,9 +376,9 @@ export default function App() {
         setSongs(data.map((s: any) => ({ 
             ...s, 
             id: s.id.toString(), 
-            coverUrl: s.cover_path, 
-            animatedCoverUrl: s.animated_cover_path, 
-            audioUrl: s.file_path, 
+            coverUrl: resolveMediaUrl(s.cover_path),
+            animatedCoverUrl: resolveMediaUrl(s.animated_cover_path),
+            audioUrl: resolveMediaUrl(s.file_path),
             uploaderId: s.added_by?.toString(), 
             tabs_url: s.tabs_url, 
             track_number: s.track_number, 
@@ -400,9 +434,9 @@ export default function App() {
       const lastSong: Song = {
         ...data,
         id: data.id.toString(),
-        coverUrl: data.cover_path,
-        animatedCoverUrl: data.animated_cover_path,
-        audioUrl: data.file_path,
+        coverUrl: resolveMediaUrl(data.cover_path),
+        animatedCoverUrl: resolveMediaUrl(data.animated_cover_path),
+        audioUrl: resolveMediaUrl(data.file_path),
         uploaderId: data.added_by?.toString(),
         tabs_url: data.tabs_url,
         track_number: data.track_number,
@@ -1066,6 +1100,8 @@ export default function App() {
   const currentThemeConfig = THEMES.find(t => t.id === activeTheme) || THEMES[0];
   const getThemeBg = () => activeTheme === 'light' ? '#ffffff' : '#050505';
 
+ 
+
   return (
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
       {/* Barra superior de escritorio integrada con el fondo */}
@@ -1134,7 +1170,7 @@ export default function App() {
         {!isFocusMode && (
           <motion.nav 
             initial={{ y: -100 }} animate={{ y: 0 }} exit={{ y: -100 }}
-            className={`h-16 flex items-center justify-between px-4 md:px-8 border-b z-20 backdrop-blur-md transition-all duration-1000 ${activeTheme === 'light' ? 'border-black/5 bg-white/60' : 'border-white/10 bg-black/40'}`}
+            className={`min-h-16 flex items-center justify-between px-4 md:px-8 pt-[env(safe-area-inset-top)] z-20 backdrop-blur-md transition-all duration-1000 md:border-b ${activeTheme === 'light' ? 'md:border-black/5 bg-white/60' : 'md:border-white/10 bg-black/40'}`}
           >
             <div className="flex items-center gap-4 md:gap-12 flex-1">
               <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => { setSelectedAlbumName(null); setSelectedArtistName(null); }}>AURA<span className="text-brand-primary">.</span></span>

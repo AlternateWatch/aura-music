@@ -90,35 +90,105 @@ const deleteTrackFiles = async (trackId: string) => {
     } catch (e) { console.error("Cleanup failed", e); }
 };
 // --- AUTH ---
+const isCapacitorApp = (req: Request) => {
+    return req.headers.origin === 'https://localhost';
+};
+
 app.post('/api/auth/register', async (req: Request, res: Response) => {
     const { username, email, password, turnstileToken } = req.body;
+
     try {
-        const verification = await axios.post("https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            new URLSearchParams({ secret: process.env.TURNSTILE_SECRET, response: turnstileToken, remoteip: req.ip as string }),
-            { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-        );
-        if (!verification.data.success) return res.status(400).json({ error: "Captcha failed." });
+        if (!isCapacitorApp(req)) {
+            const verification = await axios.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                new URLSearchParams({
+                    secret: process.env.TURNSTILE_SECRET!,
+                    response: turnstileToken,
+                    remoteip: req.ip as string
+                }),
+                {
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    }
+                }
+            );
+
+            if (!verification.data.success) {
+                return res.status(400).json({ error: "Captcha failed." });
+            }
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
-        await pool.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)', [username, email, hashedPassword]);
+
+        await pool.execute(
+            'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+            [username, email, hashedPassword]
+        );
+
         res.status(201).json({ message: "Success" });
-    } catch (error) { res.status(400).json({ error: "User exists" }); }
+
+    } catch (error) {
+        res.status(400).json({ error: "User exists" });
+    }
 });
 
 app.post('/api/auth/login', async (req: Request, res: Response) => {
     const { email, password, turnstileToken } = req.body;
+
     try {
-        const verification = await axios.post("https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            new URLSearchParams({ secret: process.env.TURNSTILE_SECRET, response: turnstileToken, remoteip: req.ip as string }),
-            { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        if (!isCapacitorApp(req)) {
+            const verification = await axios.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                new URLSearchParams({
+                    secret: process.env.TURNSTILE_SECRET!,
+                    response: turnstileToken,
+                    remoteip: req.ip as string
+                }),
+                {
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    }
+                }
+            );
+
+            if (!verification.data.success) {
+                return res.status(400).json({ error: "Captcha failed." });
+            }
+        }
+
+        const [rows]: any = await pool.execute(
+            'SELECT * FROM users WHERE email = ?',
+            [email]
         );
-        if (!verification.data.success) return res.status(400).json({ error: "Captcha failed." });
-        const [rows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+
         const user = rows[0];
+
         if (user && await bcrypt.compare(password, user.password_hash)) {
-            const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-            res.json({ token, username: user.username, role: user.role, userId: user.id, profile_pic_path: user.profile_pic_path, custom_bg_path: user.custom_bg_path });
-        } else { res.status(401).json({ error: "Invalid credentials" }); }
-    } catch (error) { res.status(500).json({ error: "Server error" }); }
+            const token = jwt.sign(
+                {
+                    userId: user.id,
+                    username: user.username,
+                    role: user.role
+                },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            res.json({
+                token,
+                username: user.username,
+                role: user.role,
+                userId: user.id,
+                profile_pic_path: user.profile_pic_path,
+                custom_bg_path: user.custom_bg_path
+            });
+        } else {
+            res.status(401).json({ error: "Invalid credentials" });
+        }
+
+    } catch (error) {
+        res.status(500).json({ error: "Server error" });
+    }
 });
 
 // --- TRACKS (Con Soporte para Likes) ---
