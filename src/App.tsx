@@ -119,6 +119,7 @@ export default function App() {
   const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
+  
 
   // 1. CARGA INMEDIATA DE LA ÚLTIMA CANCIÓN DESDE DISCO
   const [currentSong, setCurrentSong] = useState<Song | null>(() => {
@@ -144,6 +145,7 @@ export default function App() {
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [newBioText, setNewBioText] = useState("");
   const [isBioExpanded, setIsBioExpanded] = useState(false);
+  const [mobileNavVisible, setMobileNavVisible] = useState(true);
 
   // ESTADO DE FOTOS DE PERFIL DE ARTISTAS
   const [artistImageUrl, setArtistImageUrl] = useState<string | null>(null);
@@ -217,9 +219,64 @@ export default function App() {
   // --- LOGIC MODULES ---
   const audioObj = useAudioEngine(currentSong, isPlaying, volume, isNormalizerEnabled, setIsPlaying, resolvedAudioUrl);
   const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef.current, setActiveQueue);
+  const mainRef = useRef<HTMLElement | null>(null);
   
   useEffect(() => { handlePlaySongRef.current = handlePlaySong; });
 
+ useEffect(() => {
+  const main = mainRef.current;
+  if (!main) return;
+
+  let lastScrollTop = main.scrollTop;
+  let showTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const handleScroll = () => {
+    // En escritorio la barra siempre permanece visible
+    if (window.innerWidth >= 768) {
+      setMobileNavVisible(true);
+      lastScrollTop = main.scrollTop;
+      return;
+    }
+
+    const currentScrollTop = main.scrollTop;
+    const delta = currentScrollTop - lastScrollTop;
+
+    // Reiniciamos el temporizador cada vez que hay movimiento
+    if (showTimer) {
+      clearTimeout(showTimer);
+    }
+
+    // Si estamos arriba del todo, mostrar inmediatamente
+    if (currentScrollTop <= 10) {
+      setMobileNavVisible(true);
+    }
+    // Scroll hacia abajo → ocultar
+    else if (delta > 4) {
+      setMobileNavVisible(false);
+    }
+    // Scroll hacia arriba → mostrar
+    else if (delta < -4) {
+      setMobileNavVisible(true);
+    }
+
+    lastScrollTop = currentScrollTop;
+
+    // Si pasan 2 segundos sin movimiento → mostrar
+    showTimer = setTimeout(() => {
+      setMobileNavVisible(true);
+    }, 2000);
+  };
+
+  main.addEventListener("scroll", handleScroll, { passive: true });
+
+  return () => {
+    main.removeEventListener("scroll", handleScroll);
+
+    if (showTimer) {
+      clearTimeout(showTimer);
+    }
+  };
+}, []);
   
 
   // COLOR DINÁMICO
@@ -249,6 +306,25 @@ export default function App() {
   SystemBars.hide();
 }, []);
 
+useEffect(() => {
+  let lastScrollY = window.scrollY;
+
+  const handleScroll = () => {
+    const currentScrollY = window.scrollY;
+
+    if (currentScrollY <= 10 || currentScrollY < lastScrollY) {
+      setMobileNavVisible(true);
+    } else if (currentScrollY > lastScrollY) {
+      setMobileNavVisible(false);
+    }
+
+    lastScrollY = currentScrollY;
+  };
+
+  window.addEventListener("scroll", handleScroll, { passive: true });
+
+  return () => window.removeEventListener("scroll", handleScroll);
+}, []);
 
   useEffect(() => {
     if (!socketObj.currentSession || !isPlaying || !currentSong) return;
@@ -1168,10 +1244,20 @@ export default function App() {
       {/* TOP NAVIGATION */}
       <AnimatePresence>
         {!isFocusMode && (
-          <motion.nav 
-            initial={{ y: -100 }} animate={{ y: 0 }} exit={{ y: -100 }}
-            className={`min-h-16 flex items-center justify-between px-4 md:px-8 pt-[env(safe-area-inset-top)] z-20 backdrop-blur-md transition-all duration-1000 md:border-b ${activeTheme === 'light' ? 'md:border-black/5 bg-white/60' : 'md:border-white/10 bg-black/40'}`}
-          >
+          <motion.nav
+  initial={{ y: -100 }}
+  animate={{ y: mobileNavVisible ? 0 : "-100%" }}
+  exit={{ y: -100 }}
+  transition={{
+    duration: 0.25,
+    ease: "easeOut",
+  }}
+  className={`fixed top-0 left-0 right-0 min-h-[5.5rem] flex items-center justify-between px-4 md:px-8 pt-[env(safe-area-inset-top)] z-20 backdrop-blur-md transition-all duration-1000 md:border-b ${
+    activeTheme === 'light'
+      ? 'md:border-black/5 bg-white'
+      : 'md:border-white/10 bg-black'
+  }`}
+>
             <div className="flex items-center gap-4 md:gap-12 flex-1">
               <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => { setSelectedAlbumName(null); setSelectedArtistName(null); }}>AURA<span className="text-brand-primary">.</span></span>
               <div className={`hidden lg:flex gap-8 text-[10px] font-bold uppercase`}>
@@ -1180,10 +1266,15 @@ export default function App() {
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
               </div>
-              <div className="flex-1 max-w-md ml-8 relative hidden sm:block">
-                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30`} />
-                <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-4 text-[11px] outline-none text-white focus:bg-white/10" placeholder="Search frequency or artist..." />
-              </div>
+              <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
+  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+  <input
+    value={searchQuery}
+    onChange={(e) => setSearchQuery(e.target.value)}
+    className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-3 md:pr-4 text-[10px] md:text-[11px] outline-none text-white focus:bg-white/10"
+    placeholder="Search..."
+  />
+</div>
             </div>
             <div className="flex items-center gap-3 md:gap-6">
               {token ? (
@@ -1234,8 +1325,12 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <main className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${isFocusMode ? 'items-center justify-center pt-0' : ''}`}>
-            
+       <main
+  ref={mainRef}
+  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
+    isFocusMode ? 'items-center justify-center pt-0' : ''
+  }`}
+>
             {/* VISTA ESPECIAL: PERFIL DE ARTISTA */}
             {selectedArtistName ? (
               <section className="space-y-10 animate-in fade-in duration-500">
