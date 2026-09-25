@@ -35,8 +35,6 @@ export function useAudioEngine(
 
 
   const handleTimeUpdate = useCallback((time: number) => {
-  console.log('[AUDIO TIME] handleTimeUpdate:', time);
-
   currentTimeRef.current = time;
 
   timeListenersRef.current.forEach((listener) => {

@@ -14,6 +14,7 @@ import {
 import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
 import { motion } from "motion/react";
+import { hapticImpact } from "../utils/haptics";
 
 interface PlayerBarProps {
   currentSong: Song;
@@ -163,6 +164,7 @@ const [isDragging, setIsDragging] = useState(false);
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                hapticImpact("light");
                 onPrevious();
               }}
               style={{
@@ -177,6 +179,7 @@ const [isDragging, setIsDragging] = useState(false);
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                hapticImpact("medium");
                 onTogglePlay(e);
               }}
               style={{
@@ -195,6 +198,7 @@ const [isDragging, setIsDragging] = useState(false);
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                hapticImpact("light");
                 onNext();
               }}
               style={{

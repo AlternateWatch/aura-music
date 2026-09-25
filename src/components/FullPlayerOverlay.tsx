@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
+import { hapticImpact } from "../utils/haptics";
 
 interface FullPlayerOverlayProps {
   isOpen: boolean;
@@ -239,26 +240,26 @@ const liveCurrentTime = useAudioPlaybackTime(
 
               {/* Playback Controls */}
               <div className="flex items-center justify-between px-2 md:px-4">
-                <button onClick={onToggleShuffle} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isShuffle ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
+                <button onClick={() => { hapticImpact('light'); onToggleShuffle(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isShuffle ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
                   <Shuffle size={24} className="md:w-7 md:h-7" />
                 </button>
-                
+
                 <div className="flex items-center gap-6 md:gap-10">
-                    <button onClick={onPrevious} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
+                    <button onClick={() => { hapticImpact('light'); onPrevious(); }} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
                       <SkipBack size={36} className="md:w-12 md:h-12" fill="currentColor" />
                     </button>
-                    <button 
-                        onClick={onTogglePlay} 
+                    <button
+                        onClick={() => { hapticImpact('medium'); onTogglePlay(); }}
                         className="w-20 h-20 md:w-28 md:h-28 bg-white cursor-pointer rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all shadow-[0_15px_35px_rgba(255,255,255,0.15)] shrink-0 outline-none"
                     >
                         {isPlaying ? <Pause size={32} className="md:w-11 md:h-11" fill="black" /> : <Play size={32} className="md:w-11 md:h-11 ml-1.5 md:ml-2" fill="black" />}
                     </button>
-                    <button onClick={onNext} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
+                    <button onClick={() => { hapticImpact('light'); onNext(); }} className="text-white/60 hover:text-white cursor-pointer hover:scale-110 active:scale-90 transition-all shrink-0 outline-none">
                       <SkipForward size={36} className="md:w-12 md:h-12" fill="currentColor" />
                     </button>
                 </div>
 
-                <button onClick={onToggleLoop} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isLoop ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
+                <button onClick={() => { hapticImpact('light'); onToggleLoop(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isLoop ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
                   <Repeat size={24} className="md:w-7 md:h-7" />
                 </button>
               </div>

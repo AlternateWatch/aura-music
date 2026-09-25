@@ -1,16 +1,15 @@
-import { useState, useEffect, useRef, useMemo, FormEvent } from "react";
+import { useState, useEffect, useRef, useMemo, FormEvent, lazy, Suspense } from "react";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
 import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
-import { LyricsOverlay } from "./components/LyricsOverlay";
-import { MusicUpload } from "./components/MusicUpload";
-import { useFileUrl } from "./hooks/useFileUrl";
-import { 
- Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users, 
+import { THEMES } from "./constants/themes";
+import { useFileUrl, resolveFileUrl } from "./hooks/useFileUrl";
+import {
+ Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users,
   MinusCircle, ListPlus, SquarePlay, DoorOpen, ArrowUpDown, Filter, Clock, Image as ImageIcon,
-  ChevronLeft, Menu, Heart, Play, Trophy, Disc, FileText, Film,Library,
+  ChevronLeft, ChevronRight, Menu, Heart, Play, Trophy, Disc, FileText, Film,Library,
 Music2,
 MessageCircle,
 Settings,
@@ -18,22 +17,30 @@ User,
 X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { TabsOverlay } from "./components/TabsOverlay"; 
-import { ProfileOverlay } from "./components/ProfileOverlay"; 
-import { PersonalizationOverlay, THEMES } from "./components/PersonalizationOverlay";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
-import { QueueOverlay } from "./components/QueueOverlay";
-import { SessionOverlay } from "./components/SessionOverlay";
-import { MinigameLobbyOverlay } from "./components/MinigameLobbyOverlay";
 import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import AuraMedia from './plugins/auraMedia';
 
+// Pantallas que no hacen falta en el primer render (solo se abren bajo
+// demanda desde un botón/menú) — se cargan en su propio "trozo" (chunk)
+// aparte, no como parte del bundle principal. Así el bundle principal pesa
+// menos y arranca más rápido; estos componentes se descargan en paralelo,
+// sin bloquear nada, y para cuando el usuario los abre normalmente ya están
+// listos. No cambia ni el aspecto ni el comportamiento de ninguno de ellos.
+const LazyTabsOverlay = lazy(() => import("./components/TabsOverlay").then(m => ({ default: m.TabsOverlay })));
+const LazyProfileOverlay = lazy(() => import("./components/ProfileOverlay").then(m => ({ default: m.ProfileOverlay })));
+const LazyPersonalizationOverlay = lazy(() => import("./components/PersonalizationOverlay").then(m => ({ default: m.PersonalizationOverlay })));
+const LazyQueueOverlay = lazy(() => import("./components/QueueOverlay").then(m => ({ default: m.QueueOverlay })));
+const LazySessionOverlay = lazy(() => import("./components/SessionOverlay").then(m => ({ default: m.SessionOverlay })));
+const LazyMinigameLobbyOverlay = lazy(() => import("./components/MinigameLobbyOverlay").then(m => ({ default: m.MinigameLobbyOverlay })));
+const LazyLyricsOverlay = lazy(() => import("./components/LyricsOverlay").then(m => ({ default: m.LyricsOverlay })));
+const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => ({ default: m.MusicUpload })));
+const LazySocialSidebar = lazy(() => import("./hooks/SocialSidebar").then(m => ({ default: m.SocialSidebar })));
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSocketLogic } from "./hooks/useSocketLogic";
-import { SocialSidebar } from "./hooks/SocialSidebar";
 import { AuthForm } from "./hooks/AuthSection";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
@@ -69,14 +76,6 @@ export default function App() {
       }
     } catch (err) {}
   };
-
-  useEffect(() => {
-  const timer = setTimeout(() => {
-    setShowSplash(false);
-  }, 2000);
-
-  return () => clearTimeout(timer);
-}, []);
 
   const handleMaximize = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -162,6 +161,63 @@ export default function App() {
   const [isBioExpanded, setIsBioExpanded] = useState(false);
   const [mobileNavVisible, setMobileNavVisible] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
+  // Se pone a true cuando la primera carga de canciones + las carátulas que
+  // se ven primero ya están precargadas en el navegador (ver loadContent /
+  // el efecto de precarga de la rejilla / loadLastTrack).
+  const [initialContentReady, setInitialContentReady] = useState(false);
+  const initialContentReadyRef = useRef(false);
+  useEffect(() => { initialContentReadyRef.current = initialContentReady; }, [initialContentReady]);
+  const splashGateRef = useRef({ minElapsed: false });
+  // Dos señales independientes: la rejilla de la biblioteca (primeras
+  // tarjetas visibles) y el hero banner (carátula de currentSong). Solo
+  // cuando las dos están listas consideramos el contenido inicial "listo".
+  const readinessRef = useRef({ grid: false, hero: false });
+  const gridPreloadedRef = useRef(false);
+  const hasHandledLastTrackRef = useRef(false);
+  const maybeMarkInitialContentReady = () => {
+    if (readinessRef.current.grid && readinessRef.current.hero) {
+      setInitialContentReady(true);
+    }
+  };
+
+  // El splash se queda visible hasta que el contenido inicial (canciones +
+  // carátulas que se ven primero) esté precargado, para que el usuario nunca
+  // vea cómo "aparecen" las imágenes al entrar. MIN_SPLASH_MS evita que
+  // parpadee si todo carga muy rápido; MAX_SPLASH_MS es un límite de
+  // seguridad por si la red va lenta o algo falla, para no dejar al usuario
+  // atascado en el splash para siempre.
+  //
+  // splashGateRef guarda si ya pasó el tiempo mínimo en un ref para que el
+  // efecto de arranque (que solo corre una vez) y el efecto que reacciona a
+  // "initialContentReady" puedan comprobar la misma cosa sin reiniciarse
+  // el uno al otro.
+  useEffect(() => {
+    if (splashGateRef.current.minElapsed && initialContentReady) {
+      setShowSplash(false);
+    }
+  }, [initialContentReady]);
+
+  useEffect(() => {
+    const MIN_SPLASH_MS = 1000;
+    const MAX_SPLASH_MS = 4500;
+    const gate = splashGateRef.current;
+
+    const minTimer = setTimeout(() => {
+      gate.minElapsed = true;
+      if (initialContentReadyRef.current) {
+        setShowSplash(false);
+      }
+    }, MIN_SPLASH_MS);
+
+    const maxTimer = setTimeout(() => {
+      setShowSplash(false);
+    }, MAX_SPLASH_MS);
+
+    return () => {
+      clearTimeout(minTimer);
+      clearTimeout(maxTimer);
+    };
+  }, []);
 
   // ESTADO DE FOTOS DE PERFIL DE ARTISTAS
   const [artistImageUrl, setArtistImageUrl] = useState<string | null>(null);
@@ -287,8 +343,14 @@ useEffect(() => {
 
   let lastScrollTop = main.scrollTop;
   let showTimer: ReturnType<typeof setTimeout> | null = null;
+  let rafId: number | null = null;
 
-  const handleScroll = () => {
+  // La lógica real solo se ejecuta una vez por frame (rAF), aunque el
+  // navegador dispare el evento "scroll" muchas más veces durante el
+  // fling/momentum scroll — mismo comportamiento, menos trabajo.
+  const processScroll = () => {
+    rafId = null;
+
     // En escritorio la barra siempre permanece visible
     if (window.innerWidth >= 768) {
       setMobileNavVisible(true);
@@ -325,6 +387,12 @@ useEffect(() => {
     }, 2000);
   };
 
+  const handleScroll = () => {
+    if (rafId === null) {
+      rafId = requestAnimationFrame(processScroll);
+    }
+  };
+
   main.addEventListener("scroll", handleScroll, { passive: true });
 
   return () => {
@@ -332,6 +400,9 @@ useEffect(() => {
 
     if (showTimer) {
       clearTimeout(showTimer);
+    }
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
     }
   };
 }, []);
@@ -461,26 +532,6 @@ useEffect(() => {
   SystemBars.hide();
 }, []);
 
-useEffect(() => {
-  let lastScrollY = window.scrollY;
-
-  const handleScroll = () => {
-    const currentScrollY = window.scrollY;
-
-    if (currentScrollY <= 10 || currentScrollY < lastScrollY) {
-      setMobileNavVisible(true);
-    } else if (currentScrollY > lastScrollY) {
-      setMobileNavVisible(false);
-    }
-
-    lastScrollY = currentScrollY;
-  };
-
-  window.addEventListener("scroll", handleScroll, { passive: true });
-
-  return () => window.removeEventListener("scroll", handleScroll);
-}, []);
-
   useEffect(() => {
     if (!socketObj.currentSession || !isPlaying || !currentSong) return;
     const heartbeat = setInterval(() => {
@@ -596,6 +647,108 @@ useEffect(() => {
   const handleJoinSession = (code: string) => { socketObj.setCurrentSession(code); socketObj.socketRef.current?.emit('join-session', { code, user }); };
   const handleSendChat = (message: string) => { if (socketObj.currentSession) socketObj.socketRef.current?.emit('send-chat', { code: socketObj.currentSession, user, message }); };
 
+  // Precarga una imagen en el caché del navegador antes de que ningún <img>
+  // la pida "de verdad". Nunca rechaza (un fallo o timeout cuentan como
+  // "resuelta") para que una sola carátula rota/lenta no bloquee el resto.
+  const preloadImage = (src?: string): Promise<void> => {
+    if (!src) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      const img = new Image();
+      img.onload = () => {
+        // onload solo garantiza que ya han llegado los bytes; decode()
+        // fuerza además a que el bitmap quede completamente decodificado y
+        // listo para pintarse sin coste extra. Sin esto, el <img> real del
+        // Full Player podía disparar su propia decodificación "en frío"
+        // justo durante la animación de apertura del panel, que es cuando
+        // se notaba que la carátula tardaba en aparecer.
+        if (typeof img.decode === "function") {
+          img.decode().then(finish).catch(finish);
+        } else {
+          finish();
+        }
+      };
+      img.onerror = finish;
+      img.src = src;
+      setTimeout(finish, 3000);
+    });
+  };
+
+  // Igual que preloadImage, pero primero resuelve la URL (por si es una
+  // referencia firestore-file:// que necesita ir a buscar la URL real a
+  // Firebase antes de poder precargarla) — la misma resolución que usa el
+  // hero banner internamente vía useFileUrl.
+  const preloadHeroCover = async (rawUrl?: string): Promise<void> => {
+    if (!rawUrl) return;
+    try {
+      const resolved = await resolveFileUrl(rawUrl);
+      await preloadImage(resolved);
+    } catch (e) {
+      // Si la resolución falla, no bloqueamos nada más.
+    }
+  };
+
+  const isAnimatedCoverVideo = (url?: string | null) => {
+    if (!url) return false;
+    return /\.(mp4|webm|mov|mkv)($|\?)/i.test(url);
+  };
+
+  // Como preloadImage, pero para vídeo: crea un <video> fuera del DOM y
+  // espera a que decodifique el primer frame (loadeddata), no solo a que
+  // lleguen los bytes. Es justo ese trabajo — fetch + arranque del decoder —
+  // el que se nota como lag la primera vez que se monta un <video> "en
+  // frío" (por ejemplo, al abrir el Full Player por primera vez tras
+  // arrancar la app). Los vídeos pesan más que una imagen, así que el
+  // timeout de seguridad es más largo.
+  const preloadVideo = (src?: string): Promise<void> => {
+    if (!src) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const video = document.createElement('video');
+      const finish = () => {
+        if (done) return;
+        done = true;
+        video.removeEventListener('loadeddata', finish);
+        video.removeEventListener('error', finish);
+        resolve();
+      };
+      video.muted = true;
+      video.preload = 'auto';
+      (video as any).playsInline = true;
+      video.addEventListener('loadeddata', finish, { once: true });
+      video.addEventListener('error', finish, { once: true });
+      video.src = src;
+      video.load();
+      setTimeout(finish, 6000);
+    });
+  };
+
+  // Precarga en segundo plano (sin bloquear el splash) la portada animada
+  // de la canción actual. No forma parte de la condición que oculta el
+  // splash a propósito: un vídeo puede pesar varios MB y no queremos que
+  // eso alargue el arranque — solo queremos que empiece a descargarse y
+  // decodificarse cuanto antes, para que si el usuario abre el Full Player
+  // o el Modo Focus poco después, ya esté listo.
+  const preloadAnimatedCover = async (rawUrl?: string | null) => {
+    if (!rawUrl) return;
+    try {
+      const resolved = await resolveFileUrl(rawUrl);
+      if (!resolved) return;
+      if (isAnimatedCoverVideo(resolved)) {
+        await preloadVideo(resolved);
+      } else {
+        await preloadImage(resolved);
+      }
+    } catch (e) {
+      // Best-effort: si falla, no pasa nada — se cargará normal al abrir.
+    }
+  };
+
   const loadContent = async () => {
     setIsLoading(true);
     try {
@@ -603,19 +756,20 @@ useEffect(() => {
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
       const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
       const data = await res.json();
-      if (Array.isArray(data)) { 
-        setSongs(data.map((s: any) => ({ 
-            ...s, 
-            id: s.id.toString(), 
+      if (Array.isArray(data)) {
+        const mapped = data.map((s: any) => ({
+            ...s,
+            id: s.id.toString(),
             coverUrl: resolveMediaUrl(s.cover_path),
             animatedCoverUrl: resolveMediaUrl(s.animated_cover_path),
             audioUrl: resolveMediaUrl(s.file_path),
-            uploaderId: s.added_by?.toString(), 
-            tabs_url: s.tabs_url, 
-            track_number: s.track_number, 
-            format: s.format, 
+            uploaderId: s.added_by?.toString(),
+            tabs_url: s.tabs_url,
+            track_number: s.track_number,
+            format: s.format,
             video_url: s.video_url
-        }))); 
+        }));
+        setSongs(mapped);
         setLikedIds(data.filter((s: any) => s.is_liked).map((s: any) => s.id.toString()));
 
         const allIndividualArtists = Array.from(new Set(
@@ -636,7 +790,9 @@ useEffect(() => {
             .catch(() => {});
         });
       }
-    } catch (e) { console.error("Load failed"); }
+    } catch (e) {
+      console.error("Load failed");
+    }
     setIsLoading(false);
   };
 
@@ -651,16 +807,36 @@ useEffect(() => {
   };
 
   const loadLastTrack = async () => {
+    // El hero banner muestra currentSong.coverUrl desde el primer render
+    // (viene del último dato guardado en localStorage). Aquí solo nos
+    // interesa: (a) precargar esa carátula por si el navegador no la tiene
+    // ya en caché, y (b) si el servidor dice que la última canción es OTRA
+    // distinta, precargar la nueva ANTES de aplicarla, para que el hero
+    // banner nunca cambie de imagen "en vivo" delante del usuario.
+    const isFirstRun = !hasHandledLastTrackRef.current;
+    const markHeroReady = () => {
+      if (!isFirstRun) return;
+      hasHandledLastTrackRef.current = true;
+      readinessRef.current.hero = true;
+      maybeMarkInitialContentReady();
+    };
+
+    const localCoverPreload = preloadHeroCover(currentSong?.coverUrl);
+
     const activeToken = token || localStorage.getItem('aura_token');
-    if (!activeToken) return;
+    if (!activeToken) {
+      await localCoverPreload;
+      markHeroReady();
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
         headers: { 'Authorization': `Bearer ${activeToken}` }
       });
-      if (!res.ok) return;
+      if (!res.ok) { await localCoverPreload; markHeroReady(); return; }
       const data = await res.json();
-      if (!data) return;
+      if (!data) { await localCoverPreload; markHeroReady(); return; }
 
       const lastSong: Song = {
         ...data,
@@ -674,18 +850,42 @@ useEffect(() => {
         format: data.format,
         video_url: data.video_url
       };
-      
+
+      if (lastSong.id === currentSong?.id) {
+        await localCoverPreload;
+      } else {
+        await preloadHeroCover(lastSong.coverUrl);
+      }
+
       setCurrentSong(lastSong);
       setIsPlaying(false);
       localStorage.setItem('aura_last_song', JSON.stringify(lastSong));
+      markHeroReady();
     } catch (error) {
       console.error("Error loading last track from server:", error);
+      markHeroReady();
     }
   };
 
   useEffect(() => { loadContent(); }, [showModeration, activePlaylistId]);
   useEffect(() => { loadPlaylists(); }, [token]);
   useEffect(() => { loadLastTrack(); }, [token]);
+
+  // En cuanto se sabe cuál es la canción actual —ya sea la del arranque
+  // (recuperada de localStorage) o una nueva que el usuario acaba de
+  // seleccionar—, nos adelantamos y precargamos tanto su portada animada
+  // como su portada estática normal. Antes esto solo pasaba para la canción
+  // inicial, así que al elegir una canción distinta y abrir el Full Player
+  // justo después, su <img> se montaba "en frío" (sin decodificar todavía)
+  // y no se veía hasta que el navegador encontraba un hueco libre, que
+  // solía ser justo al terminar la animación de apertura del panel.
+  useEffect(() => {
+    const raw =
+      (currentSong as any)?.animated_cover_path ||
+      (currentSong as any)?.animatedCoverUrl;
+    preloadAnimatedCover(raw);
+    preloadHeroCover(currentSong?.coverUrl);
+  }, [currentSong?.id]);
 
   // --- MINIGAME ENGINE ---
   useEffect(() => {
@@ -996,24 +1196,11 @@ useEffect(() => {
       forcedState !== undefined
         ? forcedState
         : !socketObj.isShuffle;
-    console.log(
-      '[SHUFFLE] toggleShuffle ejecutado:',
-      nextShuffleState
-    );
     socketObj.setIsShuffle(nextShuffleState);
-    console.log(
-      '[AURA MEDIA] Enviando shuffle a Android:',
-      nextShuffleState
-    );
 
     AuraMedia.setShuffle({
       enabled: nextShuffleState
     })
-      .then(() => {
-        console.log(
-          '[AURA MEDIA] Shuffle enviado correctamente'
-        );
-      })
       .catch((error) => {
         console.error(
           '[AURA MEDIA] Error enviando shuffle:',
@@ -1062,24 +1249,11 @@ useEffect(() => {
         ? forcedState
         : !socketObj.isLoop;
 
-    console.log(
-      '[LOOP] toggleLoop ejecutado:',
-      nextLoop
-    );
     socketObj.setIsLoop(nextLoop);
-    console.log(
-      '[AURA MEDIA] Enviando repeat a Android:',
-      nextLoop
-    );
 
     AuraMedia.setRepeat({
       enabled: nextLoop
     })
-      .then(() => {
-        console.log(
-          '[AURA MEDIA] Repeat enviado correctamente'
-        );
-      })
       .catch((error) => {
         console.error(
           '[AURA MEDIA] Error enviando repeat:',
@@ -1362,6 +1536,26 @@ useEffect(() => {
     return items;
   }, [flattenedSongs, songs, artistsMap, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
 
+  // PRECARGA DE LAS PRIMERAS CARÁTULAS DE LA REJILLA (solo una vez, al
+  // arrancar la app) usando displayItems — el mismo array, en el mismo
+  // orden, que se usa para pintar las tarjetas — para que lo que se
+  // precarga sea EXACTAMENTE lo primero que el usuario va a ver, tanto si
+  // son canciones sueltas como tarjetas de álbum/artista agrupadas.
+  useEffect(() => {
+    if (gridPreloadedRef.current) return;
+    if (isLoading) return; // el primer intento de carga aún no ha terminado
+
+    gridPreloadedRef.current = true;
+
+    const GRID_PRELOAD_COUNT = 24;
+    Promise.allSettled(
+      displayItems.slice(0, GRID_PRELOAD_COUNT).map((item: any) => preloadImage(item.coverUrl))
+    ).then(() => {
+      readinessRef.current.grid = true;
+      maybeMarkInitialContentReady();
+    });
+  }, [isLoading, displayItems]);
+
   // ÁLBUMES DEL ARTISTA SELECCIONADO
   const artistAlbums = useMemo(() => {
     if (!selectedArtistName) return [];
@@ -1599,15 +1793,6 @@ useEffect(() => {
       Math.round(currentTime * 1000)
     );
 
-    console.log(
-      '[AUDIO SYNC] currentTime:',
-      currentTime,
-      'positionMs:',
-      positionMs,
-      'audioElement:',
-      audioObj.audioRef.current?.currentTime
-    );
-
     AuraMedia.setPosition({
       positionMs
     }).catch(() => {});
@@ -1768,9 +1953,17 @@ useEffect(() => {
 
   <button
     onClick={() => setIsMobileMenuOpen(prev => !prev)}
-    className="lg:hidden text-white/40 hover:text-white transition-colors"
+    aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+    aria-expanded={isMobileMenuOpen}
+    className={`lg:hidden w-9 h-9 -mr-1.5 rounded-full flex items-center justify-center transition-colors active:scale-90 duration-150 ${
+      isMobileMenuOpen
+        ? (activeTheme === 'light' ? 'bg-black/5 text-black' : 'bg-white/10 text-white')
+        : 'text-white/40 hover:text-white'
+    }`}
   >
-    <Menu size={20}/>
+    <span className="flex transition-transform duration-150" style={{ transform: isMobileMenuOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+      {isMobileMenuOpen ? <X size={20}/> : <Menu size={20}/>}
+    </span>
   </button>
 </div>
               ) : ( <button onClick={() => setIsAuthModalOpen(true)} className="px-5 py-2 rounded-full text-[10px] font-bold uppercase bg-white text-black hover:scale-105 transition-all cursor-pointer">Sign In</button> )}
@@ -1788,20 +1981,20 @@ useEffect(() => {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[9998] bg-black/40 md:hidden"
+        className="fixed inset-0 z-[9998] bg-black/60 md:hidden"
         onClick={() => setIsMobileMenuOpen(false)}
       />
 
       {/* MENÚ */}
       <motion.div
-        initial={{ opacity: 0, y: -6 }}
+        initial={{ opacity: 0, y: -8 }}
 animate={{ opacity: 1, y: 0 }}
-exit={{ opacity: 0, y: -6 }}
+exit={{ opacity: 0, y: -8 }}
 transition={{
-  duration: 0.12,
+  duration: 0.16,
   ease: "easeOut",
 }}
-        className={`fixed top-[5.5rem] left-3 right-3 z-[9999] md:hidden rounded-2xl border shadow-lg overflow-hidden ${
+        className={`fixed top-[5.5rem] left-3 right-3 z-[9999] md:hidden rounded-2xl border shadow-lg overflow-hidden will-change-transform ${
           activeTheme === "light"
             ? "bg-white border-black/10 text-black"
             : "bg-[#080808] border-white/10 text-white"
@@ -1829,10 +2022,11 @@ transition={{
 
             <button
               onClick={() => setIsMobileMenuOpen(false)}
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+              aria-label="Close menu"
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 duration-150 ${
                 activeTheme === "light"
-                  ? "bg-black/5 hover:bg-black/10"
-                  : "bg-white/5 hover:bg-white/10"
+                  ? "bg-black/5 hover:bg-black/10 active:bg-black/15"
+                  : "bg-white/5 hover:bg-white/10 active:bg-white/15"
               }`}
             >
               <X size={16} />
@@ -1852,17 +2046,23 @@ transition={{
               setSelectedArtistName(null);
               setIsMobileMenuOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors active:scale-[0.98] duration-150 ${
               activePlaylistId === "all" && !showModeration
                 ? "text-brand-primary bg-brand-primary/10"
                 : activeTheme === "light"
-                  ? "hover:bg-black/5"
-                  : "hover:bg-white/5"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
             }`}
           >
-            <Library size={18} />
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              activePlaylistId === "all" && !showModeration
+                ? "bg-brand-primary/15 text-brand-primary"
+                : activeTheme === "light" ? "bg-black/5" : "bg-white/5"
+            }`}>
+              <Library size={16} />
+            </div>
 
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">
                 Library
               </div>
@@ -1871,6 +2071,8 @@ transition={{
                 Your music collection
               </div>
             </div>
+
+            <ChevronRight size={15} className="opacity-20 shrink-0" />
           </button>
 
           {/* PLAYLISTS */}
@@ -1917,12 +2119,12 @@ transition={{
                 playlists.map((p) => (
                   <div
                     key={p.id}
-                    className={`flex items-center rounded-lg group ${
+                    className={`flex items-center rounded-lg ${
                       activePlaylistId === p.id.toString()
                         ? "bg-brand-primary/10"
                         : activeTheme === "light"
-                          ? "hover:bg-black/5"
-                          : "hover:bg-white/5"
+                          ? "active:bg-black/5"
+                          : "active:bg-white/5"
                     }`}
                   >
                     <button
@@ -1937,8 +2139,8 @@ transition={{
                         activePlaylistId === p.id.toString()
                           ? "text-brand-primary font-semibold"
                           : activeTheme === "light"
-                            ? "text-black/60 hover:text-black"
-                            : "text-white/60 hover:text-white"
+                            ? "text-black/60"
+                            : "text-white/60"
                       }`}
                     >
                       <div className="flex items-center gap-2">
@@ -1954,7 +2156,8 @@ transition={{
                         e.stopPropagation();
                         handleDeletePlaylist(p.id);
                       }}
-                      className="mr-2 p-1.5 text-red-500/40 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                      className="mr-1.5 p-2 rounded-md text-red-500/50 active:text-red-500 active:bg-red-500/10 transition-colors shrink-0"
+                      aria-label={`Delete playlist ${p.name}`}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -1971,17 +2174,17 @@ transition={{
               setIsCreatePlaylistOpen(true);
               setIsMobileMenuOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
               activeTheme === "light"
-                ? "hover:bg-black/5"
-                : "hover:bg-white/5"
+                ? "hover:bg-black/5 active:bg-black/10"
+                : "hover:bg-white/5 active:bg-white/10"
             }`}
           >
-            <div className="w-8 h-8 rounded-lg bg-brand-primary/10 text-brand-primary flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-brand-primary/15 text-brand-primary flex items-center justify-center shrink-0">
               <Plus size={16} />
             </div>
 
-            <div>
+            <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">
                 Create playlist
               </div>
@@ -2001,21 +2204,32 @@ transition={{
             }`}
           />
 
+          {/* ETIQUETA DE SECCIÓN */}
+          <div className="px-4 pt-4 pb-1 text-[10px] uppercase tracking-[0.18em] font-bold opacity-40">
+            More
+          </div>
+
           {/* SESSION */}
           <button
             onClick={() => {
               setIsSessionOpen(true);
               setIsMobileMenuOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
               activeTheme === "light"
-                ? "hover:bg-black/5"
-                : "hover:bg-white/5"
+                ? "hover:bg-black/5 active:bg-black/10"
+                : "hover:bg-white/5 active:bg-white/10"
             }`}
           >
-            <Users size={18} />
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              socketObj.currentSession
+                ? "bg-brand-primary/15 text-brand-primary"
+                : activeTheme === "light" ? "bg-black/5" : "bg-white/5"
+            }`}>
+              <Users size={16} />
+            </div>
 
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">
                 Session
               </div>
@@ -2025,8 +2239,10 @@ transition={{
               </div>
             </div>
 
-            {socketObj.currentSession && (
-              <span className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
+            {socketObj.currentSession ? (
+              <span className="w-2 h-2 rounded-full bg-brand-primary animate-pulse shrink-0" />
+            ) : (
+              <ChevronRight size={15} className="opacity-20 shrink-0" />
             )}
           </button>
 
@@ -2037,15 +2253,17 @@ transition={{
                 setIsSocialOpen(true);
                 setIsMobileMenuOpen(false);
               }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
                 activeTheme === "light"
-                  ? "hover:bg-black/5"
-                  : "hover:bg-white/5"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
               }`}
             >
-              <MessageCircle size={18} />
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${activeTheme === "light" ? "bg-black/5" : "bg-white/5"}`}>
+                <MessageCircle size={16} />
+              </div>
 
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold">
                   Social
                 </div>
@@ -2055,8 +2273,10 @@ transition={{
                 </div>
               </div>
 
-              {socketObj.unreadSenders.length > 0 && (
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              {socketObj.unreadSenders.length > 0 ? (
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+              ) : (
+                <ChevronRight size={15} className="opacity-20 shrink-0" />
               )}
             </button>
           )}
@@ -2067,15 +2287,17 @@ transition={{
               setIsPersonalizationOpen(true);
               setIsMobileMenuOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
               activeTheme === "light"
-                ? "hover:bg-black/5"
-                : "hover:bg-white/5"
+                ? "hover:bg-black/5 active:bg-black/10"
+                : "hover:bg-white/5 active:bg-white/10"
             }`}
           >
-            <Settings size={18} />
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${activeTheme === "light" ? "bg-black/5" : "bg-white/5"}`}>
+              <Settings size={16} />
+            </div>
 
-            <div>
+            <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">
                 Personalization
               </div>
@@ -2084,6 +2306,8 @@ transition={{
                 Appearance and preferences
               </div>
             </div>
+
+            <ChevronRight size={15} className="opacity-20 shrink-0" />
           </button>
 
           {/* MODERATION */}
@@ -2093,15 +2317,17 @@ transition={{
                 setShowModeration(true);
                 setIsMobileMenuOpen(false);
               }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
                 activeTheme === "light"
-                  ? "hover:bg-black/5"
-                  : "hover:bg-white/5"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
               }`}
             >
-              <ShieldCheck size={18} className="text-amber-500" />
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+                <ShieldCheck size={16} />
+              </div>
 
-              <div>
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold">
                   Moderation
                 </div>
@@ -2110,6 +2336,8 @@ transition={{
                   Manage Aura
                 </div>
               </div>
+
+              <ChevronRight size={15} className="opacity-20 shrink-0" />
             </button>
           )}
 
@@ -2120,15 +2348,17 @@ transition={{
                 setIsProfileOpen(true);
                 setIsMobileMenuOpen(false);
               }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
                 activeTheme === "light"
-                  ? "hover:bg-black/5"
-                  : "hover:bg-white/5"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
               }`}
             >
-              <User size={18} />
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${activeTheme === "light" ? "bg-black/5" : "bg-white/5"}`}>
+                <User size={16} />
+              </div>
 
-              <div>
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold">
                   Profile
                 </div>
@@ -2137,6 +2367,8 @@ transition={{
                   Your Aura profile
                 </div>
               </div>
+
+              <ChevronRight size={15} className="opacity-20 shrink-0" />
             </button>
           )}
 
@@ -2147,11 +2379,13 @@ transition={{
                 setIsMobileMenuOpen(false);
                 handleLogout();
               }}
-              className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-red-400 hover:bg-red-500/10 transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-red-400 hover:bg-red-500/10 active:bg-red-500/15 active:scale-[0.98] transition-colors duration-150"
             >
-              <LogOut size={18} />
+              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0">
+                <LogOut size={16} />
+              </div>
 
-              <div>
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold">
                   Log out
                 </div>
@@ -2208,7 +2442,7 @@ transition={{
 
        <main
   ref={mainRef}
-  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
+  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 pt-[calc(5.5rem+env(safe-area-inset-top))] flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
     isFocusMode ? 'items-center justify-center pt-0' : ''
   }`}
 >
@@ -2364,7 +2598,7 @@ transition={{
               </section>
             ) : !isFocusMode ? (
               <>
-                <AnimatePresence>{showUpload && <MusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />}</AnimatePresence>
+                <Suspense fallback={null}><AnimatePresence>{showUpload && <LazyMusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />}</AnimatePresence></Suspense>
                 
                 {/* HERO BANNER */}
                 {!isMinigameActive && !selectedAlbumName && (
@@ -2589,11 +2823,6 @@ transition={{
   ref={audioObj.audioRef}
   src={resolvedAudioUrl || undefined}
   onTimeUpdate={(e) => {
-    console.log(
-      '[AUDIO EVENT] HTML audio currentTime:',
-      e.currentTarget.currentTime
-    );
-
     audioObj.handleTimeUpdate(
       e.currentTarget.currentTime
     );
@@ -2692,16 +2921,16 @@ transition={{
         )}
       </AnimatePresence>
 
-      <MinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} />
-      <AnimatePresence>{tabsSong && <TabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence>
-      <AnimatePresence>{isLyricsOpen && <LyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
-  subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence>
+      <Suspense fallback={null}><LazyMinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} /></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{tabsSong && <LazyTabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
+  subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence></Suspense>
       <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} liveCurrentTime={audioObj.getCurrentTime()} subscribeToTime={audioObj.subscribeToTime}
 getCurrentTime={audioObj.getCurrentTime}
  onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
           if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
       }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
-      <AnimatePresence>{isQueueOpen && <QueueOverlay
+      <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
         queue={getCurrentPlayPool()}
@@ -2710,13 +2939,13 @@ getCurrentTime={audioObj.getCurrentTime}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
         activeTheme={activeTheme}
-      />}</AnimatePresence>
-      <AnimatePresence>{isSocialOpen && <SocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence>
+      />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSocialOpen && <LazySocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
-      <AnimatePresence>{isPersonalizationOpen && <PersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence>
-      <AnimatePresence>{isProfileOpen && ( <ProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence>
-      <AnimatePresence>{isSessionOpen && ( <SessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => { socketObj.setCurrentSession(null); socketObj.setSessionMessages([]); }} /> )}</AnimatePresence>
+      <Suspense fallback={null}><AnimatePresence>{isPersonalizationOpen && <LazyPersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => { socketObj.setCurrentSession(null); socketObj.setSessionMessages([]); }} /> )}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 

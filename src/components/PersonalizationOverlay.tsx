@@ -1,23 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Palette, Check, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { THEMES, type Theme } from '../constants/themes';
 
-export interface Theme {
-  id: string;
-  name: string;
-  preview: string;
-  color: string;
-  className: string;
-}
-
-export const THEMES: Theme[] = [
-  { id: 'dark', name: 'Void Black', preview: 'bg-black', color: '#6366f1', className: 'bg-[#050505] text-white' },
-  { id: 'light', name: 'Pure White', preview: 'bg-gray-100', color: '#ffffff', className: 'bg-white text-black' },
-  { id: 'nebula', name: 'Nebula', preview: 'bg-gradient-to-br from-indigo-900 via-purple-900 to-black', color: '#ec4899', className: 'bg-[#0a001a] text-white' },
-  { id: 'sunset', name: 'Sunset', preview: 'bg-gradient-to-br from-orange-600 to-rose-900', color: '#f59e0b', className: 'bg-[#1a0a00] text-white' },
-  { id: 'emerald', name: 'Emerald', preview: 'bg-gradient-to-br from-emerald-900 to-black', color: '#10b981', className: 'bg-[#001a0a] text-white' },
-  { id: 'custom', name: 'Custom Wall', preview: 'bg-zinc-800', color: '#6366f1', className: 'bg-black text-white' },
-];
+// Re-exportados para no romper a nadie que ya los importe desde aquí.
+export { THEMES, type Theme };
 
 interface PersonalizationOverlayProps {
   onClose: () => void;

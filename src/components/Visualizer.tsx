@@ -17,6 +17,24 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Reutilizamos el mismo buffer entre frames en vez de reservar uno nuevo
+    // cada vez (evita presión de GC durante la reproducción).
+    let dataArray = new Uint8Array(0);
+
+    if (!analyser || !active) {
+      // Sin análisis activo no hace falta animar nada: sincronizamos el
+      // tamaño, limpiamos una vez y NO seguimos pidiendo frames — antes esto
+      // se quedaba en un bucle infinito a 60fps leyendo el layout del canvas
+      // incluso con el reproductor en pausa.
+      const rect = canvas.getBoundingClientRect();
+      if (canvas.width !== rect.width || canvas.height !== rect.height) {
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
     const render = () => {
       // 1. Sync internal resolution with display size
       const rect = canvas.getBoundingClientRect();
@@ -25,14 +43,9 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
         canvas.height = rect.height;
       }
 
-      if (!analyser || !active) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        animationRef.current = requestAnimationFrame(render);
-        return;
+      if (dataArray.length !== analyser.frequencyBinCount) {
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
       }
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
       analyser.getByteFrequencyData(dataArray);
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -48,7 +61,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
         // SAMPLING FIX: 
         // We only sample the first 60% of the buffer (where the music actually happens)
         // This prevents the right side from looking "dead" or empty.
-        const sampleIndex = Math.floor((i / barCount) * (bufferLength * 0.6));
+        const sampleIndex = Math.floor((i / barCount) * (analyser.frequencyBinCount * 0.6));
         const value = dataArray[sampleIndex];
         
         // Scale the height and ensure a tiny base line is always there
