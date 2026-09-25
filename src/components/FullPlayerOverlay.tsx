@@ -175,7 +175,7 @@ const liveCurrentTime = useAudioPlaybackTime(
             >
               {animUrl ? (
                 isVideo ? (
-                  <video 
+                  <video
                     ref={(el) => {
                       if (el) {
                         el.muted = true;
@@ -183,12 +183,17 @@ const liveCurrentTime = useAudioPlaybackTime(
                       }
                     }}
                     key={animUrl}
-                    src={animUrl} 
-                    autoPlay 
-                    loop 
-                    muted 
-                    playsInline 
-                    className="w-full h-full object-cover pointer-events-none" 
+                    src={animUrl}
+                    poster={
+                      resolveMediaUrl(currentSong.coverUrl) ||
+                      '/default-cover.jpg'
+                    }
+                    preload="auto"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover pointer-events-none"
                   />
                 ) : (
                   <img 

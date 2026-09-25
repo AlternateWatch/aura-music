@@ -1592,9 +1592,20 @@ useEffect(() => {
   }
 
   const syncPosition = () => {
+    const currentTime = audioObj.getCurrentTime();
+
     const positionMs = Math.max(
       0,
-      Math.round(audioObj.getCurrentTime() * 1000)
+      Math.round(currentTime * 1000)
+    );
+
+    console.log(
+      '[AUDIO SYNC] currentTime:',
+      currentTime,
+      'positionMs:',
+      positionMs,
+      'audioElement:',
+      audioObj.audioRef.current?.currentTime
     );
 
     AuraMedia.setPosition({
@@ -2577,12 +2588,27 @@ transition={{
      <audio
   ref={audioObj.audioRef}
   src={resolvedAudioUrl || undefined}
-  onTimeUpdate={(e) =>
-    audioObj.handleTimeUpdate(e.currentTarget.currentTime)
-  }
-  onLoadedMetadata={(e) =>
-    audioObj.setDuration(e.currentTarget.duration)
-  }
+  onTimeUpdate={(e) => {
+    console.log(
+      '[AUDIO EVENT] HTML audio currentTime:',
+      e.currentTarget.currentTime
+    );
+
+    audioObj.handleTimeUpdate(
+      e.currentTarget.currentTime
+    );
+  }}
+  onLoadedMetadata={(e) => {
+    const duration = e.currentTarget.duration;
+
+    audioObj.setDuration(duration);
+
+    if (Capacitor.isNativePlatform() && Number.isFinite(duration)) {
+      AuraMedia.setDuration({
+        durationMs: Math.round(duration * 1000)
+      }).catch(() => {});
+    }
+  }}
   onEnded={handleNext}
   crossOrigin="anonymous"
 />

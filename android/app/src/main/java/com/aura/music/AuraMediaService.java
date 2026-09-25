@@ -375,7 +375,7 @@ public class AuraMediaService extends MediaSessionService {
 
             subtitle =
                     artist
-                            + " • "
+                            + " - "
                             + album;
 
         } else if (!artist.isEmpty()) {
@@ -579,22 +579,24 @@ public class AuraMediaService extends MediaSessionService {
         });
     }
 
-    public void setPosition(
-            long positionMs
-    ) {
+    public void setPosition(long positionMs) {
         mainHandler.post(() -> {
-
             if (player == null) {
                 return;
             }
 
-            player.setPosition(
-                    positionMs
+            player.setPosition(positionMs);
+
+            android.util.Log.d(
+                    "AuraMedia",
+                    "Posición recibida: "
+                            + positionMs
+                            + " ms"
+                            + " / duración: "
+                            + player.getDurationMs()
+                            + " ms"
             );
 
-            /*
-             * Como máximo una actualización por segundo.
-             */
             updateNotification();
         });
     }

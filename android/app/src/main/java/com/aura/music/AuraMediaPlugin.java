@@ -1,5 +1,4 @@
-
-        package com.aura.music;
+package com.aura.music;
 
 import android.content.Context;
 import android.content.Intent;
@@ -60,9 +59,21 @@ public class AuraMediaPlugin extends Plugin {
         String album = call.getString("album");
         String artworkUrl = call.getString("artworkUrl");
 
-        long durationMs = call.getLong(
+        Double durationValue = call.getDouble(
                 "durationMs",
-                0L
+                0.0
+        );
+
+        long durationMs =
+                durationValue != null
+                        ? Math.round(durationValue)
+                        : 0L;
+
+        Log.d(
+                "AuraMedia",
+                "setTrack duration recibido: "
+                        + durationMs
+                        + " ms"
         );
 
         AuraMediaService service =
@@ -113,9 +124,21 @@ public class AuraMediaPlugin extends Plugin {
 
     @PluginMethod
     public void setPosition(PluginCall call) {
-        long positionMs = call.getLong(
+        Double positionValue = call.getDouble(
                 "positionMs",
-                0L
+                0.0
+        );
+
+        long positionMs =
+                positionValue != null
+                        ? Math.round(positionValue)
+                        : 0L;
+
+        Log.d(
+                "AuraMedia",
+                "setPosition recibido: "
+                        + positionMs
+                        + " ms"
         );
 
         AuraMediaService service =
@@ -135,9 +158,21 @@ public class AuraMediaPlugin extends Plugin {
 
     @PluginMethod
     public void setDuration(PluginCall call) {
-        long durationMs = call.getLong(
+        Double durationValue = call.getDouble(
                 "durationMs",
-                0L
+                0.0
+        );
+
+        long durationMs =
+                durationValue != null
+                        ? Math.round(durationValue)
+                        : 0L;
+
+        Log.d(
+                "AuraMedia",
+                "setDuration recibido: "
+                        + durationMs
+                        + " ms"
         );
 
         AuraMediaService service =
@@ -208,13 +243,6 @@ public class AuraMediaPlugin extends Plugin {
             return;
         }
 
-        /*
-         * Aura solo tiene ON/OFF.
-         *
-         * Cuando está activado usamos REPEAT_MODE_ONE
-         * para que la notificación muestre el icono de
-         * repetición activa.
-         */
         int repeatMode =
                 enabled
                         ? Player.REPEAT_MODE_ONE
@@ -341,4 +369,3 @@ public class AuraMediaPlugin extends Plugin {
         );
     }
 }
-

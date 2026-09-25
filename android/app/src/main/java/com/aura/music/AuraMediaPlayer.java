@@ -76,11 +76,16 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         }
 
         if (artist != null && !artist.isEmpty()) {
-            metadataBuilder.setArtist(artist);
-        }
+            String artistText = artist;
 
-        if (album != null && !album.isEmpty()) {
-            metadataBuilder.setAlbumTitle(album);
+            if (album != null && !album.isEmpty()) {
+                artistText =
+                        artist
+                                + "   -   "
+                                + album;
+            }
+
+            metadataBuilder.setArtist(artistText);
         }
 
         if (artworkUrl != null && !artworkUrl.isEmpty()) {
@@ -123,28 +128,31 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         invalidateState();
     }
 
-    public void setPosition(
-            long positionMs
-    ) {
+    public void setPosition(long positionMs) {
+        android.util.Log.d(
+                "AuraMedia",
+                "PLAYER setPosition ENTRADA: " + positionMs
+        );
+
         if (durationMs > 0) {
-
-            currentPositionMs =
-                    Math.max(
-                            0,
-                            Math.min(
-                                    positionMs,
-                                    durationMs
-                            )
-                    );
-
+            currentPositionMs = Math.max(
+                    0,
+                    Math.min(positionMs, durationMs)
+            );
         } else {
-
-            currentPositionMs =
-                    Math.max(
-                            0,
-                            positionMs
-                    );
+            currentPositionMs = Math.max(
+                    0,
+                    positionMs
+            );
         }
+
+        android.util.Log.d(
+                "AuraMedia",
+                "PLAYER currentPositionMs DESPUES: "
+                        + currentPositionMs
+                        + " / durationMs: "
+                        + durationMs
+        );
 
         invalidateState();
     }
