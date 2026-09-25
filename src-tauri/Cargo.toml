@@ -25,3 +25,16 @@ tauri = { version = "2.11.3" }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 
+# Solo se usa en Windows para el thumbbar de la barra de tareas
+# (los 3 botones de play/pause/siguiente/anterior en el preview de la
+# ventana, como hace Tidal).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Controls",
+] }
+

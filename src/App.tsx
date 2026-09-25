@@ -42,6 +42,9 @@ const LazySocialSidebar = lazy(() => import("./hooks/SocialSidebar").then(m => (
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSocketLogic } from "./hooks/useSocketLogic";
 import { AuthForm } from "./hooks/AuthSection";
+import { useMediaSession } from "./hooks/useMediaSession";
+import { useWindowsThumbbar } from "./hooks/useWindowsThumbbar";
+import { prefetchAudio } from "./utils/audioCache";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -1191,6 +1194,36 @@ useEffect(() => {
     handlePlaySong(previousSong, false, 0, true);
   };
 
+  // Precarga en segundo plano de la SIGUIENTE canción de la cola en cuanto
+  // empieza a sonar la actual (mismo patrón que Spotify/Tidal), para que el
+  // salto de pista sea instantáneo y sobreviva a cortes de conexión. Si el
+  // SW aún no la ha terminado de cachear cuando el usuario pulsa "siguiente",
+  // simplemente se reproduce en streaming normal — no bloquea nada.
+  useEffect(() => {
+    if (!currentSong) return;
+
+    const pool = socketObj.isShuffle
+      ? socketObj.shuffledQueue
+      : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
+
+    if (pool.length < 2) return;
+
+    const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
+    if (currentIndex === -1) return;
+
+    const nextSong = pool[(currentIndex + 1) % pool.length];
+    if (!nextSong || nextSong.id === currentSong.id) return;
+
+    let cancelled = false;
+    resolveFileUrl(nextSong.audioUrl).then((url) => {
+      if (!cancelled) prefetchAudio(url);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSong?.id, activeQueue, socketObj.isShuffle, socketObj.shuffledQueue]);
+
   const toggleShuffle = (forcedState?: boolean) => {
     const nextShuffleState =
       forcedState !== undefined
@@ -1597,6 +1630,36 @@ useEffect(() => {
 
   const currentThemeConfig = THEMES.find(t => t.id === activeTheme) || THEMES[0];
   const getThemeBg = () => activeTheme === 'light' ? '#ffffff' : '#050505';
+
+  // Controles de transporte del sistema para web/escritorio (auriculares,
+  // teclas multimedia, SMTC de Windows). En Android nativo se desactiva
+  // porque AuraMedia ya cubre lo mismo de forma nativa.
+  useMediaSession({
+    currentSong,
+    isPlaying,
+    duration: audioObj.duration,
+    getCurrentTime: audioObj.getCurrentTime,
+    subscribeToTime: audioObj.subscribeToTime,
+    setIsPlaying,
+    onNext: handleNext,
+    onPrevious: handlePrevious,
+    onSeekTo: (seconds) => {
+      if (audioObj.audioRef.current) {
+        audioObj.audioRef.current.currentTime = seconds;
+      }
+    },
+    isNativePlatform: Capacitor.isNativePlatform(),
+  });
+
+  // Los 3 botones del thumbnail toolbar en el preview de la ventana de
+  // Windows (ver src-tauri/src/thumbbar.rs). No hace nada fuera de Tauri.
+  useWindowsThumbbar({
+    isDesktop,
+    isPlaying,
+    onNext: handleNext,
+    onPrevious: handlePrevious,
+    onTogglePlay: () => setIsPlaying(!isPlaying),
+  });
 
   useEffect(() => {
   if (!Capacitor.isNativePlatform()) {
