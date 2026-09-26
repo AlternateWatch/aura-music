@@ -19,9 +19,9 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows::Win32::UI::Controls::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::Shell::{
-    ITaskbarList3, TaskbarList, THBF_ENABLED, THB_FLAGS, THB_ICON, THB_TOOLTIP, THUMBBUTTON,
+    DefSubclassProc, ITaskbarList3, SetWindowSubclass, TaskbarList, THBF_ENABLED, THB_FLAGS,
+    THB_ICON, THB_TOOLTIP, THUMBBUTTON,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     LoadImageW, HICON, IMAGE_ICON, LR_LOADFROMFILE, WM_COMMAND,
