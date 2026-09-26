@@ -5,12 +5,10 @@ use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use std::sync::Mutex;
 use tauri::State;
 
-// Estructura para mantener el cliente de Discord seguro en segundo plano
 struct DiscordState {
     client: Mutex<Option<DiscordIpcClient>>,
 }
 
-// Comando de Tauri que recibe la info desde React y la manda a Discord
 #[tauri::command]
 fn update_discord_rpc(
     state: State<'_, DiscordState>,
@@ -38,7 +36,7 @@ fn update_discord_rpc(
 }
 
 fn main() {
-    // Intentamos conectar con Discord al arrancar la app de escritorio
+    // Manejamos el Result que devuelve DiscordIpcClient::new en la v1.1.0
     let discord_client = match DiscordIpcClient::new("1204134988775440405") {
         Ok(mut client) => {
             if client.connect().is_ok() {
