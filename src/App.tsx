@@ -461,6 +461,26 @@ useEffect(() => {
   };
 }, []);
 
+// EFECTO PARA DISCORD RICH PRESENCE (Solo en Desktop / Tauri)
+useEffect(() => {
+  if (!isDesktop) return;
+
+  const updateDiscord = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('update_discord_rpc', {
+        title: currentSong ? currentSong.title : '',
+        artist: currentSong ? currentSong.artist : '',
+        isPlaying: isPlaying,
+      });
+    } catch (err) {
+      console.error("Error actualizando Discord RPC:", err);
+    }
+  };
+
+  updateDiscord();
+}, [isDesktop, currentSong?.id, isPlaying]);
+
 
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) return;
@@ -2075,16 +2095,48 @@ useEffect(() => {
             </div>
             <div className="flex items-center gap-3 md:gap-6">
               {token ? (
-                   <div className="flex items-center gap-2 md:gap-4">
-  <button
-    onClick={() => setShowUpload(true)}
-    className="bg-brand-primary text-black px-3 md:px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"
-  >
-    <Plus size={14}/>
-    <span className="hidden xs:inline">Upload</span>
-  </button>
+                <div className="flex items-center gap-4 md:gap-5">
+                  {/* 1. UPLOAD BUTTON */}
+                  <button
+                    onClick={() => setShowUpload(true)}
+                    className="bg-brand-primary text-black px-3 md:px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-2 hover:scale-105 transition-all cursor-pointer"
+                  >
+                    <Plus size={14}/>
+                    <span className="hidden xs:inline">Upload</span>
+                  </button>
 
-  <button
+                  {/* 2. LOGOUT BUTTON (Hidden on Mobile) */}
+                  <button
+                    onClick={handleLogout}
+                    className={`hidden md:flex transition-colors cursor-pointer shrink-0 ${
+                      activeTheme === 'light'
+                        ? 'text-black/50 hover:text-red-500'
+                        : 'text-white/40 hover:text-red-400'
+                    }`}
+                    title="Log out"
+                  >
+                    <LogOut size={18} strokeWidth={2} />
+                  </button>
+
+                  {/* 3. PROFILE PICTURE BUTTON (Hidden on Mobile) */}
+                  <button
+                    onClick={() => setIsProfileOpen(true)}
+                    className={`hidden md:flex transition-colors cursor-pointer shrink-0 ${
+                      activeTheme === 'light'
+                        ? 'text-black/50 hover:text-brand-primary'
+                        : 'text-white/40 hover:text-brand-primary'
+                    }`}
+                    title="Profile"
+                  >
+                    {resolvedProfilePic ? (
+                      <img src={resolvedProfilePic} alt="Profile" className="w-7 h-7 rounded-full object-cover hover:scale-105 transition-transform" />
+                    ) : (
+                      <User size={18} strokeWidth={2} />
+                    )}
+                  </button>
+
+                  {/* MOBILE MENU TOGGLE */}
+                  <button
     onClick={() => setIsMobileMenuOpen(prev => !prev)}
     aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
     aria-expanded={isMobileMenuOpen}
@@ -2541,7 +2593,13 @@ transition={{
       <div className="flex flex-1 min-h-0 overflow-hidden z-10">
         <AnimatePresence>
           {!isFocusMode && (
-            <motion.aside initial={{ x: -300 }} animate={{ x: 0 }} exit={{ x: -300 }} className={`w-64 border-r border-white/5 hidden md:flex flex-col shrink-0 p-8`}>
+            <motion.aside initial={{ x: -300 }} animate={{ x: 0 }} exit={{ x: -300 }} className={`w-64 border-r border-white/5 hidden md:flex flex-col shrink-0 px-8 pb-8 ${
+              isDesktop 
+                ? 'pt-[7.5rem]' 
+                : Capacitor.isNativePlatform() 
+                  ? 'pt-8' 
+                  : 'pt-[6.5rem]'
+           }`}>
                 <div className="flex-1 overflow-y-auto flex flex-col gap-10 scrollbar-hide">
                     <div>
                       <div className="flex items-center justify-between mb-6"><h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3><Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} /></div>
@@ -2573,8 +2631,14 @@ transition={{
 
        <main
   ref={mainRef}
-  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 ${isDesktop ? 'pt-[calc(6.5rem+env(safe-area-inset-top))]' : 'pt-[calc(5.5rem+env(safe-area-inset-top))]'} flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
-    isFocusMode ? 'items-center justify-center pt-0' : ''
+  className={`flex-1 min-h-0 overflow-y-auto px-4 md:px-10 ${
+    isDesktop 
+      ? 'pt-[calc(9rem+env(safe-area-inset-top))]' 
+      : Capacitor.isNativePlatform()
+        ? 'pt-[calc(5.5rem+env(safe-area-inset-top))]'
+        : 'pt-[calc(8rem+env(safe-area-inset-top))]'
+  } flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
+    isFocusMode ? 'items-center justify-center !pt-0' : ''
   }`}
 >
             {/* VISTA ESPECIAL: PERFIL DE ARTISTA */}
