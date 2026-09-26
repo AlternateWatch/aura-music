@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, FormEvent, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
@@ -15,6 +16,9 @@ MessageCircle,
 Settings,
 User,
 X,
+Minus,
+Square,
+Copy,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -66,6 +70,48 @@ export default function App() {
     Boolean((window as any).__TAURI_INTERNALS__)
   );
 
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const win = getCurrentWindow();
+
+        const syncMaximized = async () => {
+          try {
+            const maxed = await win.isMaximized();
+            if (!cancelled) setIsWindowMaximized(maxed);
+          } catch {}
+        };
+
+        await syncMaximized();
+
+        // Detecta también cuando se maximiza/restaura desde fuera de
+        // nuestros botones: doble clic en la zona de arrastre, Snap de
+        // Windows, atajos de teclado, etc.
+        const stop = await win.onResized(() => {
+          syncMaximized();
+        });
+
+        if (cancelled) stop();
+        else unlisten = stop;
+      } catch {
+        // No estamos en Tauri (o la API no está disponible en esta
+        // plataforma): el botón se queda con el icono por defecto.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [isDesktop]);
+
   const handleMinimize = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
@@ -84,12 +130,17 @@ export default function App() {
     if (e) e.stopPropagation();
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().toggleMaximize();
+      const win = getCurrentWindow();
+      await win.toggleMaximize();
+      try {
+        setIsWindowMaximized(await win.isMaximized());
+      } catch {}
       return;
     } catch (err) {}
     try {
       if ((window as any).__TAURI_INTERNALS__?.invoke) {
         await (window as any).__TAURI_INTERNALS__.invoke('plugin:window|toggle_maximize');
+        setIsWindowMaximized((prev) => !prev);
       }
     } catch (err) {}
   };
@@ -1879,12 +1930,12 @@ useEffect(() => {
     
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
       {/* Barra superior de escritorio integrada con el fondo */}
-      {isDesktop && (
+      {isDesktop && createPortal(
         <div 
-          className={`h-8 border-b flex items-center justify-between pl-3 pr-0 select-none z-50 shrink-0 backdrop-blur-md transition-colors duration-1000 ${
+          className={`h-8 border-b flex items-center justify-between pl-3 pr-0 select-none z-50 shrink-0 backdrop-blur-md transition-colors duration-1000 fixed top-0 left-0 right-0 ${
             activeTheme === 'light' 
-              ? 'border-black/5 bg-white/40 text-black' 
-              : 'border-white/5 bg-black/20 text-white'
+              ? 'border-black/5 bg-white/80 text-black' 
+              : 'border-white/10 bg-black/70 text-white'
           }`}
         >
           {/* ZONA DE ARRASTRE */}
@@ -1898,31 +1949,48 @@ useEffect(() => {
             <button 
               type="button" 
               onClick={handleMinimize} 
+              aria-label="Minimizar"
+              title="Minimizar"
               className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer outline-none ${
                 activeTheme === 'light' ? 'hover:bg-black/5 text-black/50 hover:text-black' : 'hover:bg-white/10 text-white/50 hover:text-white'
               }`}
             >
-              ─
+              <Minus size={14} strokeWidth={1.75} />
             </button>
             <button 
               type="button" 
               onClick={handleMaximize} 
-              className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer text-xs outline-none ${
+              aria-label={isWindowMaximized ? "Restaurar" : "Maximizar"}
+              title={isWindowMaximized ? "Restaurar" : "Maximizar"}
+              className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer outline-none ${
                 activeTheme === 'light' ? 'hover:bg-black/5 text-black/50 hover:text-black' : 'hover:bg-white/10 text-white/50 hover:text-white'
               }`}
             >
-              □
+              {isWindowMaximized ? (
+                <Copy size={12} strokeWidth={1.75} className="-scale-x-100" />
+              ) : (
+                <Square size={11} strokeWidth={1.75} />
+              )}
             </button>
             <button 
               type="button" 
               onClick={handleClose} 
-              className="w-9 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-600/90 transition-colors cursor-pointer outline-none"
+              aria-label="Cerrar"
+              title="Cerrar"
+              className={`w-9 h-8 flex items-center justify-center transition-colors cursor-pointer outline-none ${
+                activeTheme === 'light' ? 'text-black/50 hover:text-white hover:bg-red-600' : 'text-white/50 hover:text-white hover:bg-red-600/90'
+              }`}
             >
-              ✕
+              <X size={14} strokeWidth={1.75} />
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
+
+      {/* Reserva el hueco de la barra de escritorio en el flujo normal,
+          ya que ahora la barra en sí vive en un portal fuera de aquí */}
+      {isDesktop && <div className="h-8 shrink-0" />}
 
       {/* Hidden Minigame Engine */}
       <audio 
@@ -1979,10 +2047,12 @@ useEffect(() => {
     duration: 0.25,
     ease: "easeOut",
   }}
-  className={`fixed top-0 left-0 right-0 min-h-[5.5rem] flex items-center justify-between px-4 md:px-8 pt-[env(safe-area-inset-top)] z-20 backdrop-blur-md transition-all duration-1000 md:border-b ${
+  className={`fixed left-0 right-0 flex items-center justify-between px-4 md:px-8 pt-[env(safe-area-inset-top)] z-20 backdrop-blur-md transition-all duration-1000 md:border-b ${
+    isDesktop ? 'top-8 min-h-[4.5rem]' : 'top-0 min-h-[5.5rem]'
+  } ${
     activeTheme === 'light'
-      ? 'md:border-black/5 bg-white'
-      : 'md:border-white/10 bg-black'
+      ? 'md:border-black/5 bg-white/60'
+      : 'md:border-white/10 bg-black/40'
   }`}
 >
             <div className="flex items-center gap-4 md:gap-12 flex-1">
@@ -2032,8 +2102,6 @@ useEffect(() => {
               ) : ( <button onClick={() => setIsAuthModalOpen(true)} className="px-5 py-2 rounded-full text-[10px] font-bold uppercase bg-white text-black hover:scale-105 transition-all cursor-pointer">Sign In</button> )}
             </div>
           </motion.nav>
-          
-          
         )}
 <AnimatePresence>
   {isMobileMenuOpen && (
@@ -2505,7 +2573,7 @@ transition={{
 
        <main
   ref={mainRef}
-  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 pt-[calc(5.5rem+env(safe-area-inset-top))] flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
+  className={`flex-1 min-h-0 overflow-y-auto p-4 md:p-10 ${isDesktop ? 'pt-[calc(6.5rem+env(safe-area-inset-top))]' : 'pt-[calc(5.5rem+env(safe-area-inset-top))]'} flex flex-col gap-8 md:gap-12 pb-8 scrollbar-hide transition-all duration-700 ${
     isFocusMode ? 'items-center justify-center pt-0' : ''
   }`}
 >

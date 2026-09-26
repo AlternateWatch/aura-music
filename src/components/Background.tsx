@@ -15,7 +15,7 @@ export const Background: React.FC<BackgroundProps> = ({ color = '#050505', dynam
       <div 
         className="absolute inset-0 opacity-40 transition-all duration-1000"
         style={{
-          background: `radial-gradient(circle at 50% -20%, ${dynamicColor || '#6366f1'} 0%, transparent 50%),
+          background: `radial-gradient(circle at 50% 0%, ${dynamicColor || '#6366f1'} 0%, transparent 60%),
                        radial-gradient(circle at 0% 100%, ${dynamicColor || '#6366f1'} 0%, transparent 40%),
                        radial-gradient(circle at 100% 100%, ${dynamicColor || '#6366f1'} 0%, transparent 40%)`
         }}
