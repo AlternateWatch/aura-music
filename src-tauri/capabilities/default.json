@@ -12,6 +12,8 @@
   },
   "permissions": [
     "core:default",
+    "allow-update-discord-rpc",
+    "allow-thumbbar-set-playing",
     "core:window:allow-close",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
