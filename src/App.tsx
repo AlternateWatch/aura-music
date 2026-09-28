@@ -465,13 +465,25 @@ useEffect(() => {
 useEffect(() => {
   if (!isDesktop) return;
 
+  const audio = audioObj.audioRef.current;
+
   const updateDiscord = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+
+      // Discord necesita una URL absoluta para la carátula
+      let cover = currentSong?.coverUrl || '';
+      if (cover.startsWith('/')) cover = window.location.origin + cover;
+
+      const dur = audioObj.duration;
       await invoke('update_discord_rpc', {
-        title: currentSong ? currentSong.title : '',
-        artist: currentSong ? currentSong.artist : '',
-        isPlaying: isPlaying,
+        title: currentSong?.title ?? '',
+        artist: currentSong?.artist ?? '',
+        album: currentSong?.album ?? '',
+        coverUrl: cover,
+        positionMs: Math.round((audioObj.getCurrentTime() || 0) * 1000),
+        durationMs: Number.isFinite(dur) && dur > 0 ? Math.round(dur * 1000) : 0,
+        isPlaying,
       });
     } catch (err) {
       console.error("Error actualizando Discord RPC:", err);
@@ -479,7 +491,10 @@ useEffect(() => {
   };
 
   updateDiscord();
-}, [isDesktop, currentSong?.id, isPlaying]);
+  // Si el usuario salta a otro punto de la canción, se recalcula la barra
+  audio?.addEventListener('seeked', updateDiscord);
+  return () => audio?.removeEventListener('seeked', updateDiscord);
+}, [isDesktop, currentSong?.id, currentSong?.coverUrl, isPlaying, audioObj.duration]);
 
 
 useEffect(() => {
