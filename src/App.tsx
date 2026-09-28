@@ -386,7 +386,7 @@ useEffect(() => {
 
   // --- LOGIC MODULES ---
   const audioObj = useAudioEngine(currentSong, isPlaying, volume, isNormalizerEnabled, setIsPlaying, resolvedAudioUrl);
-  const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef.current, setActiveQueue);
+  const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue);
   const mainRef = useRef<HTMLElement | null>(null);
   
   useEffect(() => { handlePlaySongRef.current = handlePlaySong; });
@@ -626,7 +626,7 @@ useEffect(() => {
     if (!socketObj.currentSession || !isPlaying || !currentSong) return;
     const heartbeat = setInterval(() => {
         socketObj.emitCommand('sync-time', { position: audioObj.getCurrentTime(), songId: currentSong.id });
-    }, 10000); 
+    }, 5000); 
     return () => clearInterval(heartbeat);
   }, [socketObj.currentSession, isPlaying, currentSong?.id]);
 
@@ -728,19 +728,55 @@ useEffect(() => {
   };
   const handleLogout = () => { localStorage.clear(); window.location.reload(); };
 
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSessionNotice = (msg: string) => {
+    setSessionNotice(msg);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setSessionNotice(null), 5000);
+  };
+  const joinErrorMessage = (code: string, error?: string) => {
+    switch (error) {
+      case 'SESSION_NOT_FOUND': return `La sesión ${code} no existe o ya se cerró.`;
+      case 'INVALID_CODE': return 'El código de sesión no es válido.';
+      case 'TIMEOUT': return 'No se pudo conectar con el servidor. Inténtalo de nuevo.';
+      default: return 'No se pudo unir a la sesión.';
+    }
+  };
+
   const handleStartSession = async () => {
     const activeToken = token || localStorage.getItem('aura_token');
-    const res = await fetch(`${API_BASE}/api/sessions/create`, { method: 'POST', headers: { 'Authorization': `Bearer ${activeToken}` } });
-    const data = await res.json();
-    if (res.ok) { socketObj.setCurrentSession(data.code); socketObj.socketRef.current?.emit('join-session', { code: data.code, user }); }
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/create`, { method: 'POST', headers: { 'Authorization': `Bearer ${activeToken}` } });
+      const data = await res.json();
+      if (!res.ok) return showSessionNotice('No se pudo crear la sesión.');
+      const result = await socketObj.joinSession(data.code, { asLeader: true });
+      if (!result.ok) showSessionNotice(joinErrorMessage(data.code, result.error));
+    } catch (e) {
+      showSessionNotice('No se pudo crear la sesión.');
+    }
   };
-  const handleJoinSession = (code: string) => { socketObj.setCurrentSession(code); socketObj.socketRef.current?.emit('join-session', { code, user }); };
+  const handleJoinSession = async (rawCode: string) => {
+    const code = (rawCode || '').trim().toUpperCase();
+    const result = await socketObj.joinSession(code);
+    if (!result.ok) {
+      showSessionNotice(joinErrorMessage(code, result.error));
+    } else if ((result.members ?? 1) <= 1) {
+      showSessionNotice(`Te has unido a ${code}, pero ahora mismo no hay nadie más conectado.`);
+    }
+    return result;
+  };
   // Unirse a una sesión desde un enlace ?join=CODIGO (botón de Discord)
+  const joinFromUrlDoneRef = useRef(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('join');
-    if (!code || !user || !socketObj.socketRef.current) return;
-    handleJoinSession(code.toUpperCase());
+    if (!code || joinFromUrlDoneRef.current) return;
+    // Hace falta estar logueado: se conserva el ?join= y se pide iniciar sesión
+    // (tras el login la página se recarga y el enlace sigue ahí).
+    if (!user) { setIsAuthModalOpen(true); return; }
+    joinFromUrlDoneRef.current = true;
+    handleJoinSession(code);
     params.delete('join');
     const qs = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
@@ -1105,7 +1141,11 @@ useEffect(() => {
     if (currentSong?.id === song.id) {
       const nextState = !isPlaying;
       setIsPlaying(nextState);
-      if (!fromSocket) socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+      if (!fromSocket) {
+        socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+        // Al reanudar dentro de una sesión (p. ej. tras un autoplay bloqueado) nos ponemos al día.
+        if (nextState && socketObj.currentSession) socketObj.resyncSession();
+      }
       return;
     }
 
@@ -1198,9 +1238,8 @@ useEffect(() => {
       }).catch(error => console.error("ERROR GUARDANDO LAST TRACK EN SERVIDOR:", error));
     }
 
-    if (initialPos > 0 && audioObj.audioRef.current) {
-      audioObj.audioRef.current.currentTime = initialPos;
-    }
+    // La posición se aplica cuando la nueva canción termine de cargar (ver useAudioEngine).
+    audioObj.pendingSeekRef.current = initialPos > 0 ? initialPos : null;
 
     if (!fromSocket) {
       socketObj.emitCommand('play-track', {
@@ -1393,6 +1432,18 @@ useEffect(() => {
     socketObj.emitCommand('toggle-loop', {
       isLoop: nextLoop
     });
+  };
+
+  // Al terminar una canción dentro de una sesión solo avanza el líder; los demás
+  // esperan su play-track (si no llega en 3 s, avanzan ellos para no quedarse parados).
+  const handleNextRef = useRef<() => void>(() => {});
+  handleNextRef.current = handleNext;
+  const handleSongEnded = () => {
+    if (!socketObj.currentSession || socketObj.isLeader()) return handleNext();
+    const endedId = socketObj.getTrackId();
+    setTimeout(() => {
+      if (socketObj.getTrackId() === endedId) handleNextRef.current();
+    }, 3000);
   };
 
   const handlePlayNext = (song: Song) => {
@@ -3059,7 +3110,7 @@ transition={{
       }).catch(() => {});
     }
   }}
-  onEnded={handleNext}
+  onEnded={handleSongEnded}
   crossOrigin="anonymous"
 />
       
@@ -3166,7 +3217,8 @@ getCurrentTime={audioObj.getCurrentTime}
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isPersonalizationOpen && <LazyPersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
-      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => { socketObj.setCurrentSession(null); socketObj.setSessionMessages([]); }} /> )}</AnimatePresence></Suspense>
+      <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} /> )}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 

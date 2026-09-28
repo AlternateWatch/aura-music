@@ -766,10 +766,127 @@ app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: an
 });
 app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => { const c = Math.random().toString(36).substring(2, 8).toUpperCase(); await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, req.user.userId]); res.json({ code: c }); });
 
+// --- ESTADO DE SESIONES (en memoria) ---
+// Guarda lo último que se sabe de cada sesión para poder ponerle al día a quien
+// entra a mitad de una canción (p. ej. desde el botón de Discord).
+type SessionState = {
+    song: any | null;
+    songId: string | null;
+    queue: any[];
+    isPlaying: boolean;
+    position: number;      // segundos, válida en el instante updatedAt
+    updatedAt: number;     // Date.now() del servidor (así no depende del reloj de los clientes)
+    isShuffle: boolean;
+    shuffledQueue: any[];
+    isLoop: boolean;
+};
+const sessionStates = new Map<string, SessionState>();
+
+const getSessionState = (code: string): SessionState => {
+    let st = sessionStates.get(code);
+    if (!st) {
+        st = { song: null, songId: null, queue: [], isPlaying: false, position: 0, updatedAt: Date.now(), isShuffle: false, shuffledQueue: [], isLoop: false };
+        sessionStates.set(code, st);
+    }
+    return st;
+};
+
+const livePosition = (st: SessionState) =>
+    st.isPlaying ? st.position + (Date.now() - st.updatedAt) / 1000 : st.position;
+
+const snapshot = (code: string) => {
+    const st = sessionStates.get(code);
+    return st ? { ...st, position: livePosition(st) } : null;
+};
+
+const trackCommand = (code: string, command: string, data: any) => {
+    const st = getSessionState(code);
+    const now = Date.now();
+    switch (command) {
+        case 'play-track': {
+            if (Array.isArray(data?.queue)) st.queue = data.queue;
+            if (data?.song?.id) {
+                const sameSong = st.songId === data.song.id;
+                st.song = data.song;
+                st.songId = data.song.id;
+                if (!sameSong) st.isPlaying = true;
+                st.position = Number(data.position) || 0;
+                st.updatedAt = now;
+            }
+            break;
+        }
+        case 'sync-time':
+            if (data?.songId && data.songId === st.songId) {
+                st.position = Number(data.position) || 0;
+                st.updatedAt = now;
+            }
+            break;
+        case 'seek':
+            st.position = Number(data?.time) || 0;
+            st.updatedAt = now;
+            break;
+        case 'toggle-play':
+            st.position = livePosition(st);
+            st.isPlaying = !!data?.isPlaying;
+            st.updatedAt = now;
+            break;
+        case 'toggle-shuffle':
+            st.isShuffle = !!data?.isShuffle;
+            st.shuffledQueue = Array.isArray(data?.shuffledQueue) ? data.shuffledQueue : [];
+            break;
+        case 'toggle-loop':
+            st.isLoop = !!data?.isLoop;
+            break;
+    }
+};
+
+// Limpieza de sesiones que llevan horas sin actividad y sin nadie dentro.
+setInterval(() => {
+    const limit = Date.now() - 6 * 60 * 60 * 1000;
+    for (const [code, st] of sessionStates) {
+        if (st.updatedAt < limit && !io.sockets.adapter.rooms.get(code)) sessionStates.delete(code);
+    }
+}, 30 * 60 * 1000);
+
 io.on('connection', (socket) => {
     socket.on('identify', (uid) => { socket.join(`user_${uid}`); });
-    socket.on('join-session', async ({ code, user }) => { socket.join(code); io.to(code).emit('user-joined', user); });
-    socket.on('send-command', ({ code, command, data }) => { socket.to(code).emit('receive-command', { command, data }); });
+
+    // Unirse a una sesión. Valida que el código exista y responde con un "ack"
+    // que incluye el estado actual (canción, posición, cola...) para sincronizar.
+    socket.on('join-session', async (payload: any, ack?: (res: any) => void) => {
+        const reply = typeof ack === 'function' ? ack : () => {};
+        try {
+            const code = String(payload?.code ?? '').trim().toUpperCase();
+            if (!/^[A-Z0-9]{4,10}$/.test(code)) return reply({ ok: false, error: 'INVALID_CODE' });
+
+            const [rows]: any = await pool.execute('SELECT code FROM sessions WHERE code = ?', [code]);
+            if (!rows.length) return reply({ ok: false, error: 'SESSION_NOT_FOUND' });
+
+            socket.join(code);
+            const members = io.sockets.adapter.rooms.get(code)?.size ?? 1;
+            io.to(code).emit('user-joined', payload?.user);
+            reply({ ok: true, code, members, state: snapshot(code) });
+        } catch (err) {
+            console.error('join-session error:', err);
+            reply({ ok: false, error: 'SERVER_ERROR' });
+        }
+    });
+
+    socket.on('leave-session', ({ code }: any = {}) => {
+        if (code) socket.leave(String(code).toUpperCase());
+    });
+
+    // Re-sincronizar bajo demanda (p. ej. al darle a play tras un autoplay bloqueado).
+    socket.on('get-session-state', ({ code }: any = {}, ack?: (res: any) => void) => {
+        const c = String(code ?? '').toUpperCase();
+        if (typeof ack === 'function') ack({ ok: socket.rooms.has(c), state: snapshot(c) });
+    });
+
+    socket.on('send-command', ({ code, command, data }) => {
+        if (!code || !socket.rooms.has(code)) return; // solo miembros de la sala
+        trackCommand(code, command, data);
+        socket.to(code).emit('receive-command', { command, data });
+    });
     socket.on('send-chat', ({ code, user, message }) => { io.to(code).emit('receive-chat', { user, message, time: new Date() }); });
     socket.on('send-private-message', ({ sender, receiverId, message }) => { io.to(`user_${receiverId}`).emit('receive-private-message', { sender_id: sender.userId, receiver_id: receiverId, message, created_at: new Date() }); });
     socket.on('send-session-invite', ({ senderName, receiverId, code }) => { io.to(`user_${receiverId}`).emit('receive-session-invite', { from: senderName, code }); });

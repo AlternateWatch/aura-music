@@ -29,6 +29,9 @@ export function useAudioEngine(
 
 
   const currentTimeRef = useRef(0);
+  // Posición (s) a aplicar cuando termine de cargar la próxima canción.
+  // Fijar audio.currentTime antes de cambiar el src no sirve: load() lo resetea a 0.
+  const pendingSeekRef = useRef<number | null>(null);
   const timeListenersRef = useRef(new Set<() => void>());
 
   const [duration, setDuration] = useState(0);
@@ -116,7 +119,12 @@ export function useAudioEngine(
         try {
           await audio.play();
         } catch (e: any) {
-          if (e?.name !== "AbortError") {
+          if (e?.name === "NotAllowedError") {
+            // El navegador bloquea el autoplay hasta que el usuario interactúa
+            // (p. ej. al entrar desde un enlace). Mostramos pausa en vez de "sonando".
+            console.warn("Autoplay bloqueado: hace falta pulsar play");
+            setIsPlaying(false);
+          } else if (e?.name !== "AbortError") {
             console.error("Playback failed", e);
           }
         }
@@ -136,6 +144,10 @@ export function useAudioEngine(
       audio.load();
 
       canPlayHandler = () => {
+        if (pendingSeekRef.current !== null) {
+          try { audio.currentTime = pendingSeekRef.current; } catch (e) {}
+          pendingSeekRef.current = null;
+        }
         startPlayback();
 
         if (canPlayHandler) {
@@ -178,6 +190,7 @@ export function useAudioEngine(
   return {
     audioRef,
     analyserRef,
+    pendingSeekRef,
 
     
     currentTimeRef,
