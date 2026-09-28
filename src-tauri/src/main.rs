@@ -36,7 +36,7 @@ fn update_discord_rpc(
 }
 
 fn main() {
-    // Manejamos el Result que devuelve DiscordIpcClient::new en la v1.1.0
+    // DiscordIpcClient::new devuelve un Result en la versión 1.1.0, por eso usamos ? o un match seguro
     let discord_client = match DiscordIpcClient::new("1204134988775440405") {
         Ok(mut client) => {
             if client.connect().is_ok() {
