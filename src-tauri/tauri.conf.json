@@ -44,7 +44,7 @@
 
      "plugins": {
      "updater": {
-       "pubkey": "PEGA_AQUI_LA_CLAVE_PUBLICA_DEL_PASO_2",
+       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNBNEQ0MkNGRjM2REZDRDMKUldUVC9HM3p6MEpOT3YxazI0dkhBQTc5Wmk1MXpvN0tNMGFlK2YvMVlVYUd4cnpLR1M0bTdUaXcK",
        "endpoints": [
          "https://github.com/AlternateWatch/aura-music/releases/latest/download/latest.json"
        ],
