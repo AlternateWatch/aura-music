@@ -483,6 +483,7 @@ useEffect(() => {
         coverUrl: cover,
         positionMs: Math.round((audioObj.getCurrentTime() || 0) * 1000),
         durationMs: Number.isFinite(dur) && dur > 0 ? Math.round(dur * 1000) : 0,
+        sessionCode: socketObj.currentSession ?? '',
         isPlaying,
       });
     } catch (err) {
@@ -494,7 +495,7 @@ useEffect(() => {
   // Si el usuario salta a otro punto de la canción, se recalcula la barra
   audio?.addEventListener('seeked', updateDiscord);
   return () => audio?.removeEventListener('seeked', updateDiscord);
-}, [isDesktop, currentSong?.id, currentSong?.coverUrl, isPlaying, audioObj.duration]);
+}, [isDesktop, currentSong?.id, currentSong?.coverUrl, isPlaying, audioObj.duration, socketObj.currentSession]);
 
 
 useEffect(() => {
@@ -734,6 +735,16 @@ useEffect(() => {
     if (res.ok) { socketObj.setCurrentSession(data.code); socketObj.socketRef.current?.emit('join-session', { code: data.code, user }); }
   };
   const handleJoinSession = (code: string) => { socketObj.setCurrentSession(code); socketObj.socketRef.current?.emit('join-session', { code, user }); };
+  // Unirse a una sesión desde un enlace ?join=CODIGO (botón de Discord)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('join');
+    if (!code || !user || !socketObj.socketRef.current) return;
+    handleJoinSession(code.toUpperCase());
+    params.delete('join');
+    const qs = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+  }, [user]);
   const handleSendChat = (message: string) => { if (socketObj.currentSession) socketObj.socketRef.current?.emit('send-chat', { code: socketObj.currentSession, user, message }); };
 
   // Precarga una imagen en el caché del navegador antes de que ningún <img>

@@ -50,6 +50,7 @@ struct Track<'a> {
     cover_url: &'a str,
     position_ms: u64,
     duration_ms: u64,
+    session_code: &'a str,
 }
 
 fn apply(client: &mut DiscordIpcClient, track: &Track, is_playing: bool) -> Result<(), String> {
@@ -72,12 +73,23 @@ fn apply(client: &mut DiscordIpcClient, track: &Track, is_playing: bool) -> Resu
         assets = assets.large_text(&album);
     }
 
+    // Con sesión activa: botón para unirse (abre la web con ?join=CODIGO).
+    let join_url = format!("{}/?join={}", AURA_URL, track.session_code);
+    let buttons = if track.session_code.is_empty() {
+        vec![Button::new("Escuchar en Aura", AURA_URL)]
+    } else {
+        vec![
+            Button::new("Unirse a la sesión", &join_url),
+            Button::new("Escuchar en Aura", AURA_URL),
+        ]
+    };
+
     let mut activity = Activity::new()
         .activity_type(ActivityType::Listening) // "Escuchando Aura" en vez de "Jugando a"
         .details(&details)
         .state(&state)
         .assets(assets)
-        .buttons(vec![Button::new("Escuchar en Aura", AURA_URL)]);
+        .buttons(buttons);
 
     // Barra de progreso estilo Spotify: inicio y fin en segundos (Unix).
     if track.duration_ms > 0 {
@@ -101,6 +113,7 @@ pub fn update_discord_rpc(
     cover_url: String,
     position_ms: u64,
     duration_ms: u64,
+    session_code: String,
     is_playing: bool,
 ) -> Result<(), String> {
     let track = Track {
@@ -110,6 +123,7 @@ pub fn update_discord_rpc(
         cover_url: &cover_url,
         position_ms,
         duration_ms,
+        session_code: &session_code,
     };
 
     let mut guard = state

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Aura",
-  "version": "1.1.8",
+  "version": "1.2.0",
   "identifier": "com.alternatewatch.auramusic",
   "build": {
     "frontendDist": "../dist",
@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "resources": ["icons/thumbbar/*.ico"],
     "icon": [
@@ -39,5 +40,15 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
-  }
+  },
+
+     "plugins": {
+     "updater": {
+       "pubkey": "PEGA_AQUI_LA_CLAVE_PUBLICA_DEL_PASO_2",
+       "endpoints": [
+         "https://github.com/AlternateWatch/aura-music/releases/latest/download/latest.json"
+       ],
+       "windows": { "installMode": "passive" }
+     }
+   }
 }
