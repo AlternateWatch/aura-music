@@ -2177,7 +2177,15 @@ useEffect(() => {
       )}
 
       <AnimatePresence>
-    {showSplash && (
+        {isSocialHubOpen && (
+          <Suspense fallback={null}>
+            <SocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
+          </Suspense>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSplash && (
       <motion.div
         initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
@@ -2230,7 +2238,7 @@ useEffect(() => {
                 <button onClick={() => {setShowModeration(false); setActivePlaylistId("all"); setSelectedAlbumName(null); setSelectedArtistName(null);}} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
                 {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 ${showModeration ? 'text-amber-500 border-b border-amber-500 pb-1' : ''}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
-                {token && <button onClick={() => setIsSocialOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
+                {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
                 {token && <button onClick={() => setIsWrappedOpen(true)} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Sparkles size={12} /> Wrapped</button>}
               </div>
               <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
@@ -2583,7 +2591,7 @@ transition={{
           {token && (
             <button
               onClick={() => {
-                setIsSocialOpen(true);
+                setIsSocialHubOpen(true);
                 setIsMobileMenuOpen(false);
               }}
               className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
