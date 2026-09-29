@@ -40,7 +40,7 @@ const LazyPersonalizationOverlay = lazy(() => import("./components/Personalizati
 const LazyAudioSettingsOverlay = lazy(() => import("./components/AudioSettingsOverlay").then(m => ({ default: m.AudioSettingsOverlay })));
 const LazyQueueOverlay = lazy(() => import("./components/QueueOverlay").then(m => ({ default: m.QueueOverlay })));
 const LazySessionOverlay = lazy(() => import("./components/SessionOverlay").then(m => ({ default: m.SessionOverlay })));
-const LazySocialOverlay = lazy(() => import("./components/SocialOverlay").then(m => ({ default: m.SocialOverlay })));
+const LazySocialOverlay = lazy(() => import("./components/SocialOverlay"));
 const LazyMinigameLobbyOverlay = lazy(() => import("./components/MinigameLobbyOverlay").then(m => ({ default: m.MinigameLobbyOverlay })));
 const LazyLyricsOverlay = lazy(() => import("./components/LyricsOverlay").then(m => ({ default: m.LyricsOverlay })));
 const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => ({ default: m.MusicUpload })));
@@ -2181,7 +2181,7 @@ useEffect(() => {
         {isSocialHubOpen && (
           <ErrorBoundary>
             <Suspense fallback={null}>
-              <SocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
+              <LazySocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
             </Suspense>
           </ErrorBoundary>
         )}
