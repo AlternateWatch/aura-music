@@ -79,26 +79,7 @@ fn check_for_updates(app: tauri::AppHandle) {
             }
         };
 
-        // --- DIAGNÓSTICO TEMPORAL: quitar este bloque en cuanto se compruebe que
-        // el actualizador funciona. Sin él, un fallo aquí no se ve por ningún sitio. ---
-        let result = updater.check().await;
-        if let Err(e) = &result {
-            app.dialog()
-                .message(format!("No se pudo comprobar si hay actualizaciones:\n\n{}", e))
-                .title("Fallo del actualizador (diagnóstico)")
-                .buttons(MessageDialogButtons::Ok)
-                .blocking_show();
-        }
-        if let Ok(None) = &result {
-            app.dialog()
-                .message("El actualizador ha funcionado, pero no ve ninguna versión más nueva que esta.")
-                .title("Sin actualizaciones (diagnóstico)")
-                .buttons(MessageDialogButtons::Ok)
-                .blocking_show();
-        }
-        // --- FIN DEL BLOQUE DE DIAGNÓSTICO TEMPORAL ---
-
-        match result {
+        match updater.check().await {
             Ok(Some(update)) => {
                 let accepted = app
                     .dialog()
