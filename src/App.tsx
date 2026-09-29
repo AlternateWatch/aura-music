@@ -39,6 +39,7 @@ const LazyPersonalizationOverlay = lazy(() => import("./components/Personalizati
 const LazyAudioSettingsOverlay = lazy(() => import("./components/AudioSettingsOverlay").then(m => ({ default: m.AudioSettingsOverlay })));
 const LazyQueueOverlay = lazy(() => import("./components/QueueOverlay").then(m => ({ default: m.QueueOverlay })));
 const LazySessionOverlay = lazy(() => import("./components/SessionOverlay").then(m => ({ default: m.SessionOverlay })));
+const LazySocialOverlay = lazy(() => import("./components/SocialOverlay").then(m => ({ default: m.SocialOverlay })));
 const LazyMinigameLobbyOverlay = lazy(() => import("./components/MinigameLobbyOverlay").then(m => ({ default: m.MinigameLobbyOverlay })));
 const LazyLyricsOverlay = lazy(() => import("./components/LyricsOverlay").then(m => ({ default: m.LyricsOverlay })));
 const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => ({ default: m.MusicUpload })));
@@ -295,6 +296,7 @@ export default function App() {
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('aura_theme') || 'dark');
   const [customBg, setCustomBg] = useState(user?.custom_bg_path || null);
   const [isSocialOpen, setIsSocialOpen] = useState(false);
+  const [isSocialHubOpen, setIsSocialHubOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
@@ -640,12 +642,22 @@ useEffect(() => {
 }, []);
 
   useEffect(() => {
-    if (!socketObj.currentSession || !isPlaying || !currentSong) return;
-    const heartbeat = setInterval(() => {
-        socketObj.emitCommand('sync-time', { position: audioObj.getCurrentTime(), songId: currentSong.id });
-    }, 5000); 
-    return () => clearInterval(heartbeat);
-  }, [socketObj.currentSession, isPlaying, currentSong?.id]);
+    if (!currentSong || !token) return;
+
+    const updateActivity = () => {
+      if (socketObj.socketRef.current) {
+        socketObj.socketRef.current.emit('update-activity', {
+          trackId: currentSong.id,
+          title: currentSong.title,
+          artist: currentSong.artist,
+        });
+      }
+    };
+
+    updateActivity();
+    const interval = setInterval(updateActivity, 30000);
+    return () => clearInterval(interval);
+  }, [currentSong?.id, token]);
 
   // CARGAR BIOGRAFÍA Y FOTO DEL ARTISTA
   useEffect(() => {

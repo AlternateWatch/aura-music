@@ -60,6 +60,22 @@ const pool = mysql.createPool({
     enableKeepAlive: true
 });
 
+// --- SOCIAL INFRASTRUCTURE ---
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS user_friends (
+        user_id INT NOT NULL,
+        friend_id INT NOT NULL,
+        status ENUM('pending', 'accepted', 'blocked') DEFAULT 'pending',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, friend_id),
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (friend_id) REFERENCES users(id)
+    )
+`).catch(err => console.error('Error creating user_friends table:', err));
+
+// In-memory map of who is listening to what: userId -> { trackId, title, artist, updatedAt }
+const liveActivity = new Map<string, { trackId: string | null, title: string | null, artist: string | null, updatedAt: number }>();
+
 // --- ESTADÍSTICAS DE ESCUCHA (para el "Wrapped") ---
 // Una fila por cada 30s de escucha real. title/artist/album se guardan en el
 // momento, así el resumen sigue funcionando aunque la canción se borre luego.
@@ -106,6 +122,49 @@ const deleteTrackFiles = async (trackId: string) => {
         }
     } catch (e) { console.error("Cleanup failed", e); }
 };
+// --- SOCIAL API ---
+app.post('/api/social/friend-request', authenticateToken, async (req: any, res: Response) => {
+    const { friendId } = req.body;
+    if (!friendId) return res.status(400).json({ error: "friendId is required" });
+    try {
+        await pool.execute(
+            'INSERT INTO user_friends (user_id, friend_id, status) VALUES (?, ?, "pending") ON DUPLICATE KEY UPDATE status = status',
+            [req.user.userId, friendId]
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: "Database error" }); }
+});
+
+app.get('/api/social/friends', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            `SELECT u.id, u.username, u.profile_pic_path, f.status
+             FROM users u
+             JOIN user_friends f ON u.id = f.friend_id
+             WHERE f.user_id = ?`,
+            [req.user.userId]
+        );
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: "Database error" }); }
+});
+
+app.get('/api/social/activity', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [friends]: any = await pool.execute(
+            'SELECT friend_id FROM user_friends WHERE user_id = ? AND status = "accepted"',
+            [req.user.userId]
+        );
+        const friendIds = friends.map((f: any) => String(f.friend_id));
+        const activity = [];
+        liveActivity.forEach((data, userId) => {
+            if (friendIds.includes(userId)) {
+                activity.push({ userId, ...data });
+            }
+        });
+        res.json(activity);
+    } catch (e) { res.status(500).json({ error: "Database error" }); }
+});
+
 // --- AUTH ---
 const isCapacitorApp = (req: Request) => {
     return req.headers.origin === 'https://localhost';
@@ -1014,7 +1073,22 @@ const announceLeave = (code: string, u: { userId: string; username: string }, de
 };
 
 io.on('connection', (socket) => {
-    socket.on('identify', (uid) => { socket.join(`user_${uid}`); });
+    socket.on('identify', (uid) => {
+        socket.join(`user_${uid}`);
+        socket.data.userId = uid; // Store the userId directly on the socket
+    });
+
+    // Update current listening status
+    socket.on('update-activity', ({ trackId, title, artist }) => {
+        const uid = socket.data.userId;
+        if (!uid) return;
+        liveActivity.set(String(uid), {
+            trackId: String(trackId || ''),
+            title: String(title || ''),
+            artist: String(artist || ''),
+            updatedAt: Date.now()
+        });
+    });
 
     // Unirse a una sesión. Valida que el código exista y responde con un "ack"
     // que incluye el estado actual (canción, posición, cola...) para sincronizar.
