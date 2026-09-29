@@ -36,10 +36,6 @@ const Avatar: React.FC<{ u: Friend | { username: string; profile_pic_path: strin
 };
 
 export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, token }) => {
-// ... resto del código ...
-};
-
-export default SocialOverlay;
   const [activeTab, setActiveTab] = useState<'activity' | 'friends'>('activity');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -212,3 +208,5 @@ export default SocialOverlay;
     </div>
   );
 };
+
+export default SocialOverlay;
