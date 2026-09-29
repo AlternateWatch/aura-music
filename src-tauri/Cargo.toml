@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.2.3"
+version = "1.2.4"
 description = "Aura is a shared music library where users can upload their own custom songs and listen to them anywhere."
 authors = ["AlternateWatch"]
 license = ""
