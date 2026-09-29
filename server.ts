@@ -63,13 +63,13 @@ const pool = mysql.createPool({
 // --- SOCIAL INFRASTRUCTURE ---
 pool.execute(`
     CREATE TABLE IF NOT EXISTS user_friends (
-        user_id INT NOT NULL,
-        friend_id INT NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        friend_id INT UNSIGNED NOT NULL,
         status ENUM('pending', 'accepted', 'blocked') DEFAULT 'pending',
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, friend_id),
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (friend_id) REFERENCES users(id)
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (friend_id) REFERENCES users(id) ON DELETE CASCADE
     )
 `).catch(err => console.error('Error creating user_friends table:', err));
 
