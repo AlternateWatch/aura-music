@@ -133,7 +133,12 @@ export function useSocketLogic(
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
     socket.on("session-members", ({ code, members }: { code: string; members: SessionMember[] }) => {
-      if (code === sessionRef.current) setSessionMembers(members);
+      if (code !== sessionRef.current) return;
+      setSessionMembers(members);
+      // El anfitrión puede cambiar (por "Ceder control"): esto mantiene isLeaderRef
+      // al día en todos los clientes sin depender de un evento aparte.
+      const me = members.find((m) => m.userId === String(userRef.current?.userId ?? ""));
+      if (me) isLeaderRef.current = me.isHost;
     });
     socket.on("receive-private-message", (msg) => {
       setUnreadSenders(prev => [...new Set([...prev, String(msg.sender_id)])]);
@@ -189,6 +194,19 @@ export function useSocketLogic(
     });
   }, []);
 
+  // Cede el control de la sesión a otra persona. Solo funciona si somos el
+  // anfitrión; el servidor lo comprueba de todas formas por seguridad.
+  const transferHost = useCallback((targetUserId: string): Promise<{ ok: boolean; error?: string }> => {
+    return new Promise((resolve) => {
+      const code = sessionRef.current;
+      const socket = socketRef.current;
+      if (!code || !socket) return resolve({ ok: false, error: "NO_SESSION" });
+      socket.emit("transfer-host", { code, targetUserId }, (res: any) => {
+        resolve(res?.ok ? { ok: true } : { ok: false, error: res?.error || "SERVER_ERROR" });
+      });
+    });
+  }, []);
+
   const leaveSession = useCallback(() => {
     const code = sessionRef.current;
     if (code) socketRef.current?.emit("leave-session", { code });
@@ -234,6 +252,6 @@ export function useSocketLogic(
     socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages, sessionMembers,
     unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand,
     isShuffle, setIsShuffle, shuffledQueue, setShuffledQueue, isLoop, setIsLoop,
-    setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession
+    setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession, transferHost
   };
 }

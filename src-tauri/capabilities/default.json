@@ -19,6 +19,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "opener:default",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "deep-link:default"
   ]
 }

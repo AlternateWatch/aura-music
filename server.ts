@@ -1006,10 +1006,42 @@ io.on('connection', (socket) => {
         if (typeof ack === 'function') ack({ ok: socket.rooms.has(c), state: snapshot(c) });
     });
 
+    // Comandos que cambian lo que suena para todos: solo el anfitrión puede darlos.
+    // El resto de la sesión solo escucha, así no hay peleas por el control.
+    const HOST_ONLY_COMMANDS = new Set(['play-track', 'toggle-play', 'seek', 'toggle-shuffle', 'toggle-loop', 'sync-time']);
     socket.on('send-command', ({ code, command, data }) => {
         if (!code || !socket.rooms.has(code)) return; // solo miembros de la sala
+        if (HOST_ONLY_COMMANDS.has(command)) {
+            const u = socket.data.sessionUsers?.[code];
+            if (!u || sessionHosts.get(code) !== u.userId) return; // no es el anfitrión: se ignora
+        }
         trackCommand(code, command, data);
         socket.to(code).emit('receive-command', { command, data });
+    });
+
+    // Ceder el control a otra persona de la sesión. Solo puede hacerlo el anfitrión actual.
+    socket.on('transfer-host', async ({ code, targetUserId }: any = {}, ack?: (res: any) => void) => {
+        const reply = typeof ack === 'function' ? ack : () => {};
+        try {
+            const c = String(code ?? '').trim().toUpperCase();
+            const caller = socket.data.sessionUsers?.[c];
+            if (!caller) return reply({ ok: false, error: 'NOT_IN_SESSION' });
+            if (sessionHosts.get(c) !== caller.userId) return reply({ ok: false, error: 'NOT_HOST' });
+
+            const target = String(targetUserId ?? '');
+            if (!target || !userStillInRoom(c, target)) return reply({ ok: false, error: 'TARGET_NOT_IN_SESSION' });
+
+            sessionHosts.set(c, target);
+            await pool.execute('UPDATE sessions SET host_id = ? WHERE code = ?', [target, c]);
+
+            broadcastMembers(c);
+            const newHost = getMembers(c).find(m => m.userId === target);
+            systemChat(c, `${newHost?.username ?? 'Alguien'} es ahora el anfitrión de la sesión 👑`, 'info');
+            reply({ ok: true });
+        } catch (err) {
+            console.error('transfer-host error:', err);
+            reply({ ok: false, error: 'SERVER_ERROR' });
+        }
     });
     socket.on('send-chat', ({ code, user, message }) => {
         const text = String(message ?? '').trim().slice(0, 500);

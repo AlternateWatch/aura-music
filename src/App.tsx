@@ -768,6 +768,18 @@ useEffect(() => {
   };
   // Unirse a una sesión desde un enlace ?join=CODIGO (botón de Discord)
   const joinFromUrlDoneRef = useRef(false);
+
+  // Si el enlace se abre en un NAVEGADOR normal (no dentro de la app de escritorio)
+  // y Aura está instalada, se intenta pasar el testigo a la app con aura://join/CODIGO.
+  // Si no está instalada, el navegador simplemente ignora el esquema y no pasa nada raro.
+  useEffect(() => {
+    if (isDesktop) return; // ya estamos dentro de la app: no hace falta relanzarla
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('join');
+    if (!code) return;
+    window.location.href = `aura://join/${encodeURIComponent(code)}`;
+  }, [isDesktop]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('join');
@@ -1132,12 +1144,29 @@ useEffect(() => {
   };
 
   // --- PLAYBACK ENGINE Y GUARDADO DE ÚLTIMA CANCIÓN ---
+  // Aviso breve de "solo el anfitrión controla" (2.5s y desaparece solo).
+  const [hostOnlyNotice, setHostOnlyNotice] = useState<string | null>(null);
+  const hostOnlyNoticeTimer = useRef<any>(null);
+
+  // true si estamos en una sesión y no somos quien la controla: en ese caso
+  // los controles de reproducción no hacen nada (el servidor los rechazaría igualmente).
+  const isSessionGuest = () => !!socketObj.currentSession && !socketObj.isLeader();
+
+  const blockIfGuest = (): boolean => {
+    if (!isSessionGuest()) return false;
+    setHostOnlyNotice('Solo el anfitrión de la sesión controla la reproducción');
+    clearTimeout(hostOnlyNoticeTimer.current);
+    hostOnlyNoticeTimer.current = setTimeout(() => setHostOnlyNotice(null), 2500);
+    return true;
+  };
+
   const handlePlaySong = async (
     song: Song,
     fromSocket = false,
     initialPos = 0,
     preserveQueue = false
   ) => {
+    if (!fromSocket && blockIfGuest()) return;
     if (currentSong?.id === song.id) {
       const nextState = !isPlaying;
       setIsPlaying(nextState);
@@ -1252,6 +1281,7 @@ useEffect(() => {
   };
 
   const handleNext = async () => {
+    if (blockIfGuest()) return;
     const pool = socketObj.isShuffle
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
@@ -1304,6 +1334,7 @@ useEffect(() => {
   };
 
   const handlePrevious = () => {
+    if (blockIfGuest()) return;
     const pool = socketObj.isShuffle
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
@@ -1361,6 +1392,7 @@ useEffect(() => {
   }, [currentSong?.id, activeQueue, socketObj.isShuffle, socketObj.shuffledQueue]);
 
   const toggleShuffle = (forcedState?: boolean) => {
+    if (blockIfGuest()) return;
     const nextShuffleState =
       forcedState !== undefined
         ? forcedState
@@ -1413,6 +1445,7 @@ useEffect(() => {
   };
 
   const toggleLoop = (forcedState?: boolean) => {
+    if (blockIfGuest()) return;
     const nextLoop =
       forcedState !== undefined
         ? forcedState
@@ -3169,6 +3202,7 @@ transition={{
                 if (isMinigameActive) {
                   if (minigameAudioRef.current && t <= 10) minigameAudioRef.current.currentTime = t;
                 } else {
+                  if (blockIfGuest()) return;
                   if (audioObj.audioRef.current) {
                     audioObj.audioRef.current.currentTime = t;
                     socketObj.emitCommand("seek", { time: t });
@@ -3213,12 +3247,18 @@ getCurrentTime={audioObj.getCurrentTime}
         activeTheme={activeTheme}
       />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isSocialOpen && <LazySocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence></Suspense>
+      <AnimatePresence>{hostOnlyNotice && (
+        <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[600] bg-[#121212] border border-amber-400/30 text-amber-300 text-[11px] font-bold px-4 py-2.5 rounded-full shadow-2xl">
+          {hostOnlyNotice}
+        </motion.div>
+      )}</AnimatePresence>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isPersonalizationOpen && <LazyPersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
       <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
-      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 

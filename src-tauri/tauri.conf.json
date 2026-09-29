@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Aura",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "identifier": "com.alternatewatch.auramusic",
   "build": {
     "frontendDist": "../dist",
@@ -43,6 +43,11 @@
   },
 
      "plugins": {
+     "deep-link": {
+       "desktop": {
+         "schemes": ["aura"]
+       }
+     },
      "updater": {
        "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNBNEQ0MkNGRjM2REZDRDMKUldUVC9HM3p6MEpOT3YxazI0dkhBQTc5Wmk1MXpvN0tNMGFlK2YvMVlVYUd4cnpLR1M0bTdUaXcK",
        "endpoints": [

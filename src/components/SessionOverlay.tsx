@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useFileUrl } from '../hooks/useFileUrl';
-import { X, Users, Send, Crown, MessageSquare, Copy, Check, LogOut, LogIn, Hand } from 'lucide-react';
+import { X, Users, Send, Crown, MessageSquare, Copy, Check, LogOut, LogIn, Hand, ArrowRightLeft } from 'lucide-react';
 
 interface Member { userId: string; username: string; avatar: string | null; isHost: boolean }
 
@@ -16,6 +16,8 @@ interface SessionOverlayProps {
   onCreateSession: () => void;
   onJoinSession: (code: string) => void;
   onLeaveSession: () => void;
+  isHost?: boolean;
+  onTransferHost?: (targetUserId: string) => void;
 }
 
 const Avatar: React.FC<{ m: { username: string; avatar: string | null }; size?: number }> = ({ m, size = 36 }) => {
@@ -33,8 +35,10 @@ const fmtTime = (t: any) => {
 };
 
 export const SessionOverlay: React.FC<SessionOverlayProps> = ({
-  onClose, user, currentSession, messages, members = [], onSendMessage, onCreateSession, onJoinSession, onLeaveSession
+  onClose, user, currentSession, messages, members = [], onSendMessage, onCreateSession, onJoinSession, onLeaveSession,
+  isHost = false, onTransferHost
 }) => {
+  const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
@@ -118,6 +122,21 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                         <p className="text-sm font-semibold text-white/90 truncate">{m.username}{m.userId === myId && <span className="text-white/30 font-normal"> (tú)</span>}</p>
                         {m.isHost && <p className="text-[9px] uppercase font-bold tracking-widest text-amber-400/80">Anfitrión</p>}
                       </div>
+                      {isHost && !m.isHost && (
+                        confirmTransferId === m.userId ? (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button onClick={() => { onTransferHost?.(m.userId); setConfirmTransferId(null); }}
+                              className="text-[9px] font-bold uppercase bg-brand-primary text-black rounded-full px-2.5 py-1">Confirmar</button>
+                            <button onClick={() => setConfirmTransferId(null)}
+                              className="text-[9px] font-bold uppercase text-white/40 rounded-full px-2 py-1">No</button>
+                          </div>
+                        ) : (
+                          <button title="Hacer anfitrión" onClick={() => setConfirmTransferId(m.userId)}
+                            className="p-1.5 rounded-full text-white/30 hover:text-amber-400 hover:bg-amber-400/10 transition-all shrink-0">
+                            <ArrowRightLeft size={13} />
+                          </button>
+                        )
+                      )}
                       {m.isHost && <Crown size={14} className="text-amber-400 shrink-0" />}
                     </motion.div>
                   ))}
