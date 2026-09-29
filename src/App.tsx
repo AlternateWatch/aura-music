@@ -2922,8 +2922,6 @@ transition={{
                         onDelete={() => setTrackToDelete(song.id)}
                         onPlayNext={() => handlePlayNext(song)}
                         onAddToQueue={() => handleAddToQueue(song)}
-                        inSession={!!socketObj.currentSession}
-                        onProposeVote={() => socketObj.proposeSong(song)}
                         onEdit={() => setSongToEdit(song)}
                         onClick={() => handlePlaySong(song)} 
                       />
@@ -3087,8 +3085,6 @@ transition={{
                                         onDelete={() => setTrackToDelete(item.id)}
                                         onPlayNext={() => handlePlayNext(item)}
                                         onAddToQueue={() => handleAddToQueue(item)}
-                                        inSession={!!socketObj.currentSession}
-                                        onProposeVote={() => socketObj.proposeSong(item)}
                                         onEdit={() => setSongToEdit(item)}
                                         onClick={() => {
                                             if (isMinigameActive) {
@@ -3301,7 +3297,7 @@ getCurrentTime={audioObj.getCurrentTime}
       )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })} onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
       <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
-      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} proposals={socketObj.songProposals} onVoteSong={socketObj.voteSong} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}

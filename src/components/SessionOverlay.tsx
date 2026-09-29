@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useFileUrl } from '../hooks/useFileUrl';
-import { X, Users, Send, Crown, MessageSquare, Copy, Check, LogOut, LogIn, Hand, ArrowRightLeft, Vote, ThumbsUp } from 'lucide-react';
+import { X, Users, Send, Crown, MessageSquare, Copy, Check, LogOut, LogIn, Hand, ArrowRightLeft } from 'lucide-react';
 
-interface Member { userId: string; username: string; avatar: string | null; isHost: boolean }
+interface Member { userId: string; username: string; avatar: string | null; isHost: boolean }
 interface SongProposal { song: any; proposedBy: { userId: string; username: string }; votes: number; voterIds: string[] }
 
 interface SessionOverlayProps {
@@ -13,8 +13,6 @@ interface SessionOverlayProps {
   currentSession: string | null;
   messages: any[];
   members?: Member[];
-  proposals?: SongProposal[];
-  onVoteSong?: (songId: string) => void;
   onSendMessage: (msg: string) => void;
   onCreateSession: () => void;
   onJoinSession: (code: string) => void;
@@ -38,7 +36,7 @@ const fmtTime = (t: any) => {
 };
 
 export const SessionOverlay: React.FC<SessionOverlayProps> = ({
-  onClose, user, currentSession, messages, members = [], proposals = [], onVoteSong, onSendMessage, onCreateSession, onJoinSession, onLeaveSession,
+  onClose, user, currentSession, messages, members = [], onSendMessage, onCreateSession, onJoinSession, onLeaveSession,
   isHost = false, onTransferHost
 }) => {
   const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null);
@@ -146,34 +144,6 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                 </AnimatePresence>
                 {members.length === 0 && <p className="text-xs text-white/20 text-center py-4">Conectando…</p>}
               </div>
-
-              {/* Votaciones: cualquiera propone desde el menú de una canción; en cuanto */}
-              {/* la propuesta suma mayoría de la gente que hay ahora, pasa a sonar. */}
-              {proposals.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-white/5">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-white/40 flex items-center gap-2 mb-3">
-                    <Vote size={12} /> Votaciones
-                  </span>
-                  <div className="space-y-2">
-                    {proposals.map(p => {
-                      const voted = p.voterIds.includes(String(user?.userId ?? ''));
-                      return (
-                        <div key={p.song.id} className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-white/[0.03] border border-white/5">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-white/90 truncate">{p.song.title}</p>
-                            <p className="text-[10px] text-white/30 truncate">Propuesta por {p.proposedBy.username}</p>
-                          </div>
-                          <button onClick={() => onVoteSong?.(p.song.id)}
-                            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${
-                              voted ? 'bg-brand-primary text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
-                            <ThumbsUp size={11} /> {p.votes}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
               <button onClick={onLeaveSession}
                 className="mt-6 w-full py-3.5 border border-red-500/20 text-red-500 rounded-2xl font-bold uppercase text-[10px] tracking-widest hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2">

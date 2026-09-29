@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
-  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Vote 
+  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check 
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { hapticImpact } from '../utils/haptics';
@@ -22,8 +22,6 @@ interface MusicCardProps {
   onAddToQueue: () => void;
   onEdit: () => void;
   /** Si estamos en una sesión colaborativa, muestra "Proponer para votación". */
-  inSession?: boolean;
-  onProposeVote?: () => void;
   onClick: () => void;
 
   onDragStart?: () => void;
@@ -35,11 +33,10 @@ interface MusicCardProps {
 export const MusicCard: React.FC<MusicCardProps> = ({ 
   song, isActive, isPlaying, playlists = [], userRole, isLiked, onToggleLike,
   onAddToPlaylist, onRemoveFromPlaylist, onOpenTabs, onDelete, onPlayNext, onAddToQueue, onEdit, onClick, onDragStart,
-  onDragOver, onDrop, isDragging, inSession = false, onProposeVote
+  onDragOver, onDrop, isDragging
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState(false);
-  const [proposed, setProposed] = useState(false);
 
   // Feedback visual al añadir a la cola o reproducir siguiente
   const [addedToQueue, setAddedToQueue] = useState(false);
@@ -101,13 +98,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
     onPlayNext();
     setPlayedNext(true);
     setTimeout(() => setPlayedNext(false), 1500);
-  };
-
-  const handleProposeClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onProposeVote?.();
-    setProposed(true);
-    setTimeout(() => setProposed(false), 1500);
   };
 
   const handleOpenVideo = (e?: React.MouseEvent) => {
@@ -255,18 +245,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   <Youtube size={15} />
                   <span>{hasVideo ? 'Vídeo Oficial (YouTube)' : 'Sin vídeo oficial'}</span>
                 </button>
-
-                {/* 3.5 PROPONER PARA VOTACIÓN (solo dentro de una sesión) */}
-                {inSession && onProposeVote && (
-                  <button
-                    type="button"
-                    onClick={(e) => { handleProposeClick(e); setShowMenu(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                  >
-                    {proposed ? <Check size={15} className="text-green-400" /> : <Vote size={15} />}
-                    <span>{proposed ? '¡Propuesta enviada!' : 'Proponer para votación'}</span>
-                  </button>
-                )}
 
                 {/* 4. REPRODUCIR SIGUIENTE */}
                 <button
