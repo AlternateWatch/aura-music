@@ -60,6 +60,23 @@ const pool = mysql.createPool({
     enableKeepAlive: true
 });
 
+// --- ESTADÍSTICAS DE ESCUCHA (para el "Wrapped") ---
+// Una fila por cada 30s de escucha real. title/artist/album se guardan en el
+// momento, así el resumen sigue funcionando aunque la canción se borre luego.
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS listen_pings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        track_id VARCHAR(64) NULL,
+        title VARCHAR(255) NOT NULL,
+        artist VARCHAR(255) NOT NULL,
+        album VARCHAR(255) NULL,
+        ms INT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_time (user_id, created_at)
+    )
+`).catch(err => console.error('No se pudo crear la tabla listen_pings:', err));
+
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -764,6 +781,63 @@ app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: an
         connection.release();
     }
 });
+// Aviso periódico de que se sigue escuchando algo (cada ~30s desde el cliente).
+app.post('/api/stats/ping', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const { trackId, title, artist, album, ms } = req.body || {};
+        const cleanMs = Math.max(1000, Math.min(Number(ms) || 0, 60000)); // entre 1s y 60s, por si acaso
+        if (!title || !artist) return res.status(400).json({ error: 'Faltan datos de la canción' });
+        await pool.execute(
+            'INSERT INTO listen_pings (user_id, track_id, title, artist, album, ms) VALUES (?, ?, ?, ?, ?, ?)',
+            [req.user.userId, trackId || null, String(title).slice(0, 255), String(artist).slice(0, 255), album ? String(album).slice(0, 255) : null, cleanMs]
+        );
+        res.sendStatus(204);
+    } catch (err) {
+        console.error('stats/ping error:', err);
+        res.sendStatus(204); // nunca debe romper la reproducción por esto
+    }
+});
+
+// Resumen tipo "Wrapped": lo más escuchado en el periodo pedido.
+app.get('/api/stats/wrapped', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const range = String(req.query.range || 'month');
+        const where =
+            range === 'year' ? 'YEAR(created_at) = YEAR(NOW())' :
+            range === 'all' ? '1=1' :
+            'created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)'; // 'month' por defecto
+
+        const [totalsRows]: any = await pool.execute(
+            `SELECT COALESCE(SUM(ms),0) AS totalMs, COUNT(DISTINCT track_id) AS distinctTracks, COUNT(*) AS pings
+             FROM listen_pings WHERE user_id = ? AND ${where}`,
+            [req.user.userId]
+        );
+        const [topTracks]: any = await pool.execute(
+            `SELECT track_id AS trackId, title, artist, album, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${where}
+             GROUP BY track_id, title, artist, album ORDER BY totalMs DESC LIMIT 5`,
+            [req.user.userId]
+        );
+        const [topArtists]: any = await pool.execute(
+            `SELECT artist, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${where}
+             GROUP BY artist ORDER BY totalMs DESC LIMIT 5`,
+            [req.user.userId]
+        );
+
+        res.json({
+            range,
+            totalMinutes: Math.round((totalsRows[0]?.totalMs || 0) / 60000),
+            distinctTracks: totalsRows[0]?.distinctTracks || 0,
+            topTracks,
+            topArtists
+        });
+    } catch (err) {
+        console.error('stats/wrapped error:', err);
+        res.status(500).json({ error: 'No se pudo calcular el resumen' });
+    }
+});
+
 app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => { const c = Math.random().toString(36).substring(2, 8).toUpperCase(); await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, req.user.userId]); scheduleSessionDeletion(c, NEVER_JOINED_GRACE_MS); res.json({ code: c }); });
 
 // --- ESTADO DE SESIONES (en memoria) ---

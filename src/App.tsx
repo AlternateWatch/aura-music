@@ -19,6 +19,7 @@ X,
 Minus,
 Square,
 Copy,
+  Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -41,6 +42,7 @@ const LazyMinigameLobbyOverlay = lazy(() => import("./components/MinigameLobbyOv
 const LazyLyricsOverlay = lazy(() => import("./components/LyricsOverlay").then(m => ({ default: m.LyricsOverlay })));
 const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => ({ default: m.MusicUpload })));
 const LazySocialSidebar = lazy(() => import("./hooks/SocialSidebar").then(m => ({ default: m.SocialSidebar })));
+const LazyWrappedOverlay = lazy(() => import("./components/WrappedOverlay").then(m => ({ default: m.WrappedOverlay })));
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
@@ -289,6 +291,7 @@ export default function App() {
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
+  const [isWrappedOpen, setIsWrappedOpen] = useState(false);
   
   // METADATA EDITING STATES
   const [songToEdit, setSongToEdit] = useState<any | null>(null);
@@ -794,6 +797,28 @@ useEffect(() => {
     window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
   }, [user]);
   const handleSendChat = (message: string) => { if (socketObj.currentSession) socketObj.socketRef.current?.emit('send-chat', { code: socketObj.currentSession, user, message }); };
+
+  // ESTADÍSTICAS DE ESCUCHA (para el "Wrapped"): un aviso cada 30s de reproducción
+  // real de la misma canción. Si se cambia de canción o se pausa, se corta sin más
+  // (perder los últimos segundos sueltos no afecta a un resumen de este tipo).
+  useEffect(() => {
+    if (!isPlaying || !currentSong || !token) return;
+    const interval = setInterval(() => {
+      const activeToken = token || localStorage.getItem('aura_token');
+      fetch(`${API_BASE}/api/stats/ping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeToken}` },
+        body: JSON.stringify({
+          trackId: currentSong.id,
+          title: currentSong.title,
+          artist: currentSong.artist,
+          album: currentSong.album,
+          ms: 30000,
+        }),
+      }).catch(() => {}); // no pasa nada si un aviso suelto no llega
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isPlaying, currentSong?.id, token]);
 
   // Precarga una imagen en el caché del navegador antes de que ningún <img>
   // la pida "de verdad". Nunca rechaza (un fallo o timeout cuentan como
@@ -2192,6 +2217,7 @@ useEffect(() => {
                 {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 ${showModeration ? 'text-amber-500 border-b border-amber-500 pb-1' : ''}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
+                {token && <button onClick={() => setIsWrappedOpen(true)} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Sparkles size={12} /> Wrapped</button>}
               </div>
               <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -3259,6 +3285,7 @@ getCurrentTime={audioObj.getCurrentTime}
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
       <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 
