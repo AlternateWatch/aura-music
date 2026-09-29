@@ -137,6 +137,7 @@ app.post('/api/social/friend-request', authenticateToken, async (req: any, res: 
 
 app.get('/api/social/friends', authenticateToken, async (req: any, res: Response) => {
     try {
+        console.log(`Fetching friends for user: ${req.user.userId}`);
         const [rows]: any = await pool.execute(
             `SELECT u.id, u.username, u.profile_pic_path, f.status
              FROM users u
@@ -144,12 +145,17 @@ app.get('/api/social/friends', authenticateToken, async (req: any, res: Response
              WHERE f.user_id = ?`,
             [req.user.userId]
         );
+        console.log(`Found ${rows.length} friends`);
         res.json(rows);
-    } catch (e) { res.status(500).json({ error: "Database error" }); }
+    } catch (e: any) {
+        console.error("SOCIAL_FRIENDS_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
 });
 
 app.get('/api/social/activity', authenticateToken, async (req: any, res: Response) => {
     try {
+        console.log(`Fetching activity for user: ${req.user.userId}`);
         const [friends]: any = await pool.execute(
             'SELECT friend_id FROM user_friends WHERE user_id = ? AND status = "accepted"',
             [req.user.userId]
@@ -162,7 +168,10 @@ app.get('/api/social/activity', authenticateToken, async (req: any, res: Respons
             }
         });
         res.json(activity);
-    } catch (e) { res.status(500).json({ error: "Database error" }); }
+    } catch (e: any) {
+        console.error("SOCIAL_ACTIVITY_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
 });
 
 // --- AUTH ---
