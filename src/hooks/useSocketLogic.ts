@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, MutableRefObject } from "reac
 import { io, Socket } from "socket.io-client";
 import { Song } from "../constants";
 
+export type SessionMember = { userId: string; username: string; avatar: string | null; isHost: boolean };
 export type JoinResult = { ok: boolean; error?: string; members?: number };
 
 const SOCKET_URL = "https://aura.basildo.me";
@@ -18,6 +19,7 @@ export function useSocketLogic(
   const socketRef = useRef<Socket | null>(null);
   const [currentSession, setCurrentSessionState] = useState<string | null>(null);
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);
+  const [sessionMembers, setSessionMembers] = useState<SessionMember[]>([]);
   const [unreadSenders, setUnreadSenders] = useState<string[]>([]);
   const [activeInvite, setActiveInvite] = useState<{from: string, code: string} | null>(null);
   const [isShuffle, setIsShuffle] = useState(false);
@@ -81,7 +83,7 @@ export function useSocketLogic(
       const code = sessionRef.current;
       if (code) {
         socket.emit("join-session", { code, user: userRef.current }, (res: any) => {
-          if (res?.ok) applyState(res.state);
+          if (res?.ok) { applyState(res.state); if (res.membersList) setSessionMembers(res.membersList); }
           else if (res?.error === "SESSION_NOT_FOUND") setCurrentSession(null);
         });
       }
@@ -130,6 +132,9 @@ export function useSocketLogic(
     });
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
+    socket.on("session-members", ({ code, members }: { code: string; members: SessionMember[] }) => {
+      if (code === sessionRef.current) setSessionMembers(members);
+    });
     socket.on("receive-private-message", (msg) => {
       setUnreadSenders(prev => [...new Set([...prev, String(msg.sender_id)])]);
     });
@@ -177,6 +182,7 @@ export function useSocketLogic(
         if (sessionRef.current !== code) setSessionMessages([]);
         setCurrentSession(code);
         isLeaderRef.current = !!opts.asLeader;
+        if (res.membersList) setSessionMembers(res.membersList);
         applyState(res.state);
         resolve({ ok: true, members: res.members });
       });
@@ -189,6 +195,7 @@ export function useSocketLogic(
     isLeaderRef.current = false;
     setCurrentSession(null);
     setSessionMessages([]);
+    setSessionMembers([]);
   }, []);
 
   // Pide el estado actual y corrige solo la posición (no toca play/pausa).
@@ -224,7 +231,7 @@ export function useSocketLogic(
   const isLeader = () => isLeaderRef.current;
 
   return {
-    socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages,
+    socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages, sessionMembers,
     unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand,
     isShuffle, setIsShuffle, shuffledQueue, setShuffledQueue, isLoop, setIsLoop,
     setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession

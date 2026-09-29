@@ -764,7 +764,7 @@ app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: an
         connection.release();
     }
 });
-app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => { const c = Math.random().toString(36).substring(2, 8).toUpperCase(); await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, req.user.userId]); res.json({ code: c }); });
+app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => { const c = Math.random().toString(36).substring(2, 8).toUpperCase(); await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, req.user.userId]); scheduleSessionDeletion(c, NEVER_JOINED_GRACE_MS); res.json({ code: c }); });
 
 // --- ESTADO DE SESIONES (en memoria) ---
 // Guarda lo último que se sabe de cada sesión para poder ponerle al día a quien
@@ -848,6 +848,90 @@ setInterval(() => {
     }
 }, 30 * 60 * 1000);
 
+// --- BORRADO DE SESIONES VACÍAS ---
+// Cuando no queda nadie en la sala, se espera un margen (por si alguien se reconecta
+// o recarga la página) y después se borra la fila de la BD y el estado en memoria.
+const EMPTY_GRACE_MS = 60 * 1000;        // margen tras quedarse vacía
+const NEVER_JOINED_GRACE_MS = 2 * 60 * 1000; // margen para sesiones recién creadas
+const SESSION_CODE_RE = /^[A-Z0-9]{4,10}$/;
+const deleteTimers = new Map<string, NodeJS.Timeout>();
+const roomSize = (code: string) => io.sockets.adapter.rooms.get(code)?.size ?? 0;
+
+const cancelSessionDeletion = (code: string) => {
+    const t = deleteTimers.get(code);
+    if (t) { clearTimeout(t); deleteTimers.delete(code); }
+};
+
+const scheduleSessionDeletion = (code: string, delay = EMPTY_GRACE_MS) => {
+    cancelSessionDeletion(code);
+    deleteTimers.set(code, setTimeout(async () => {
+        deleteTimers.delete(code);
+        if (roomSize(code) > 0) return; // alguien volvió a entrar
+        try {
+            await pool.execute('DELETE FROM sessions WHERE code = ?', [code]);
+            sessionStates.delete(code);
+        } catch (err) {
+            console.error('delete empty session error:', err);
+        }
+    }, delay));
+};
+
+// Al arrancar: sesiones que quedaron huérfanas de antes (o tras un reinicio).
+setTimeout(async () => {
+    try {
+        const [rows]: any = await pool.execute('SELECT code FROM sessions');
+        for (const r of rows) scheduleSessionDeletion(r.code, NEVER_JOINED_GRACE_MS);
+    } catch (err) {
+        console.error('startup session cleanup error:', err);
+    }
+}, 10 * 1000);
+
+// --- PRESENCIA EN SESIONES ---
+// Cada socket guarda con qué usuario entró a cada sala (socket.data.sessionUsers).
+// Los miembros se deducen de las salas de socket.io, deduplicando por userId
+// (así una misma persona con dos pestañas cuenta una sola vez).
+type Member = { userId: string; username: string; avatar: string | null; isHost: boolean };
+const sessionHosts = new Map<string, string>(); // code -> host userId
+const pendingLeaves = new Map<string, NodeJS.Timeout>(); // `${code}:${userId}` -> aviso de salida diferido
+const LEAVE_ANNOUNCE_DELAY_MS = 8000; // por si solo es una recarga / reconexión
+
+const cleanUser = (u: any) => ({
+    userId: String(u?.userId ?? u?.id ?? ''),
+    username: String(u?.username ?? 'Alguien').slice(0, 40),
+    avatar: (u?.profile_pic_path ?? null) as string | null,
+});
+
+const getMembers = (code: string): Member[] => {
+    const ids = io.sockets.adapter.rooms.get(code);
+    const seen = new Map<string, Member>();
+    if (ids) for (const id of ids) {
+        const u = io.sockets.sockets.get(id)?.data?.sessionUsers?.[code];
+        if (u && u.userId && !seen.has(u.userId)) seen.set(u.userId, { ...u, isHost: u.userId === sessionHosts.get(code) });
+    }
+    // Anfitrión primero, luego por nombre
+    return [...seen.values()].sort((a, b) => Number(b.isHost) - Number(a.isHost) || a.username.localeCompare(b.username));
+};
+
+const broadcastMembers = (code: string) => io.to(code).emit('session-members', { code, members: getMembers(code) });
+const systemChat = (code: string, message: string, kind: 'join' | 'leave' | 'info' = 'info') =>
+    io.to(code).emit('receive-chat', { system: true, kind, message, time: new Date() });
+const userStillInRoom = (code: string, userId: string) => getMembers(code).some(m => m.userId === userId);
+
+// Anuncia la salida de un usuario. Si fue una desconexión, espera unos segundos
+// y solo avisa si no ha vuelto a entrar (evita spam en recargas).
+const announceLeave = (code: string, u: { userId: string; username: string }, delayed: boolean) => {
+    const key = `${code}:${u.userId}`;
+    const doIt = () => {
+        pendingLeaves.delete(key);
+        broadcastMembers(code);
+        if (!userStillInRoom(code, u.userId)) systemChat(code, `${u.username} ha salido de la sesión 👋`, 'leave');
+    };
+    if (!delayed) return doIt();
+    broadcastMembers(code);
+    if (pendingLeaves.has(key)) clearTimeout(pendingLeaves.get(key)!);
+    pendingLeaves.set(key, setTimeout(doIt, LEAVE_ANNOUNCE_DELAY_MS));
+};
+
 io.on('connection', (socket) => {
     socket.on('identify', (uid) => { socket.join(`user_${uid}`); });
 
@@ -859,13 +943,32 @@ io.on('connection', (socket) => {
             const code = String(payload?.code ?? '').trim().toUpperCase();
             if (!/^[A-Z0-9]{4,10}$/.test(code)) return reply({ ok: false, error: 'INVALID_CODE' });
 
-            const [rows]: any = await pool.execute('SELECT code FROM sessions WHERE code = ?', [code]);
+            const [rows]: any = await pool.execute('SELECT code, host_id FROM sessions WHERE code = ?', [code]);
             if (!rows.length) return reply({ ok: false, error: 'SESSION_NOT_FOUND' });
+            sessionHosts.set(code, String(rows[0].host_id));
 
+            const u = cleanUser(payload?.user);
+            if (!u.userId) return reply({ ok: false, error: 'INVALID_USER' });
+            // Foto y nombre se leen de la BD (no se fía del cliente).
+            const [urows]: any = await pool.execute('SELECT username, profile_pic_path FROM users WHERE id = ?', [u.userId]);
+            if (urows[0]) { u.username = String(urows[0].username).slice(0, 40); u.avatar = urows[0].profile_pic_path || null; }
+
+            const wasIn = userStillInRoom(code, u.userId);     // ya estaba (otra pestaña)
+            const key = `${code}:${u.userId}`;
+            const wasPendingLeave = pendingLeaves.has(key);    // vuelve tras una recarga/reconexión
+            if (wasPendingLeave) { clearTimeout(pendingLeaves.get(key)!); pendingLeaves.delete(key); }
+
+            socket.data.sessionUsers = { ...(socket.data.sessionUsers ?? {}), [code]: u };
             socket.join(code);
-            const members = io.sockets.adapter.rooms.get(code)?.size ?? 1;
+            cancelSessionDeletion(code);
+
+            broadcastMembers(code);
             io.to(code).emit('user-joined', payload?.user);
-            reply({ ok: true, code, members, state: snapshot(code) });
+            if (!wasIn && !wasPendingLeave) {
+                systemChat(code, `${u.username} ha entrado a la sesión. ¡Saludad! 👋`, 'join');
+            }
+            const list = getMembers(code);
+            reply({ ok: true, code, members: list.length, membersList: list, state: snapshot(code) });
         } catch (err) {
             console.error('join-session error:', err);
             reply({ ok: false, error: 'SERVER_ERROR' });
@@ -873,7 +976,28 @@ io.on('connection', (socket) => {
     });
 
     socket.on('leave-session', ({ code }: any = {}) => {
-        if (code) socket.leave(String(code).toUpperCase());
+        if (!code) return;
+        const c = String(code).toUpperCase();
+        const u = socket.data.sessionUsers?.[c];
+        socket.leave(c);
+        if (socket.data.sessionUsers) delete socket.data.sessionUsers[c];
+        if (u) announceLeave(c, u, false);
+        if (SESSION_CODE_RE.test(c) && roomSize(c) === 0) scheduleSessionDeletion(c);
+    });
+
+    // Desconexión (cerrar pestaña, perder red...): el socket aún figura en sus salas.
+    socket.on('disconnecting', () => {
+        for (const room of socket.rooms) {
+            if (!SESSION_CODE_RE.test(room)) continue;
+            if (roomSize(room) <= 1) scheduleSessionDeletion(room);
+            const u = socket.data.sessionUsers?.[room];
+            if (u) {
+                // El socket sigue en la sala en este evento: lo quitamos ya para que la lista sea correcta.
+                socket.leave(room);
+                delete socket.data.sessionUsers[room];
+                announceLeave(room, u, true);
+            }
+        }
     });
 
     // Re-sincronizar bajo demanda (p. ej. al darle a play tras un autoplay bloqueado).
@@ -887,7 +1011,11 @@ io.on('connection', (socket) => {
         trackCommand(code, command, data);
         socket.to(code).emit('receive-command', { command, data });
     });
-    socket.on('send-chat', ({ code, user, message }) => { io.to(code).emit('receive-chat', { user, message, time: new Date() }); });
+    socket.on('send-chat', ({ code, user, message }) => {
+        const text = String(message ?? '').trim().slice(0, 500);
+        if (!code || !text || !socket.rooms.has(code)) return; // solo miembros, sin mensajes vacíos
+        io.to(code).emit('receive-chat', { user: socket.data.sessionUsers?.[code] ?? user, message: text, time: new Date() });
+    });
     socket.on('send-private-message', ({ sender, receiverId, message }) => { io.to(`user_${receiverId}`).emit('receive-private-message', { sender_id: sender.userId, receiver_id: receiverId, message, created_at: new Date() }); });
     socket.on('send-session-invite', ({ senderName, receiverId, code }) => { io.to(`user_${receiverId}`).emit('receive-session-invite', { from: senderName, code }); });
 });
