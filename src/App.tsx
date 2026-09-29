@@ -1518,6 +1518,9 @@ useEffect(() => {
     }, 3000);
   };
 
+  // Cola: cualquier miembro de la sesión puede tocarla (añadir, "siguiente",
+  // reordenar) sin ser el anfitrión. Solo cambiar la canción que suena ahora
+  // o el transporte (play/pause/seek/shuffle/loop) sigue siendo cosa suya.
   const handlePlayNext = (song: Song) => {
     const pool = activeQueue.length > 0 ? [...activeQueue] : [...getFlattenedSongs()];
     const filtered = pool.filter(s => s.id !== song.id);
@@ -1525,12 +1528,7 @@ useEffect(() => {
     const insertIdx = curIdx !== -1 ? curIdx + 1 : 0;
     filtered.splice(insertIdx, 0, song);
     setActiveQueue(filtered);
-    socketObj.emitCommand('play-track', { 
-      id: currentSong?.id, 
-      song: currentSong, 
-      queue: filtered, 
-      position: audioObj.audioRef.current?.currentTime || audioObj.getCurrentTime() 
-    });
+    socketObj.emitCommand('update-queue', { queue: filtered });
   };
 
   const handleAddToQueue = (song: Song) => {
@@ -1538,23 +1536,13 @@ useEffect(() => {
     const filtered = pool.filter(s => s.id !== song.id);
     const newQueue = [...filtered, song];
     setActiveQueue(newQueue);
-    socketObj.emitCommand('play-track', { 
-      id: currentSong?.id, 
-      song: currentSong, 
-      queue: newQueue, 
-      position: audioObj.audioRef.current?.currentTime || audioObj.getCurrentTime() 
-    });
+    socketObj.emitCommand('update-queue', { queue: newQueue });
   };
 
   const handleReorderQueue = (newQueue: Song[]) => {
     setActiveQueue(newQueue);
     if (socketObj.isShuffle) socketObj.setShuffledQueue(newQueue);
-    socketObj.emitCommand('play-track', {
-      id: currentSong?.id,
-      song: currentSong,
-      queue: newQueue,
-      position: audioObj.getCurrentTime()
-    });
+    socketObj.emitCommand('update-queue', { queue: newQueue });
   };
 
   const handleModerate = async (songId: string, status: string) => {
@@ -2934,6 +2922,8 @@ transition={{
                         onDelete={() => setTrackToDelete(song.id)}
                         onPlayNext={() => handlePlayNext(song)}
                         onAddToQueue={() => handleAddToQueue(song)}
+                        inSession={!!socketObj.currentSession}
+                        onProposeVote={() => socketObj.proposeSong(song)}
                         onEdit={() => setSongToEdit(song)}
                         onClick={() => handlePlaySong(song)} 
                       />
@@ -3097,6 +3087,8 @@ transition={{
                                         onDelete={() => setTrackToDelete(item.id)}
                                         onPlayNext={() => handlePlayNext(item)}
                                         onAddToQueue={() => handleAddToQueue(item)}
+                                        inSession={!!socketObj.currentSession}
+                                        onProposeVote={() => socketObj.proposeSong(item)}
                                         onEdit={() => setSongToEdit(item)}
                                         onClick={() => {
                                             if (isMinigameActive) {
@@ -3309,7 +3301,7 @@ getCurrentTime={audioObj.getCurrentTime}
       )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })} onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
       <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
-      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} proposals={socketObj.songProposals} onVoteSong={socketObj.voteSong} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
 
       {/* MODAL CREAR PLAYLIST */}

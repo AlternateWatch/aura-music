@@ -899,6 +899,11 @@ const trackCommand = (code: string, command: string, data: any) => {
             st.position = Number(data?.time) || 0;
             st.updatedAt = now;
             break;
+        case 'update-queue':
+            // Solo la cola: cualquier miembro puede añadir/reordenar canciones
+            // sin tocar lo que suena ahora mismo (eso sigue siendo del anfitrión).
+            if (Array.isArray(data?.queue)) st.queue = data.queue;
+            break;
         case 'toggle-play':
             st.position = livePosition(st);
             st.isPlaying = !!data?.isPlaying;
@@ -944,6 +949,7 @@ const scheduleSessionDeletion = (code: string, delay = EMPTY_GRACE_MS) => {
         try {
             await pool.execute('DELETE FROM sessions WHERE code = ?', [code]);
             sessionStates.delete(code);
+            sessionProposals.delete(code);
         } catch (err) {
             console.error('delete empty session error:', err);
         }
@@ -998,12 +1004,60 @@ const announceLeave = (code: string, u: { userId: string; username: string }, de
     const doIt = () => {
         pendingLeaves.delete(key);
         broadcastMembers(code);
-        if (!userStillInRoom(code, u.userId)) systemChat(code, `${u.username} ha salido de la sesión 👋`, 'leave');
+        if (!userStillInRoom(code, u.userId)) {
+            systemChat(code, `${u.username} ha salido de la sesión 👋`, 'leave');
+            clearVotesFor(code, u.userId);
+        }
     };
     if (!delayed) return doIt();
     broadcastMembers(code);
     if (pendingLeaves.has(key)) clearTimeout(pendingLeaves.get(key)!);
     pendingLeaves.set(key, setTimeout(doIt, LEAVE_ANNOUNCE_DELAY_MS));
+};
+
+// --- VOTACIONES PARA "SIGUIENTE CANCIÓN" ---
+// Cualquiera propone una canción; el resto vota (o quita su voto). En cuanto
+// alcanza mayoría estricta de la gente que hay AHORA en la sala, se cuela la
+// primera de la cola y se retira de las propuestas. Nadie necesita ser el
+// anfitrión para proponer o votar — solo para que su voto cuente, tiene que
+// seguir en la sesión.
+type Proposal = { song: any; proposedBy: { userId: string; username: string }; voterIds: Set<string> };
+const sessionProposals = new Map<string, Map<string, Proposal>>(); // code -> songId -> propuesta
+
+const getProposalsList = (code: string) => {
+    const map = sessionProposals.get(code);
+    if (!map) return [];
+    return [...map.values()]
+        .map(p => ({ song: p.song, proposedBy: p.proposedBy, votes: p.voterIds.size, voterIds: [...p.voterIds] }))
+        .sort((a, b) => b.votes - a.votes);
+};
+const broadcastProposals = (code: string) => io.to(code).emit('session-proposals', { code, proposals: getProposalsList(code) });
+const majorityNeeded = (code: string) => Math.floor(getMembers(code).length / 2) + 1;
+
+const tryPromoteProposal = (code: string, songId: string) => {
+    const map = sessionProposals.get(code);
+    const p = map?.get(songId);
+    if (!p || p.voterIds.size < majorityNeeded(code)) return;
+    map!.delete(songId);
+    const st = getSessionState(code);
+    st.queue = [p.song, ...st.queue.filter((s: any) => s?.id !== p.song.id)];
+    io.to(code).emit('receive-command', { command: 'update-queue', data: { queue: st.queue } });
+    systemChat(code, `"${String(p.song.title ?? 'Una propuesta').slice(0, 80)}" ganó la votación y suena a continuación 🗳️`, 'info');
+    broadcastProposals(code);
+};
+
+// Al salir alguien de la sesión ya no cuenta su voto, y con menos gente la
+// mayoría necesaria baja: puede que eso sea suficiente para desempatar algo.
+const clearVotesFor = (code: string, userId: string) => {
+    const map = sessionProposals.get(code);
+    if (!map) return;
+    let changed = false;
+    for (const [songId, p] of map) {
+        if (p.voterIds.delete(userId)) changed = true;
+        if (p.voterIds.size === 0) map.delete(songId);
+    }
+    if (changed) broadcastProposals(code);
+    for (const songId of [...map.keys()]) tryPromoteProposal(code, songId);
 };
 
 io.on('connection', (socket) => {
@@ -1042,7 +1096,7 @@ io.on('connection', (socket) => {
                 systemChat(code, `${u.username} ha entrado a la sesión. ¡Saludad! 👋`, 'join');
             }
             const list = getMembers(code);
-            reply({ ok: true, code, members: list.length, membersList: list, state: snapshot(code) });
+            reply({ ok: true, code, members: list.length, membersList: list, state: snapshot(code), proposals: getProposalsList(code) });
         } catch (err) {
             console.error('join-session error:', err);
             reply({ ok: false, error: 'SERVER_ERROR' });
@@ -1091,6 +1145,33 @@ io.on('connection', (socket) => {
         }
         trackCommand(code, command, data);
         socket.to(code).emit('receive-command', { command, data });
+    });
+
+    // Proponer una canción para votación. Si ya estaba propuesta, proponerla
+    // de nuevo cuenta como un voto tuyo (útil si perdiste tu voto al recargar).
+    socket.on('propose-song', ({ code, song }: any = {}) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        const u = socket.data.sessionUsers?.[c];
+        if (!u || !song?.id || !socket.rooms.has(c)) return;
+        if (!sessionProposals.has(c)) sessionProposals.set(c, new Map());
+        const map = sessionProposals.get(c)!;
+        const existing = map.get(song.id);
+        if (existing) existing.voterIds.add(u.userId);
+        else map.set(song.id, { song, proposedBy: { userId: u.userId, username: u.username }, voterIds: new Set([u.userId]) });
+        broadcastProposals(c);
+        tryPromoteProposal(c, song.id);
+    });
+
+    // Votar (o quitar el voto) a una propuesta existente.
+    socket.on('vote-song', ({ code, songId }: any = {}) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        const u = socket.data.sessionUsers?.[c];
+        const p = sessionProposals.get(c)?.get(songId);
+        if (!u || !p || !socket.rooms.has(c)) return;
+        if (p.voterIds.has(u.userId)) p.voterIds.delete(u.userId); else p.voterIds.add(u.userId);
+        if (p.voterIds.size === 0) sessionProposals.get(c)?.delete(songId); // nadie la quiere ya: fuera
+        broadcastProposals(c);
+        tryPromoteProposal(c, songId);
     });
 
     // Ceder el control a otra persona de la sesión. Solo puede hacerlo el anfitrión actual.

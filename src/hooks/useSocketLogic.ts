@@ -3,6 +3,7 @@ import { io, Socket } from "socket.io-client";
 import { Song } from "../constants";
 
 export type SessionMember = { userId: string; username: string; avatar: string | null; isHost: boolean };
+export type SongProposal = { song: Song; proposedBy: { userId: string; username: string }; votes: number; voterIds: string[] };
 export type JoinResult = { ok: boolean; error?: string; members?: number };
 
 const SOCKET_URL = "https://aura.basildo.me";
@@ -20,6 +21,7 @@ export function useSocketLogic(
   const [currentSession, setCurrentSessionState] = useState<string | null>(null);
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);
   const [sessionMembers, setSessionMembers] = useState<SessionMember[]>([]);
+  const [songProposals, setSongProposals] = useState<SongProposal[]>([]);
   const [unreadSenders, setUnreadSenders] = useState<string[]>([]);
   const [activeInvite, setActiveInvite] = useState<{from: string, code: string} | null>(null);
   const [isShuffle, setIsShuffle] = useState(false);
@@ -83,7 +85,11 @@ export function useSocketLogic(
       const code = sessionRef.current;
       if (code) {
         socket.emit("join-session", { code, user: userRef.current }, (res: any) => {
-          if (res?.ok) { applyState(res.state); if (res.membersList) setSessionMembers(res.membersList); }
+          if (res?.ok) {
+            applyState(res.state);
+            if (res.membersList) setSessionMembers(res.membersList);
+            setSongProposals(res.proposals ?? []);
+          }
           else if (res?.error === "SESSION_NOT_FOUND") setCurrentSession(null);
         });
       }
@@ -91,6 +97,10 @@ export function useSocketLogic(
 
     socket.on("receive-command", ({ command, data }) => {
       if (command !== "sync-time") isLeaderRef.current = false;
+
+      if (command === "update-queue") {
+        if (Array.isArray(data.queue)) settersRef.current.setActiveQueue(data.queue);
+      }
 
       if (command === "play-track") {
         if (data.queue) settersRef.current.setActiveQueue(data.queue);
@@ -140,6 +150,9 @@ export function useSocketLogic(
       const me = members.find((m) => m.userId === String(userRef.current?.userId ?? ""));
       if (me) isLeaderRef.current = me.isHost;
     });
+    socket.on("session-proposals", ({ proposals }: { proposals: SongProposal[] }) => {
+      setSongProposals(proposals);
+    });
     socket.on("receive-private-message", (msg) => {
       setUnreadSenders(prev => [...new Set([...prev, String(msg.sender_id)])]);
     });
@@ -188,6 +201,7 @@ export function useSocketLogic(
         setCurrentSession(code);
         isLeaderRef.current = !!opts.asLeader;
         if (res.membersList) setSessionMembers(res.membersList);
+        setSongProposals(res.proposals ?? []);
         applyState(res.state);
         resolve({ ok: true, members: res.members });
       });
@@ -214,6 +228,21 @@ export function useSocketLogic(
     setCurrentSession(null);
     setSessionMessages([]);
     setSessionMembers([]);
+    setSongProposals([]);
+  }, []);
+
+  // Propone una canción para votación (o vota por ella, si ya estaba propuesta).
+  const proposeSong = useCallback((song: Song) => {
+    const code = sessionRef.current;
+    if (!code) return;
+    socketRef.current?.emit("propose-song", { code, song });
+  }, []);
+
+  // Vota o quita tu voto a una propuesta ya existente.
+  const voteSong = useCallback((songId: string) => {
+    const code = sessionRef.current;
+    if (!code) return;
+    socketRef.current?.emit("vote-song", { code, songId });
   }, []);
 
   // Pide el estado actual y corrige solo la posición (no toca play/pausa).
@@ -231,11 +260,9 @@ export function useSocketLogic(
   const emitCommand = (command: string, data: any) => {
     const code = sessionRef.current;
     if (!code) return;
-    if (command === "sync-time") {
-      if (!isLeaderRef.current) return; // solo el líder emite el latido
-    } else {
-      isLeaderRef.current = true;
-    }
+    // isLeaderRef refleja si somos el anfitrión (lo fija el evento "session-members"
+    // del servidor); emitir un comando no nos convierte en anfitrión.
+    if (command === "sync-time" && !isLeaderRef.current) return; // solo el anfitrión emite el latido
     socketRef.current?.emit("send-command", {
       code,
       command,
@@ -250,6 +277,7 @@ export function useSocketLogic(
 
   return {
     socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages, sessionMembers,
+    songProposals, proposeSong, voteSong,
     unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand,
     isShuffle, setIsShuffle, shuffledQueue, setShuffledQueue, isLoop, setIsLoop,
     setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession, transferHost
