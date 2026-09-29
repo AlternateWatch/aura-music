@@ -49,10 +49,18 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
         fetch('/api/social/friends', { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/social/activity', { headers: { Authorization: `Bearer ${token}` } })
       ]);
-      setFriends(await friendsRes.json());
-      setActivity(await activityRes.json());
+
+      const friendsData = await friendsRes.json();
+      const activityData = await activityRes.json();
+
+      // PROTECCIÓN: Solo guardamos si la respuesta es realmente un Array
+      setFriends(Array.isArray(friendsData) ? friendsData : []);
+      setActivity(Array.isArray(activityData) ? activityData : []);
+
     } catch (e) {
       console.error("Failed to fetch social data", e);
+      setFriends([]);
+      setActivity([]);
     } finally {
       setLoading(false);
     }
@@ -60,7 +68,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
 
   useEffect(() => {
     fetchSocialData();
-    const interval = setInterval(fetchSocialData, 30000); // Refresh activity every 30s
+    const interval = setInterval(fetchSocialData, 30000);
     return () => clearInterval(interval);
   }, [token]);
 
@@ -77,7 +85,11 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     }
   };
 
-  const filteredFriends = friends.filter(f => f.username.toLowerCase().includes(searchQuery.toLowerCase()));
+  // PROTECCIÓN EXTRA: Asegurar que friends es un array antes de filtrar
+  const safeFriends = Array.isArray(friends) ? friends : [];
+  const filteredFriends = safeFriends.filter(f =>
+    f && f.username && f.username.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/80 backdrop-blur-xl p-0 md:px-4 font-sans">
@@ -130,7 +142,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
             </div>
           ) : activeTab === 'activity' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {activity.length > 0 ? activity.map((act, i) => (
+              {Array.isArray(activity) && activity.length > 0 ? activity.map((act, i) => (
                 <motion.div
                   key={act.userId}
                   initial={{ opacity: 0, y: 10 }}
