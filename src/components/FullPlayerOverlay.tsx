@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { 
   X, Play, Pause, SkipBack, SkipForward, 
   Shuffle, Repeat, ChevronDown, Music2,
-  Volume2, Mic2, ListMusic, VolumeX, Volume1
+  Volume2, Mic2, ListMusic, VolumeX, Volume1, SlidersHorizontal
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
@@ -31,6 +31,7 @@ interface FullPlayerOverlayProps {
   onToggleLoop: () => void;
   onToggleLyrics: () => void;
   onToggleQueue: () => void;
+  onOpenAudioSettings: () => void;
   activeTheme: string;
   onOpenMinigameLobby: () => void; 
 }
@@ -80,6 +81,7 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
   onToggleLoop,
   onToggleLyrics,
   onToggleQueue,
+  onOpenAudioSettings,
   activeTheme,
   onOpenMinigameLobby,
   getCurrentTime,
@@ -270,13 +272,23 @@ const liveCurrentTime = useAudioPlaybackTime(
         {/* Footer Utility Bar */}
         <div className="h-24 md:h-32 flex items-center justify-between px-6 md:px-20 shrink-0 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-transparent w-full">
               
-              {/* Botón LYRICS con cuadrado gris */}
-              <button onClick={onToggleLyrics} className="flex items-center gap-2 md:gap-3 text-white/40 cursor-pointer hover:text-white transition-all group shrink-0 active:scale-95 outline-none">
-                  <div className="p-3 bg-white/5 rounded-xl md:rounded-2xl group-hover:bg-brand-primary group-hover:text-black transition-all">
-                      <Mic2 size={18} className="md:w-5 md:h-5" />
-                  </div>
-                  <span className="hidden sm:inline text-[9px] md:text-[10px] font-bold uppercase tracking-[0.3em]">Lyrics</span>
-              </button>
+              <div className="flex items-center gap-3 md:gap-5 shrink-0">
+                {/* Botón LYRICS con cuadrado gris */}
+                <button onClick={onToggleLyrics} className="flex items-center gap-2 md:gap-3 text-white/40 cursor-pointer hover:text-white transition-all group shrink-0 active:scale-95 outline-none">
+                    <div className="p-3 bg-white/5 rounded-xl md:rounded-2xl group-hover:bg-brand-primary group-hover:text-black transition-all">
+                        <Mic2 size={18} className="md:w-5 md:h-5" />
+                    </div>
+                    <span className="hidden sm:inline text-[9px] md:text-[10px] font-bold uppercase tracking-[0.3em]">Lyrics</span>
+                </button>
+
+                  {/* Botón AUDIO (ecualizador + normalizador) */}
+                  <button onClick={onOpenAudioSettings} title="Equalizer & normalizer" aria-label="Equalizer & normalizer" className="flex items-center gap-2 md:gap-3 text-white/40 cursor-pointer hover:text-white transition-all group shrink-0 active:scale-95 outline-none">
+                      <div className="p-3 bg-white/5 rounded-xl md:rounded-2xl group-hover:bg-brand-primary group-hover:text-black transition-all">
+                          <SlidersHorizontal size={18} className="md:w-5 md:h-5" />
+                      </div>
+                      <span className="hidden lg:inline text-[9px] md:text-[10px] font-bold uppercase tracking-[0.3em]">EQ</span>
+                  </button>
+              </div>
 
               {/* Volume Controller (solo Desktop/Tablets) */}
               <div className="hidden sm:flex items-center gap-4 md:gap-6 w-full max-w-[200px] md:max-w-md px-4 md:px-10 group">

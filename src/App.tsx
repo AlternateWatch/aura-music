@@ -36,6 +36,7 @@ import AuraMedia from './plugins/auraMedia';
 const LazyTabsOverlay = lazy(() => import("./components/TabsOverlay").then(m => ({ default: m.TabsOverlay })));
 const LazyProfileOverlay = lazy(() => import("./components/ProfileOverlay").then(m => ({ default: m.ProfileOverlay })));
 const LazyPersonalizationOverlay = lazy(() => import("./components/PersonalizationOverlay").then(m => ({ default: m.PersonalizationOverlay })));
+const LazyAudioSettingsOverlay = lazy(() => import("./components/AudioSettingsOverlay").then(m => ({ default: m.AudioSettingsOverlay })));
 const LazyQueueOverlay = lazy(() => import("./components/QueueOverlay").then(m => ({ default: m.QueueOverlay })));
 const LazySessionOverlay = lazy(() => import("./components/SessionOverlay").then(m => ({ default: m.SessionOverlay })));
 const LazyMinigameLobbyOverlay = lazy(() => import("./components/MinigameLobbyOverlay").then(m => ({ default: m.MinigameLobbyOverlay })));
@@ -46,6 +47,7 @@ const LazyWrappedOverlay = lazy(() => import("./components/WrappedOverlay").then
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
+import { loadAudioSettings, saveAudioSettings, type AudioSettings } from "./audio/audioSettings";
 import { useSocketLogic } from "./hooks/useSocketLogic";
 import { AuthForm } from "./hooks/AuthSection";
 import { useMediaSession } from "./hooks/useMediaSession";
@@ -203,7 +205,13 @@ export default function App() {
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
-  const [isNormalizerEnabled, setIsNormalizerEnabled] = useState(localStorage.getItem('aura_norm') === 'true');
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>(loadAudioSettings);
+  const isNormalizerEnabled = audioSettings.normalizer.enabled;
+  const updateAudioSettings = (next: AudioSettings) => {
+    setAudioSettings(next);
+    saveAudioSettings(next);
+  };
+  const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
   const [activePlaylistId, setActivePlaylistId] = useState<string>("all");
   const [playlists, setPlaylists] = useState<any[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
@@ -388,7 +396,7 @@ useEffect(() => {
   const resolvedProfilePic = useFileUrl(user?.profile_pic_path);
 
   // --- LOGIC MODULES ---
-  const audioObj = useAudioEngine(currentSong, isPlaying, volume, isNormalizerEnabled, setIsPlaying, resolvedAudioUrl);
+  const audioObj = useAudioEngine(currentSong, isPlaying, volume, audioSettings, setIsPlaying, resolvedAudioUrl);
   const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue);
   const mainRef = useRef<HTMLElement | null>(null);
   
@@ -531,6 +539,11 @@ useEffect(() => {
       return;
     }
 
+    if (isAudioSettingsOpen) {
+      setIsAudioSettingsOpen(false);
+      return;
+    }
+
     if (isProfileOpen) {
       setIsProfileOpen(false);
       return;
@@ -590,6 +603,7 @@ useEffect(() => {
   isSocialOpen,
   isSessionOpen,
   isProfileOpen,
+  isAudioSettingsOpen,
   isPersonalizationOpen,
   showUpload,
   isCreatePlaylistOpen,
@@ -3191,6 +3205,7 @@ transition={{
               getCurrentTime={audioObj.getCurrentTime}
               subscribeToTime={audioObj.subscribeToTime}
               volume={volume}
+              onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
               onTogglePlay={(e: any) => {
                 e.stopPropagation();
                 if (isMinigameActive) {
@@ -3261,7 +3276,7 @@ transition={{
 getCurrentTime={audioObj.getCurrentTime}
  onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
           if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
-      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
@@ -3282,7 +3297,17 @@ getCurrentTime={audioObj.getCurrentTime}
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isPersonalizationOpen && <LazyPersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence></Suspense>
-      <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => { setIsNormalizerEnabled(val); localStorage.setItem('aura_norm', String(val)); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isAudioSettingsOpen && (
+        <LazyAudioSettingsOverlay
+          onClose={() => setIsAudioSettingsOpen(false)}
+          settings={audioSettings}
+          onChange={updateAudioSettings}
+          subscribeStatus={audioObj.subscribeStatus}
+          getStatus={audioObj.getStatus}
+          onClearLoudnessCache={audioObj.clearLoudnessCache}
+        />
+      )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })} onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
       <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>

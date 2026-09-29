@@ -10,6 +10,7 @@ import {
   Repeat,
   Maximize2,
   MonitorPlay,
+  SlidersHorizontal,
 } from "lucide-react";
 import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
@@ -36,6 +37,7 @@ interface PlayerBarProps {
   onToggleShuffle: (e: any) => void;
   onToggleLoop: (e: any) => void;
   onToggleLyrics: (e: any) => void;
+  onOpenAudioSettings: () => void;
   onOpenFullPlayer: () => void;
   onToggleFocusMode: () => void;
   isFocusMode: boolean;
@@ -60,6 +62,7 @@ export function PlayerBar({
   onToggleShuffle,
   onToggleLoop,
   onToggleLyrics,
+  onOpenAudioSettings,
   onOpenFullPlayer,
   onToggleFocusMode,
   isFocusMode,
@@ -427,6 +430,17 @@ const [isDragging, setIsDragging] = useState(false);
             className="text-white/30 hover:text-brand-primary transition-all hover:scale-110 shrink-0 outline-none"
           >
             <Mic2 size={18} />
+          </button>
+          <button
+            title="Equalizer & normalizer"
+            aria-label="Equalizer & normalizer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenAudioSettings();
+            }}
+            className="text-white/30 hover:text-brand-primary transition-all hover:scale-110 shrink-0 outline-none"
+          >
+            <SlidersHorizontal size={18} />
           </button>
 
           <div className="hidden lg:flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/5 group shrink-0">

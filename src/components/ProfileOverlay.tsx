@@ -7,10 +7,11 @@ interface ProfileOverlayProps {
   token: string | null;
   isNormalizerEnabled: boolean;
   onToggleNormalizer: (val: boolean) => void;
+  onOpenAudioSettings?: () => void;
 }
 
 export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({ 
-  onClose, token, isNormalizerEnabled, onToggleNormalizer 
+  onClose, token, isNormalizerEnabled, onToggleNormalizer, onOpenAudioSettings 
 }) => {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -87,6 +88,11 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
                             <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isNormalizerEnabled ? 'left-7' : 'left-1'}`} />
                         </button>
                     </div>
+                    {onOpenAudioSettings && (
+                        <button onClick={onOpenAudioSettings} className="mt-4 w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-widest text-white/50 hover:text-white transition-all outline-none">
+                            Equalizer & loudness settings
+                        </button>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-10">
