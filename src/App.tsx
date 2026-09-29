@@ -7,6 +7,7 @@ import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
 import { THEMES } from "./constants/themes";
 import { useFileUrl, resolveFileUrl } from "./hooks/useFileUrl";
+import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import {
  Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users,
   MinusCircle, ListPlus, SquarePlay, DoorOpen, ArrowUpDown, Filter, Clock, Image as ImageIcon,
@@ -2178,9 +2179,11 @@ useEffect(() => {
 
       <AnimatePresence>
         {isSocialHubOpen && (
-          <Suspense fallback={null}>
-            <SocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={null}>
+              <SocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
+            </Suspense>
+          </ErrorBoundary>
         )}
       </AnimatePresence>
 
@@ -2951,7 +2954,15 @@ transition={{
               </section>
             ) : !isFocusMode ? (
               <>
-                <Suspense fallback={null}><AnimatePresence>{showUpload && <LazyMusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />}</AnimatePresence></Suspense>
+      <AnimatePresence>
+        {showUpload && (
+          <ErrorBoundary>
+            <Suspense fallback={null}>
+              <LazyMusicUpload onClose={() => setShowUpload(false)} onUploadComplete={() => loadContent()} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+      </AnimatePresence>
                 
                 {/* HERO BANNER */}
                 {!isMinigameActive && !selectedAlbumName && (
