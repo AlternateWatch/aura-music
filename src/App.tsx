@@ -2181,7 +2181,7 @@ useEffect(() => {
         {isSocialHubOpen && (
           <ErrorBoundary>
             <Suspense fallback={null}>
-              <LazySocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} />
+              <LazySocialOverlay onClose={() => setIsSocialHubOpen(false)} user={user} token={token} socket={socketObj.socketRef.current} currentSession={socketObj.currentSession} />
             </Suspense>
           </ErrorBoundary>
         )}

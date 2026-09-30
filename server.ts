@@ -93,6 +93,18 @@ pool.execute(`
     )
 `).catch(err => console.error('No se pudo crear la tabla listen_pings:', err));
 
+// --- MENSAJES PRIVADOS ENTRE AMIGOS ---
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS private_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        sender_id INT NOT NULL,
+        receiver_id INT NOT NULL,
+        message VARCHAR(1000) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_conversation (sender_id, receiver_id, created_at)
+    )
+`).catch(err => console.error('No se pudo crear la tabla private_messages:', err));
+
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -158,6 +170,86 @@ app.get('/api/social/search', authenticateToken, async (req: any, res: Response)
     }
 });
 
+// Solicitudes de amistad que me han mandado a mí y sigo sin responder.
+app.get('/api/social/requests', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            `SELECT u.id, u.username, u.profile_pic_path
+             FROM users u
+             JOIN user_friends f ON u.id = f.user_id
+             WHERE f.friend_id = ? AND f.status = 'pending'`,
+            [req.user.userId]
+        );
+        res.json(rows);
+    } catch (e: any) {
+        console.error("SOCIAL_REQUESTS_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
+});
+
+// Aceptar o rechazar una solicitud recibida. Al aceptar, se crea también la fila
+// en sentido contrario para que la amistad aparezca en la lista de ambos.
+app.post('/api/social/friend-request/respond', authenticateToken, async (req: any, res: Response) => {
+    const { friendId, accept } = req.body;
+    if (!friendId) return res.status(400).json({ error: "friendId is required" });
+    try {
+        if (accept) {
+            await pool.execute(
+                'UPDATE user_friends SET status = "accepted" WHERE user_id = ? AND friend_id = ? AND status = "pending"',
+                [friendId, req.user.userId]
+            );
+            await pool.execute(
+                'INSERT INTO user_friends (user_id, friend_id, status) VALUES (?, ?, "accepted") ON DUPLICATE KEY UPDATE status = "accepted"',
+                [req.user.userId, friendId]
+            );
+        } else {
+            await pool.execute(
+                'DELETE FROM user_friends WHERE user_id = ? AND friend_id = ? AND status = "pending"',
+                [friendId, req.user.userId]
+            );
+        }
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error("SOCIAL_RESPOND_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
+});
+
+// Historial de mensajes con un amigo concreto (los últimos 100).
+app.get('/api/social/chat/:friendId', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const friendId = req.params.friendId;
+        const [rows]: any = await pool.execute(
+            `SELECT id, sender_id, receiver_id, message, created_at FROM private_messages
+             WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+             ORDER BY created_at ASC LIMIT 100`,
+            [req.user.userId, friendId, friendId, req.user.userId]
+        );
+        res.json(rows);
+    } catch (e: any) {
+        console.error("SOCIAL_CHAT_HISTORY_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
+});
+
+// Enviar un mensaje privado (se guarda y además se manda en vivo por socket
+// desde el propio cliente con 'send-private-message', que ya existía).
+app.post('/api/social/chat', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const { receiverId, message } = req.body;
+        const clean = String(message || '').trim().slice(0, 1000);
+        if (!receiverId || !clean) return res.status(400).json({ error: "Faltan datos del mensaje" });
+        const [result]: any = await pool.execute(
+            'INSERT INTO private_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)',
+            [req.user.userId, receiverId, clean]
+        );
+        res.json({ id: result.insertId, sender_id: req.user.userId, receiver_id: receiverId, message: clean, created_at: new Date() });
+    } catch (e: any) {
+        console.error("SOCIAL_CHAT_SEND_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
+});
+
 app.get('/api/social/friends', authenticateToken, async (req: any, res: Response) => {
     try {
         console.log(`Fetching friends for user: ${req.user.userId}`);
@@ -183,11 +275,24 @@ app.get('/api/social/activity', authenticateToken, async (req: any, res: Respons
             'SELECT friend_id FROM user_friends WHERE user_id = ? AND status = "accepted"',
             [req.user.userId]
         );
-        const friendIds = friends.map((f: any) => String(f.friend_id));
-        const activity = [];
+        const friendIds: string[] = friends.map((f: any) => String(f.friend_id));
+        const activeIds = friendIds.filter((id: string) => liveActivity.has(id));
+
+        let usersById: Record<string, { username: string; profile_pic_path: string | null }> = {};
+        if (activeIds.length > 0) {
+            const placeholders = activeIds.map(() => '?').join(',');
+            const [userRows]: any = await pool.execute(
+                `SELECT id, username, profile_pic_path FROM users WHERE id IN (${placeholders})`,
+                activeIds
+            );
+            usersById = Object.fromEntries(userRows.map((u: any) => [String(u.id), u]));
+        }
+
+        const activity: any[] = [];
         liveActivity.forEach((data, userId) => {
             if (friendIds.includes(userId)) {
-                activity.push({ userId, ...data });
+                const u = usersById[userId];
+                activity.push({ userId, username: u?.username ?? 'Usuario', profile_pic_path: u?.profile_pic_path ?? null, ...data });
             }
         });
         res.json(activity);
