@@ -10,6 +10,14 @@ interface Friend {
   status: 'pending' | 'accepted' | 'blocked';
 }
 
+interface SearchResult {
+  id: string;
+  username: string;
+  profile_pic_path: string | null;
+  outgoingStatus: 'pending' | 'accepted' | 'blocked' | null; // yo -> ellos
+  incomingStatus: 'pending' | 'accepted' | 'blocked' | null; // ellos -> yo
+}
+
 interface Activity {
   userId: string;
   trackId: string | null;
@@ -41,6 +49,9 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
   const [activity, setActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
 
   const fetchSocialData = async () => {
     if (!token) return;
@@ -72,16 +83,53 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     return () => clearInterval(interval);
   }, [token]);
 
+  // Busca usuarios de verdad en el servidor a partir de 2 caracteres.
+  // Con menos, se vuelve a la lista de amigos de siempre (searchResults = null).
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2 || !token) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/social/search?q=${encodeURIComponent(q)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        setSearchResults(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          console.error('Social search failed', e);
+          setSearchResults([]);
+        }
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [searchQuery, token]);
+
   const sendFriendRequest = async (friendId: string) => {
+    setSendingTo(friendId);
     try {
       await fetch('/api/social/friend-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ friendId })
       });
+      // Refleja el envío al momento en los resultados de búsqueda, sin esperar
+      // a la siguiente búsqueda ni al refresco de la lista de amigos.
+      setSearchResults(prev => prev ? prev.map(u => u.id === friendId ? { ...u, outgoingStatus: 'pending' } : u) : prev);
       fetchSocialData();
     } catch (e) {
       console.error("Request failed", e);
+    } finally {
+      setSendingTo(null);
     }
   };
 
@@ -175,7 +223,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Search friends..."
+                  placeholder="Busca a alguien por su nombre de usuario..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 pl-12 text-white outline-none focus:border-brand-primary transition-all"
@@ -184,7 +232,50 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {filteredFriends.length > 0 ? filteredFriends.map(f => (
+                {searchQuery.trim().length >= 2 ? (
+                  searching && !searchResults ? (
+                    <div className="col-span-full text-center py-12 text-white/20 font-bold uppercase tracking-widest text-xs">Buscando...</div>
+                  ) : searchResults && searchResults.length > 0 ? searchResults.map(u => {
+                    const isFriend = u.outgoingStatus === 'accepted' || u.incomingStatus === 'accepted';
+                    const requestSent = u.outgoingStatus === 'pending';
+                    const requestReceived = u.incomingStatus === 'pending' && !requestSent;
+                    return (
+                      <div key={u.id} className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                        <div className="flex items-center gap-3">
+                          <Avatar u={u} size={40} />
+                          <div>
+                            <p className="text-white font-bold">{u.username}</p>
+                            {isFriend && <p className="text-[9px] font-bold uppercase text-emerald-400">accepted</p>}
+                            {requestSent && <p className="text-[9px] font-bold uppercase text-white/30">pending</p>}
+                            {requestReceived && <p className="text-[9px] font-bold uppercase text-brand-primary">Te ha enviado una solicitud</p>}
+                          </div>
+                        </div>
+                        {isFriend ? (
+                          <button className="p-2 rounded-xl bg-brand-primary/10 text-brand-primary hover:bg-brand-primary hover:text-black transition-all">
+                            <ArrowRight size={16} />
+                          </button>
+                        ) : requestSent ? (
+                          <div className="flex items-center gap-2 text-white/20 text-[10px] font-bold uppercase tracking-widest">
+                            <Clock size={12} /> Waiting
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => sendFriendRequest(u.id)}
+                            disabled={sendingTo === u.id}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:brightness-110 transition-all"
+                          >
+                            <UserPlus size={14} /> {sendingTo === u.id ? 'Enviando...' : 'Añadir'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }) : (
+                    <div className="col-span-full text-center py-12 text-white/20">
+                      <p className="font-bold uppercase tracking-widest">No se ha encontrado a nadie</p>
+                      <p className="text-xs mt-2">Comprueba que el nombre de usuario esté bien escrito.</p>
+                    </div>
+                  )
+                ) : filteredFriends.length > 0 ? filteredFriends.map(f => (
                   <div key={f.id} className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/5">
                     <div className="flex items-center gap-3">
                       <Avatar u={f} size={40} />
@@ -209,7 +300,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
                 )) : (
                   <div className="col-span-full text-center py-12 text-white/20">
                     <p className="font-bold uppercase tracking-widest">No friends found</p>
-                    <p className="text-xs mt-2">Start adding people to your network!</p>
+                    <p className="text-xs mt-2">Start adding people to your network! Escribe un nombre arriba para buscar.</p>
                   </div>
                 )}
               </div>

@@ -135,6 +135,29 @@ app.post('/api/social/friend-request', authenticateToken, async (req: any, res: 
     } catch (e) { res.status(500).json({ error: "Database error" }); }
 });
 
+// Busca usuarios por nombre (para añadir amigos nuevos, no solo filtrar los que ya tienes).
+app.get('/api/social/search', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const q = String(req.query.q || '').trim();
+        if (q.length < 2) return res.json([]); // evita consultas enormes con 1 sola letra
+
+        const [rows]: any = await pool.execute(
+            `SELECT u.id, u.username, u.profile_pic_path,
+                    (SELECT status FROM user_friends WHERE user_id = ? AND friend_id = u.id) AS outgoingStatus,
+                    (SELECT status FROM user_friends WHERE user_id = u.id AND friend_id = ?) AS incomingStatus
+             FROM users u
+             WHERE u.username LIKE ? AND u.id != ?
+             ORDER BY u.username ASC
+             LIMIT 20`,
+            [req.user.userId, req.user.userId, `%${q}%`, req.user.userId]
+        );
+        res.json(rows);
+    } catch (e: any) {
+        console.error("SOCIAL_SEARCH_ERROR:", e);
+        res.status(500).json({ error: "Database error", details: e.message });
+    }
+});
+
 app.get('/api/social/friends', authenticateToken, async (req: any, res: Response) => {
     try {
         console.log(`Fetching friends for user: ${req.user.userId}`);
