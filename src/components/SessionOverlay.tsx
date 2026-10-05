@@ -18,8 +18,13 @@ interface SessionOverlayProps {
   onCreateSession: () => void;
   onJoinSession: (code: string) => void;
   onLeaveSession: () => void;
+  analyser?: AnalyserNode | null;
+  active?: boolean;
+}
   isHost?: boolean;
   onTransferHost?: (targetUserId: string) => void;
+  analyser?: AnalyserNode | null;
+  active?: boolean;
 }
 
 const Avatar: React.FC<{ m: { username: string; avatar: string | null }; size?: number }> = ({ m, size = 36 }) => {
@@ -38,7 +43,7 @@ const fmtTime = (t: any) => {
 
 export const SessionOverlay: React.FC<SessionOverlayProps> = ({
   onClose, user, currentSession, messages, members = [], onSendMessage, onCreateSession, onJoinSession, onLeaveSession,
-  isHost = false, onTransferHost
+  isHost = false, onTransferHost, analyser, active
 }) => {
   const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -98,12 +103,17 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
             <div className="flex flex-col flex-1 min-h-0">
               {/* Código con botón de copiar */}
               <button onClick={copyCode} title="Copiar código"
-                className="group p-5 bg-brand-primary/10 border border-brand-primary/20 rounded-3xl text-center mb-6 hover:bg-brand-primary/15 transition-all">
-                <p className="text-[9px] font-bold text-brand-primary uppercase tracking-widest mb-2 flex items-center justify-center gap-2">
-                  Active session code {copied ? <Check size={11} /> : <Copy size={11} className="opacity-60 group-hover:opacity-100" />}
-                </p>
-                <h4 className="text-3xl font-black text-white tracking-[0.4em] pl-[0.4em]">{currentSession}</h4>
-                <p className="text-[9px] text-white/30 mt-2 uppercase font-bold">{copied ? 'Copiado' : 'Toca para copiar'}</p>
+                className="group relative overflow-hidden p-5 bg-brand-primary/10 border border-brand-primary/20 rounded-3xl text-center mb-6 hover:bg-brand-primary/15 transition-all">
+                <div className="absolute inset-0 z-0 pointer-events-none">
+                  <Visualizer analyser={analyser} active={active} color="#6366f1" />
+                </div>
+                <div className="relative z-10">
+                  <p className="text-[9px] font-bold text-brand-primary uppercase tracking-widest mb-2 flex items-center justify-center gap-2">
+                    Active session code {copied ? <Check size={11} /> : <Copy size={11} className="opacity-60 group-hover:opacity-100" />}
+                  </p>
+                  <h4 className="text-3xl font-black text-white tracking-[0.4em] pl-[0.4em]">{currentSession}</h4>
+                  <p className="text-[9px] text-white/30 mt-2 uppercase font-bold">{copied ? 'Copiado' : 'Toca para copiar'}</p>
+                </div>
               </button>
 
               {/* Personas activas */}
