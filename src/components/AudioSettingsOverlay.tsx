@@ -337,7 +337,43 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
             onClearLoudnessCache={onClearLoudnessCache}
           />
 
+          {/* AJUSTES DE REPRODUCCIÓN */}
+          <section className="p-6 bg-white/[0.02] border border-white/5 rounded-[24px]">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Activity className="text-brand-primary" size={18} />
+                  <div>
+                    <p className="text-sm font-bold text-white leading-none">Crossfade</p>
+                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Smooth transition between tracks</p>
+                  </div>
+                </div>
+                <Toggle
+                  on={settings.crossfade.enabled}
+                  onClick={() => onChange({ ...settings, crossfade: { ...settings.crossfade, enabled: !settings.crossfade.enabled } })}
+                  label="Crossfade"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Activity className="text-brand-primary" size={18} />
+                  <div>
+                    <p className="text-sm font-bold text-white leading-none">Visualizer</p>
+                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Reactive frequency waves</p>
+                  </div>
+                </div>
+                <Toggle
+                  on={settings.visualizer.enabled}
+                  onClick={() => onChange({ ...settings, visualizer: { ...settings.visualizer, enabled: !settings.visualizer.enabled } })}
+                  label="Visualizer"
+                />
+              </div>
+            </div>
+          </section>
+
           {/* ECUALIZADOR */}
+
           <section className="p-6 bg-white/[0.02] border border-white/5 rounded-[24px]">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">

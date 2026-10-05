@@ -2099,7 +2099,17 @@ useEffect(() => {
 
     
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
+      {audioSettings.visualizer.enabled && (
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-50 overflow-hidden">
+          <Visualizer
+            analyser={audioObj.analyser}
+            active={isPlaying}
+            color={dynamicColor}
+          />
+        </div>
+      )}
       {/* Barra superior de escritorio integrada con el fondo */}
+
       {isDesktop && createPortal(
         <div 
           className={`h-8 border-b flex items-center justify-between pl-3 pr-0 select-none z-50 shrink-0 backdrop-blur-md transition-colors duration-1000 fixed top-0 left-0 right-0 ${

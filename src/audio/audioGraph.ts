@@ -85,6 +85,9 @@ export class AudioGraph {
   private master: GainNode;
   private meterNode: AudioWorkletNode | null = null;
   private meterState: AudioStatus["meter"] = "loading";
+  private crossfadeNode: GainNode | null = null;
+  private crossfadeSource: MediaElementAudioSourceNode | null = null;
+
 
   private settings: AudioSettings = JSON.parse(JSON.stringify(DEFAULT_AUDIO_SETTINGS));
   private volume = 0.7;
@@ -192,6 +195,26 @@ export class AudioGraph {
 
   /** Nueva canción: se reinicia el análisis y se fija la ganancia inicial sin rampa. */
   beginTrack(id: string | null) {
+    // --- Manejo de Crossfade ---
+    if (this.settings.crossfade.enabled && this.crossfadeSource) {
+      const now = this.ctx.currentTime;
+      const duration = this.settings.crossfade.duration;
+
+      // Desvanecer la fuente antigua
+      if (this.crossfadeNode) {
+        this.crossfadeNode.gain.setTargetAtTime(0, now, duration / 4);
+        // Limpiar después de que el fade termine
+        setTimeout(() => {
+          if (this.crossfadeSource) {
+            this.crossfadeSource.disconnect();
+            this.crossfadeNode?.disconnect();
+            this.crossfadeSource = null;
+            this.crossfadeNode = null;
+          }
+        }, duration * 1000 + 100);
+      }
+    }
+
     this.trackId = id;
     this.analysis.reset();
     this.live = { lufs: null, gatedSeconds: 0 };
@@ -204,6 +227,7 @@ export class AudioGraph {
     this.evaluate({ instant: true });
     this.publish(true);
   }
+
 
   setDuration(d: number) {
     this.duration = d;

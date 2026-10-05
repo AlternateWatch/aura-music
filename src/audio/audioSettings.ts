@@ -25,6 +25,13 @@ export interface EqSettings {
 export interface AudioSettings {
   normalizer: NormalizerSettings;
   eq: EqSettings;
+  crossfade: {
+    enabled: boolean;
+    duration: number;
+  };
+  visualizer: {
+    enabled: boolean;
+  };
 }
 
 export const NORMALIZER_TARGETS = [
@@ -42,6 +49,8 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
     preamp: 0,
     autoPreamp: true,
   },
+  crossfade: { enabled: false, duration: 5 },
+  visualizer: { enabled: false },
 };
 
 const KEY = "aura_audio_v2";
@@ -72,6 +81,14 @@ export function loadAudioSettings(): AudioSettings {
       const pre = Number(p.eq.preamp);
       base.eq.preamp = Number.isFinite(pre) ? Math.min(12, Math.max(-12, pre)) : 0;
       base.eq.autoPreamp = p.eq.autoPreamp !== false;
+    }
+    if (p?.crossfade) {
+      base.crossfade.enabled = !!p.crossfade.enabled;
+      const dur = Number(p.crossfade.duration);
+      if (Number.isFinite(dur) && dur >= 0 && dur <= 20) base.crossfade.duration = dur;
+    }
+    if (p?.visualizer) {
+      base.visualizer.enabled = !!p.visualizer.enabled;
     }
   } catch {
     /* ajustes corruptos: valores por defecto */
