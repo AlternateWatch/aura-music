@@ -224,11 +224,13 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                     <span className="text-[9px] font-bold uppercase text-white/25 mb-1 px-2">
                       {mine ? 'Tú' : m.user?.username} <span className="text-white/15 font-medium normal-case">{fmtTime(m.time)}</span>
                     </span>
-                    <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'} relative group`}>
-                      {m.message}
-                      <div className="absolute -bottom-5 -right-1 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-black/60 backdrop-blur-md rounded-full p-1 border border-white/10">
+                    <div className={`flex flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
+                      <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'}`}>
+                        {m.message}
+                      </div>
+                      <div className="flex flex-wrap gap-1 px-1">
                         {m.reactions && Object.entries(getEmojiCounts(m.reactions)).map(([emoji, count]) => (
-                          <span key={emoji} className="text-[10px] bg-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform border border-white/10"
+                          <span key={emoji} className="text-[10px] bg-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:bg-white/20 transition-all border border-white/5"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (typeof onSendReaction === 'function') {
@@ -238,7 +240,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                             {emoji} <span className="text-white/60 font-bold">{count}</span>
                           </span>
                         ))}
-                        <div className="flex gap-1 px-1 border-l border-white/10 ml-1">
+                        <div className="flex gap-1 px-1 border-l border-white/10 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
                             <button key={emoji} onClick={(e) => {
                               e.stopPropagation();
