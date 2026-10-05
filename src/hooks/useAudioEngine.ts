@@ -90,7 +90,7 @@ export function useAudioEngine(
     graph.applySettings(settingsRef.current);
     graph.beginTrack(songIdRef.current);
     if (Number.isFinite(audio.duration)) graph.setDuration(audio.duration);
-    unsubscribeGraphPRef.current = graph.subscribeStatus(notifyStatus);
+    unsubscribeGraphRef.current = graph.subscribeStatus(notifyStatus);
     void graph.resume().catch(() => {});
 
     setGraphVersion((v) => v + 1);
