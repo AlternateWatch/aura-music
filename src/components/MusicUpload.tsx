@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  X, Upload, Music, Image as ImageIcon, 
-  CheckCircle2, AlertCircle, Loader2, Disc, Search, 
+import {
+  X, Upload as UploadIcon, Music, Image as ImageIcon,
+  CheckCircle2, AlertCircle, Loader2, Disc, Search,
   Layers, Check, FileAudio, ArrowLeft, RefreshCw, Calendar, User
 } from 'lucide-react';
 
@@ -375,7 +375,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
         <div className="flex items-center justify-between border-b border-white/5 px-6 py-4 shrink-0">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <Upload size={16} className="text-brand-primary" />
+              <UploadIcon size={16} className="text-brand-primary" />
               <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/90">Aura Ingest</h2>
             </div>
 
