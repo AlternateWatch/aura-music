@@ -279,7 +279,7 @@ export function useSocketLogic(
 
   return {
     socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages, sessionMembers,
-    unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand,
+    unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand, emitReaction,
     isShuffle, setIsShuffle, shuffledQueue, setShuffledQueue, isLoop, setIsLoop,
     setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession, transferHost
   };
