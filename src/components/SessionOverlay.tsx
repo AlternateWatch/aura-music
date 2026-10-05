@@ -226,19 +226,19 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                     </span>
                     <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'} relative group`}>
                       {m.message}
-                      <div className="absolute -bottom-2 -right-1 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute -bottom-3 -right-1 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         {m.reactions && Object.entries(getEmojiCounts(m.reactions)).map(([emoji, count]) => (
-                          <span key={emoji} className="text-[10px] bg-black/50 backdrop-blur-md border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                          <span key={emoji} className="text-[10px] bg-black/80 backdrop-blur-md border border-white/20 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (typeof onSendReaction === 'function') {
                                 onSendReaction(m.id, emoji);
                               }
                             }}>
-                            {emoji} <span className="text-white/40 font-bold">{count}</span>
+                            {emoji} <span className="text-white/60 font-bold">{count}</span>
                           </span>
                         ))}
-                        <div className="flex gap-1 bg-black/50 backdrop-blur-md border border-white/10 rounded-full p-1">
+                        <div className="flex gap-1 bg-black/80 backdrop-blur-md border border-white/20 rounded-full p-1">
                           {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
                             <button key={emoji} onClick={(e) => {
                               e.stopPropagation();
