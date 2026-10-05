@@ -224,7 +224,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                     <span className="text-[9px] font-bold uppercase text-white/25 mb-1 px-2">
                       {mine ? 'Tú' : m.user?.username} <span className="text-white/15 font-medium normal-case">{fmtTime(m.time)}</span>
                     </span>
-                    <div className={`flex flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
+                    <div className={`flex flex-col gap-1 ${mine ? 'items-end' : 'items-start'} group`}>
                       <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'}`}>
                         {m.message}
                       </div>
