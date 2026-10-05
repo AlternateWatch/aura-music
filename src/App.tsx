@@ -2183,7 +2183,7 @@ useEffect(() => {
         onPause={() => setIsMinigamePlaying(false)}
       />
       
-      <Background color={getThemeBg()} dynamicColor={dynamicColor} />
+      <Background color={getThemeBg()} />
       {activeTheme === 'custom' && resolvedCustomBg && (
           <div className="absolute inset-0 pointer-events-none transition-opacity duration-1000 z-[1]" style={{ backgroundImage: `url(${resolvedCustomBg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
       )}
