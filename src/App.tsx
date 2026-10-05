@@ -2099,7 +2099,7 @@ useEffect(() => {
 
     
     <div className={`relative h-[100dvh] flex flex-col font-sans overflow-hidden transition-all duration-1000 ${currentThemeConfig.className}`}>
-      {audioSettings.visualizer.enabled && (
+      {audioSettings.visualizer.enabled && audioObj.analyser && (
         <div className="absolute inset-0 z-0 pointer-events-none opacity-50 overflow-hidden">
           <Visualizer
             analyser={audioObj.analyser}
@@ -2108,6 +2108,7 @@ useEffect(() => {
           />
         </div>
       )}
+
       {/* Barra superior de escritorio integrada con el fondo */}
 
       {isDesktop && createPortal(

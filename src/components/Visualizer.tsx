@@ -22,11 +22,8 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
     let dataArray = new Uint8Array(0);
 
     if (!analyser || !active) {
-      // Sin análisis activo no hace falta animar nada: sincronizamos el
-      // tamaño, limpiamos una vez y NO seguimos pidiendo frames — antes esto
-      // se quedaba en un bucle infinito a 60fps leyendo el layout del canvas
-      // incluso con el reproductor en pausa.
       const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
       if (canvas.width !== rect.width || canvas.height !== rect.height) {
         canvas.width = rect.width;
         canvas.height = rect.height;
@@ -36,8 +33,10 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
     }
 
     const render = () => {
+      if (!analyser) return;
       // 1. Sync internal resolution with display size
       const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
       if (canvas.width !== rect.width || canvas.height !== rect.height) {
         canvas.width = rect.width;
         canvas.height = rect.height;
@@ -46,7 +45,12 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
       if (dataArray.length !== analyser.frequencyBinCount) {
         dataArray = new Uint8Array(analyser.frequencyBinCount);
       }
-      analyser.getByteFrequencyData(dataArray);
+
+      try {
+        analyser.getByteFrequencyData(dataArray);
+      } catch (e) {
+        return;
+      }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
