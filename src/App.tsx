@@ -2773,7 +2773,7 @@ transition={{
                         <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3>
                         <div className="flex gap-3">
                           <Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} />
-                          <Upload size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
+                          <UploadIcon size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
                         </div>
                       </div>
                       <ul className="space-y-4 text-[13px] font-medium">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Upload, FileText, CheckCircle2, AlertCircle, Loader2, Music, ArrowRight } from 'lucide-react';
+import { X, Upload as UploadIcon, FileText, CheckCircle2, AlertCircle, Loader2, Music, ArrowRight } from 'lucide-react';
 
 interface ImportedTrack {
   title: string;
@@ -142,7 +142,7 @@ export const PlaylistImportOverlay: React.FC<PlaylistImportOverlayProps> = ({ on
       >
         <div className="flex items-center justify-between border-b border-white/5 px-6 py-4 shrink-0">
           <div className="flex items-center gap-3">
-            <Upload size={18} className="text-brand-primary" />
+            <UploadIcon size={18} className="text-brand-primary" />
             <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white">Import Playlist</h2>
           </div>
           <button onClick={onClose} className="text-white/20 hover:text-white transition-colors"><X size={20} /></button>
