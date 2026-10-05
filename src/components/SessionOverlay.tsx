@@ -6,15 +6,25 @@ import { Visualizer } from './Visualizer';
 
 interface Member { userId: string; username: string; avatar: string | null; isHost: boolean }
 interface SongProposal { song: any; proposedBy: { userId: string; username: string }; votes: number; voterIds: string[] }
+interface SessionMessage {
+  id: string;
+  user?: { userId: string; username: string; avatar: string | null };
+  message: string;
+  time: any;
+  system?: boolean;
+  kind?: string;
+  reactions?: Record<string, string[]>;
+}
 
 interface SessionOverlayProps {
   onClose: () => void;
   token: string | null;
   user: any;
   currentSession: string | null;
-  messages: any[];
+  messages: SessionMessage[];
   members?: Member[];
   onSendMessage: (msg: string) => void;
+  onSendReaction: (messageId: string, reaction: string) => void;
   onCreateSession: () => void;
   onJoinSession: (code: string) => void;
   onLeaveSession: () => void;
@@ -40,7 +50,7 @@ const fmtTime = (t: any) => {
 
 export const SessionOverlay: React.FC<SessionOverlayProps> = ({
   onClose, user, currentSession, messages, members = [], onSendMessage, onCreateSession, onJoinSession, onLeaveSession,
-  isHost = false, onTransferHost, analyser, active
+  isHost = false, onTransferHost, analyser, active, onSendReaction
 }) => {
   const [confirmTransferId, setConfirmTransferId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -201,8 +211,27 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                     <span className="text-[9px] font-bold uppercase text-white/25 mb-1 px-2">
                       {mine ? 'Tú' : m.user?.username} <span className="text-white/15 font-medium normal-case">{fmtTime(m.time)}</span>
                     </span>
-                    <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'}`}>
+                    <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'} relative group`}>
                       {m.message}
+                      <div className="absolute -bottom-2 -right-1 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {m.reactions && Object.entries(m.reactions).map(([emoji, users]) => (
+                          <span key={emoji} className="text-[10px] bg-black/50 backdrop-blur-md border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSendReaction(m.id, emoji);
+                            }}>
+                            {emoji} <span className="text-white/40 font-bold">{users.length}</span>
+                          </span>
+                        ))}
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          // Simple reaction picker: for now just a few common ones
+                          const emoji = prompt("React with: ❤️, 🔥, 😂, 😮, 😢") || "❤️";
+                          onSendReaction(m.id, emoji);
+                        }} className="text-[10px] bg-white/10 hover:bg-white/20 rounded-full w-4 h-4 flex items-center justify-center transition-colors">
+                          +
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

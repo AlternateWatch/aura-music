@@ -2780,12 +2780,14 @@ transition={{
                         ))}
                       </ul>
                     </div>
-                    <div className="flex flex-col gap-6">
-                        <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Aura Sync</h3>
-                        <div className="h-24 border border-white/10 bg-white/5 rounded-2xl overflow-hidden p-4 w-full relative">
-                            <Visualizer analyser={audioObj.analyser} active={isPlaying} color={dynamicColor} />
-                        </div>
-                    </div>
+                    {audioSettings.visualizer.enabled && (
+                      <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-top-2 duration-500">
+                          <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Aura Sync</h3>
+                          <div className="h-24 border border-white/10 bg-white/5 rounded-2xl overflow-hidden p-4 w-full relative">
+                              <Visualizer analyser={audioObj.analyser} active={isPlaying} color={dynamicColor} />
+                          </div>
+                      </div>
+                    )}
                     <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
                 <div className="mt-auto pt-6"><div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all"><Palette size={18} className="text-brand-primary" /><span className="text-[10px] font-bold uppercase tracking-widest text-white/80">Aesthetic</span></div></div>

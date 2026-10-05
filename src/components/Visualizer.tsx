@@ -54,39 +54,42 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 2. Enhanced Visuals
-      const barCount = 60;
-      const gutter = 2;
+      // 2. Ultra-Premium Visuals
+      const barCount = 80;
+      const gutter = 1;
       const barWidth = (canvas.width - (gutter * (barCount - 1))) / barCount;
-
-      // Mirror effect setup
       const centerY = canvas.height / 2;
 
       for (let i = 0; i < barCount; i++) {
-        // Sample from the first 50% of the spectrum for a more active feel
-        const sampleIndex = Math.floor((i / barCount) * (analyser.frequencyBinCount * 0.5));
+        // Sample with a curve to emphasize bass and mid-range
+        const sampleIndex = Math.floor(Math.pow(i / barCount, 1.5) * (analyser.frequencyBinCount * 0.4));
         const value = dataArray[sampleIndex];
 
-        // Dynamic height based on value, but capped to not overflow the container
+        // Smooth the height transition
         const barHeight = Math.max(2, (value / 255) * (canvas.height * 0.8));
 
         const x = i * (barWidth + gutter);
 
-        // Create a gradient for each bar
+        // Neon-like glow effect using gradients
         const gradient = ctx.createLinearGradient(0, centerY - barHeight / 2, 0, centerY + barHeight / 2);
         gradient.addColorStop(0, color);
+        gradient.addColorStop(0.5, color);
         gradient.addColorStop(1, color);
 
         ctx.fillStyle = gradient;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = color;
 
         if (ctx.roundRect) {
           ctx.beginPath();
-          // Draw bars growing from the center outwards (Symmetric)
-          ctx.roundRect(x, centerY - barHeight / 2, barWidth, barHeight, 2);
+          ctx.roundRect(x, centerY - barHeight / 2, barWidth, barHeight, 1);
           ctx.fill();
         } else {
           ctx.fillRect(x, centerY - barHeight / 2, barWidth, barHeight);
         }
+
+        // Reset shadow for next bar to prevent bleeding
+        ctx.shadowBlur = 0;
       }
 
       animationRef.current = requestAnimationFrame(render);

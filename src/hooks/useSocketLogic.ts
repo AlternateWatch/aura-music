@@ -139,6 +139,19 @@ export function useSocketLogic(
     });
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
+    socket.on("receive-reaction", ({ messageId, userId, reaction }) => {
+      setSessionMessages(prev => prev.map(msg => {
+        if (msg.id === messageId) {
+          const reactions = msg.reactions || {};
+          const userReactions = reactions[userId] || [];
+          const newReactions = userReactions.includes(reaction)
+            ? userReactions.filter(r => r !== reaction)
+            : [...userReactions, reaction];
+          return { ...msg, reactions: { ...reactions, [userId]: newReactions } };
+        }
+        return msg;
+      }));
+    });
     socket.on("session-members", ({ code, members }: { code: string; members: SessionMember[] }) => {
       if (code !== sessionRef.current) return;
       setSessionMembers(members);
@@ -245,6 +258,17 @@ export function useSocketLogic(
       code,
       command,
       data: { ...data, sentAt: Date.now() }
+    });
+  };
+
+  const emitReaction = (messageId: string, reaction: string) => {
+    const code = sessionRef.current;
+    if (!code) return;
+    socketRef.current?.emit("send-reaction", {
+      code,
+      messageId,
+      reaction,
+      userId: userRef.current?.userId
     });
   };
 
