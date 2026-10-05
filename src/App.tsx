@@ -12,6 +12,7 @@ import {
  Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users,
   MinusCircle, ListPlus, SquarePlay, DoorOpen, ArrowUpDown, Filter, Clock, Image as ImageIcon,
   ChevronLeft, ChevronRight, Menu, Heart, Play, Trophy, Disc, FileText, Film,Library,
+Upload as UploadIcon,
 Music2,
 MessageCircle,
 Settings,
