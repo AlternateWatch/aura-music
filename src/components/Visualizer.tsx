@@ -54,35 +54,38 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 2. Original Style Logic
-      const barCount = 42; 
-      const gutter = 3; 
-      
-      // Calculate bar width to cover EXACTLY the horizontal space
+      // 2. Enhanced Visuals
+      const barCount = 60;
+      const gutter = 2;
       const barWidth = (canvas.width - (gutter * (barCount - 1))) / barCount;
-      
-      for (let i = 0; i < barCount; i++) {
-        // SAMPLING FIX: 
-        // We only sample the first 60% of the buffer (where the music actually happens)
-        // This prevents the right side from looking "dead" or empty.
-        const sampleIndex = Math.floor((i / barCount) * (analyser.frequencyBinCount * 0.6));
-        const value = dataArray[sampleIndex];
-        
-        // Scale the height and ensure a tiny base line is always there
-        const barHeight = Math.max(3, (value / 255) * canvas.height);
-        
-        const x = i * (barWidth + gutter);
-        const y = canvas.height - barHeight;
 
-        ctx.fillStyle = color;
+      // Mirror effect setup
+      const centerY = canvas.height / 2;
+
+      for (let i = 0; i < barCount; i++) {
+        // Sample from the first 50% of the spectrum for a more active feel
+        const sampleIndex = Math.floor((i / barCount) * (analyser.frequencyBinCount * 0.5));
+        const value = dataArray[sampleIndex];
+
+        // Dynamic height based on value, but capped to not overflow the container
+        const barHeight = Math.max(2, (value / 255) * (canvas.height * 0.8));
+
+        const x = i * (barWidth + gutter);
+
+        // Create a gradient for each bar
+        const gradient = ctx.createLinearGradient(0, centerY - barHeight / 2, 0, centerY + barHeight / 2);
+        gradient.addColorStop(0, color);
+        gradient.addColorStop(1, color);
+
+        ctx.fillStyle = gradient;
 
         if (ctx.roundRect) {
           ctx.beginPath();
-          // Draw vertical bars with rounded tops
-          ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
+          // Draw bars growing from the center outwards (Symmetric)
+          ctx.roundRect(x, centerY - barHeight / 2, barWidth, barHeight, 2);
           ctx.fill();
         } else {
-          ctx.fillRect(x, y, barWidth, barHeight);
+          ctx.fillRect(x, centerY - barHeight / 2, barWidth, barHeight);
         }
       }
 
