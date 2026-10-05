@@ -18,9 +18,6 @@ interface SessionOverlayProps {
   onCreateSession: () => void;
   onJoinSession: (code: string) => void;
   onLeaveSession: () => void;
-  analyser?: AnalyserNode | null;
-  active?: boolean;
-}
   isHost?: boolean;
   onTransferHost?: (targetUserId: string) => void;
   analyser?: AnalyserNode | null;
