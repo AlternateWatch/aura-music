@@ -97,11 +97,12 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
   }, [analyser, active, color]);
 
   return (
-    <canvas 
-      ref={canvasRef} 
-      className="w-full h-full block"
-      style={{ 
-        filter: `drop-shadow(0 0 12px ${color}55)`
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full block"
+      style={{
+        filter: `drop-shadow(0 0 12px ${color}55)`,
+        pointerEvents: 'none'
       }}
     />
   );

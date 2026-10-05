@@ -101,9 +101,6 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
               {/* Código con botón de copiar */}
               <button onClick={copyCode} title="Copiar código"
                 className="group relative overflow-hidden p-5 bg-brand-primary/10 border border-brand-primary/20 rounded-3xl text-center mb-6 hover:bg-brand-primary/15 transition-all">
-                <div className="absolute inset-0 z-0 pointer-events-none">
-                  <Visualizer analyser={analyser} active={active} color="#6366f1" />
-                </div>
                 <div className="relative z-10">
                   <p className="text-[9px] font-bold text-brand-primary uppercase tracking-widest mb-2 flex items-center justify-center gap-2">
                     Active session code {copied ? <Check size={11} /> : <Copy size={11} className="opacity-60 group-hover:opacity-100" />}
