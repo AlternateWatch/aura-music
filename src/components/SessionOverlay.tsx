@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useFileUrl } from '../hooks/useFileUrl';
 import { X, Users, Send, Crown, MessageSquare, Copy, Check, LogOut, LogIn, Hand, ArrowRightLeft } from 'lucide-react';
+import { Visualizer } from './Visualizer';
 
 interface Member { userId: string; username: string; avatar: string | null; isHost: boolean }
 interface SongProposal { song: any; proposedBy: { userId: string; username: string }; votes: number; voterIds: string[] }

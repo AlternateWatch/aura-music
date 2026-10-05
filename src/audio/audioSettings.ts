@@ -50,7 +50,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
     autoPreamp: true,
   },
   crossfade: { enabled: false, duration: 5 },
-  visualizer: { enabled: false },
+  visualizer: { enabled: true },
 };
 
 const KEY = "aura_audio_v2";
