@@ -39,7 +39,7 @@ export function useAudioEngine(
   volumeRef.current = volume;
   settingsRef.current = settings;
 
-  const needsGraph = settings.normalizer.enabled || settings.eq.enabled;
+  const needsGraph = settings.normalizer.enabled || settings.eq.enabled || settings.visualizer.enabled;
 
   const currentTimeRef = useRef(0);
   // Posición (s) a aplicar cuando termine de cargar la próxima canción.
@@ -90,7 +90,7 @@ export function useAudioEngine(
     graph.applySettings(settingsRef.current);
     graph.beginTrack(songIdRef.current);
     if (Number.isFinite(audio.duration)) graph.setDuration(audio.duration);
-    unsubscribeGraphRef.current = graph.subscribeStatus(notifyStatus);
+    unsubscribeGraphPRef.current = graph.subscribeStatus(notifyStatus);
     void graph.resume().catch(() => {});
 
     setGraphVersion((v) => v + 1);
@@ -241,7 +241,7 @@ export function useAudioEngine(
 
   return {
     audioRef,
-    analyserRef,
+    analyser: graphRef.current?.analyser ?? null,
     pendingSeekRef,
 
     subscribeStatus,
