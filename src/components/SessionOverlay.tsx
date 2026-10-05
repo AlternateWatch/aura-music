@@ -227,26 +227,14 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                     <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'} relative group`}>
                       {m.message}
                       <div className="absolute -bottom-2 -right-1 flex flex-wrap gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {m.reactions && Object.entries(m.reactions).map(([userId, reactions]) => {
-                          // Sumamos todas las reacciones de este usuario para este mensaje
-                          // Pero el componente anterior esperaba [emoji, users].
-                          // Vamos a cambiar la lógica para mostrar los emojis únicos y el total de usuarios por emoji.
-                          return null;
-                        }))}
-                        {/* Lógica corregida para mostrar emojis y conteo total */}
-                        {m.reactions && Object.values(m.reactions).flat().reduce((acc: Record<string, number>, emoji: string) => {
-                          acc[emoji] = (acc[emoji] || 0) + 1;
-                          return acc;
-                        }, {}), (emojiCounts: Record<string, number>) => (
-                          Object.entries(emojiCounts).map(([emoji, count]) => (
-                            <span key={emoji} className="text-[10px] bg-black/50 backdrop-blur-md border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSendReaction(m.id, emoji);
-                              }}>
-                              {emoji} <span className="text-white/40 font-bold">{count}</span>
-                            </span>
-                          ))
+                        {m.reactions && Object.entries(getEmojiCounts(m.reactions)).map(([emoji, count]) => (
+                          <span key={emoji} className="text-[10px] bg-black/50 backdrop-blur-md border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSendReaction(m.id, emoji);
+                            }}>
+                            {emoji} <span className="text-white/40 font-bold">{count}</span>
+                          </span>
                         ))}
                         <div className="flex gap-1 bg-black/50 backdrop-blur-md border border-white/10 rounded-full p-1">
                           {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
