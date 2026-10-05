@@ -103,8 +103,6 @@ export function useSocketLogic(
         if (data.queue) settersRef.current.setActiveQueue(data.queue);
         if (data.song?.id) {
           if (currentSongIdRef.current === data.song.id) {
-            // Misma canción: solo era una actualización de la cola. NO hay que
-            // llamar a handlePlaySong, que en ese caso alterna play/pausa.
             const audio = audioRef.current;
             const pos = Number(data.position) || 0;
             if (audio && Math.abs(audio.currentTime - pos) > DRIFT_TOLERANCE) audio.currentTime = pos;
@@ -137,6 +135,16 @@ export function useSocketLogic(
         audioRef.current.currentTime = data.time;
       }
     });
+
+    // HEARTBEAT: Solo el líder envía el tiempo actual cada 3 segundos para mantener a todos sincronizados
+    const heartbeatInterval = setInterval(() => {
+      if (isLeaderRef.current && sessionRef.current && audioRef.current) {
+        emitCommand("sync-time", {
+          songId: currentSongIdRef.current,
+          position: audioRef.current.currentTime
+        });
+      }
+    }, 3000);
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
     socket.on("receive-reaction", ({ messageId, userId, reaction }) => {
