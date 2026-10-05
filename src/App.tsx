@@ -24,9 +24,11 @@ Copy,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
-import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
+import { Capacitor, SystemBars, SystemBarsLStyle } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import AuraMedia from './plugins/auraMedia';
+import { PlaylistImportOverlay } from "./components/PlaylistImportOverlay";
+
 
 // Pantallas que no hacen falta en el primer render (solo se abren bajo
 // demanda desde un botón/menú) — se cargan en su propio "trozo" (chunk)
@@ -303,7 +305,8 @@ export default function App() {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isWrappedOpen, setIsWrappedOpen] = useState(false);
-  
+  const [isImportOpen, setIsImportOpen] = useState(false);
+
   // METADATA EDITING STATES
   const [songToEdit, setSongToEdit] = useState<any | null>(null);
   const [newEditCover, setNewEditCover] = useState<File | null>(null);
@@ -2766,7 +2769,13 @@ transition={{
            }`}>
                 <div className="flex-1 overflow-y-auto flex flex-col gap-10 scrollbar-hide">
                     <div>
-                      <div className="flex items-center justify-between mb-6"><h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3><Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} /></div>
+                      <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3>
+                        <div className="flex gap-3">
+                          <Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} />
+                          <Upload size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
+                        </div>
+                      </div>
                       <ul className="space-y-4 text-[13px] font-medium">
                         <li key="stream-all" className={`cursor-pointer transition-all ${activePlaylistId === "all" ? "text-brand-primary" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("all"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>Global Stream</li>
                         <li key="liked-songs" className={`flex items-center gap-2 cursor-pointer transition-all ${activePlaylistId === "liked" ? "text-red-500 font-bold" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("liked"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>
@@ -3332,7 +3341,18 @@ getCurrentTime={audioObj.getCurrentTime}
         />
       )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })} onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
-      <AnimatePresence>{sessionNotice && ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
+      <AnimatePresence>{isImportOpen && (
+        <PlaylistImportOverlay
+          onClose={() => setIsImportOpen(false)}
+          token={token}
+          onImportComplete={(name, ids) => {
+            setIsImportOpen(false);
+            loadPlaylists();
+            loadContent();
+          }}
+        />
+      )}</AnimatePresence>
+      <AnimatePresence>{sessionNotice && (<motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} onSendReaction={(messageId, reaction) => socketObj.emitReaction(messageId, reaction)} analyser={audioObj.analyser} active={isPlaying} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
 

@@ -148,17 +148,21 @@ export function useSocketLogic(
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
     socket.on("receive-reaction", ({ messageId, userId, reaction }) => {
-      setSessionMessages(prev => prev.map(msg => {
-        if (msg.id === messageId) {
-          const reactions = msg.reactions || {};
-          const userReactions = reactions[userId] || [];
-          const newReactions = userReactions.includes(reaction)
-            ? userReactions.filter(r => r !== reaction)
-            : [...userReactions, reaction];
-          return { ...msg, reactions: { ...reactions, [userId]: newReactions } };
-        }
-        return msg;
-      }));
+      console.log("[SOCKET] receive-reaction:", { messageId, userId, reaction });
+      setSessionMessages(prev => {
+        const updated = prev.map(msg => {
+          if (msg.id === messageId) {
+            const reactions = msg.reactions || {};
+            const userReactions = reactions[userId] || [];
+            const newReactions = userReactions.includes(reaction)
+              ? userReactions.filter(r => r !== reaction)
+              : [...userReactions, reaction];
+            return { ...msg, reactions: { ...reactions, [userId]: newReactions } };
+          }
+          return msg;
+        });
+        return updated;
+      });
     });
     socket.on("session-members", ({ code, members }: { code: string; members: SessionMember[] }) => {
       if (code !== sessionRef.current) return;
@@ -272,6 +276,22 @@ export function useSocketLogic(
   const emitReaction = (messageId: string, reaction: string) => {
     const code = sessionRef.current;
     if (!code) return;
+
+    // Optimistic Update: Immediately update local state so the user sees their reaction
+    setSessionMessages(prev =>
+      prev.map(msg => {
+        if (msg.id === messageId) {
+          const reactions = msg.reactions || {};
+          const myReactions = reactions[userRef.current?.userId] || [];
+          const newMyReactions = myReactions.includes(reaction)
+            ? myReactions.filter(r => r !== reaction)
+            : [...myReactions, reaction];
+          return { ...msg, reactions: { ...reactions, [userRef.current?.userId]: newMyReactions } };
+        }
+        return msg;
+      })
+    );
+
     socketRef.current?.emit("send-reaction", {
       code,
       messageId,
