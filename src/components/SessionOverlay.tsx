@@ -231,7 +231,9 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                           <span key={emoji} className="text-[10px] bg-black/50 backdrop-blur-md border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onSendReaction(m.id, emoji);
+                              if (typeof onSendReaction === 'function') {
+                                onSendReaction(m.id, emoji);
+                              }
                             }}>
                             {emoji} <span className="text-white/40 font-bold">{count}</span>
                           </span>
@@ -240,7 +242,9 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                           {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
                             <button key={emoji} onClick={(e) => {
                               e.stopPropagation();
-                              onSendReaction(m.id, emoji);
+                              if (typeof onSendReaction === 'function') {
+                                onSendReaction(m.id, emoji);
+                              }
                             }} className="hover:scale-125 transition-transform px-0.5">
                               {emoji}
                             </button>
