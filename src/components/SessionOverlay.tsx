@@ -223,14 +223,16 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                             {emoji} <span className="text-white/40 font-bold">{users.length}</span>
                           </span>
                         ))}
-                        <button onClick={(e) => {
-                          e.stopPropagation();
-                          // Simple reaction picker: for now just a few common ones
-                          const emoji = prompt("React with: ❤️, 🔥, 😂, 😮, 😢") || "❤️";
-                          onSendReaction(m.id, emoji);
-                        }} className="text-[10px] bg-white/10 hover:bg-white/20 rounded-full w-4 h-4 flex items-center justify-center transition-colors">
-                          +
-                        </button>
+                        <div className="flex gap-1 bg-black/50 backdrop-blur-md border border-white/10 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
+                            <button key={emoji} onClick={(e) => {
+                              e.stopPropagation();
+                              onSendReaction(m.id, emoji);
+                            }} className="hover:scale-125 transition-transform px-0.5">
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>

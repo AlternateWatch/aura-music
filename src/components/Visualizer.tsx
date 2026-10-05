@@ -77,8 +77,6 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
         gradient.addColorStop(1, color);
 
         ctx.fillStyle = gradient;
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = color;
 
         if (ctx.roundRect) {
           ctx.beginPath();
@@ -107,7 +105,6 @@ export const Visualizer: React.FC<VisualizerProps> = ({ analyser, active, color 
       ref={canvasRef}
       className="absolute inset-0 w-full h-full block"
       style={{
-        filter: `drop-shadow(0 0 12px ${color}55)`,
         pointerEvents: 'none'
       }}
     />
