@@ -228,7 +228,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                       <div className={`px-5 py-3 rounded-2xl text-sm break-words ${mine ? 'bg-brand-primary text-black font-medium rounded-tr-none' : 'bg-white/5 text-white/80 rounded-tl-none border border-white/5'}`}>
                         {m.message}
                       </div>
-                      <div className={`flex flex-wrap gap-1 px-1 ${mine ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex flex-wrap gap-1 px-1 ${mine ? 'justify-end' : 'justify-start'} w-full`}>
                         {m.reactions && Object.entries(getEmojiCounts(m.reactions)).map(([emoji, count]) => (
                           <span key={emoji} className="text-[10px] bg-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 cursor-pointer hover:bg-white/20 transition-all border border-white/5"
                             onClick={(e) => {
@@ -240,7 +240,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                             {emoji} <span className="text-white/60 font-bold">{count}</span>
                           </span>
                         ))}
-                        <div className="flex gap-1 px-1 border-l border-white/10 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className={`flex gap-1 px-1 border-l border-white/10 ml-1 opacity-0 group-hover:opacity-100 transition-opacity ${mine ? 'flex-row-reverse border-l-0 border-r' : ''}`}>
                           {['❤️', '🔥', '😂', '😮', '😢'].map(emoji => (
                             <button key={emoji} onClick={(e) => {
                               e.stopPropagation();
