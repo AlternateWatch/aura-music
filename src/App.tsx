@@ -236,6 +236,7 @@ export default function App() {
     saveAudioSettings(next);
   };
   const [isAudioSettingsOpen, setIsAudioSettingsOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [activePlaylistId, setActivePlaylistId] = useState<string>("all");
   const [playlists, setPlaylists] = useState<any[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
