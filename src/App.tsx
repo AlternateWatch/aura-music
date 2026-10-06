@@ -325,7 +325,8 @@ export default function App() {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isWrappedOpen, setIsWrappedOpen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
+  const [purgeStats, setPurgeStats] = useState<{ albums: number; tracks: number; files: number } | null>(null);
 
   // METADATA EDITING STATES
   const [songToEdit, setSongToEdit] = useState<any | null>(null);
@@ -1615,9 +1616,14 @@ useEffect(() => {
   };
 
   const handlePurgeCovers = async () => {
-    if (!window.confirm("⚠️ WARNING: This is a destructive operation. It will normalize all album covers and permanently delete redundant files from the server. Are you sure?")) {
-      return;
+    if (!isDesktop) {
+      if (!window.confirm("⚠️ WARNING: This is a destructive operation. It will normalize all album covers and permanently delete redundant files from the server. Are you sure?")) {
+        return;
+      }
     }
+
+    setIsPurging(true);
+    setPurgeStats(null);
 
     try {
       const activeToken = token || localStorage.getItem('aura_token');
@@ -1632,10 +1638,23 @@ useEffect(() => {
       }
 
       const data = await res.json();
-      alert(`✅ Purge Complete!\n\nAlbums Processed: ${data.albumsProcessed}\nTracks Updated: ${data.tracksUpdated}\nFiles Deleted: ${data.filesDeleted}`);
+      setPurgeStats({
+        albums: data.albumsProcessed,
+        tracks: data.tracksUpdated,
+        files: data.filesDeleted
+      });
+
+      const msg = `✅ Purge Complete!\n\nAlbums Processed: ${data.albumsProcessed}\nTracks Updated: ${data.tracksUpdated}\nFiles Deleted: ${data.filesDeleted}`;
+
+      if (isDesktop) {
+        console.log(msg);
+      } else {
+        alert(msg);
+      }
+
       loadContent();
-    } catch (err: any) {
-      alert(`❌ Error: ${err.message}`);
+    } finally {
+      setIsPurging(false);
     }
   };
 
@@ -3051,12 +3070,35 @@ transition={{
                             {!selectedAlbumName && !isMinigameActive && (
                                 <div className="flex flex-wrap items-center gap-3">
                                     {showModeration && userRole === 'admin' && (
-                                      <button
-                                        onClick={handlePurgeCovers}
-                                        className="px-3 py-1 rounded-full bg-amber-600 text-white text-[8px] font-bold uppercase tracking-widest hover:bg-amber-500 transition-all shadow-lg flex items-center gap-1.5"
-                                      >
-                                        <AlertTriangle size={10}/> Purge Album Covers
-                                      </button>
+                                      <div className="flex flex-col gap-3 w-full max-w-[200px]">
+                                        <button
+                                          onClick={handlePurgeCovers}
+                                          disabled={isPurging}
+                                          className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
+                                            isPurging
+                                              ? 'bg-white/20 text-white/40 cursor-not-allowed'
+                                              : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
+                                          }`}
+                                        >
+                                          {isPurging ? (
+                                            <>
+                                              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                              Purging...
+                                            </>
+                                          ) : (
+                                            <>
+                                              <AlertTriangle size={10}/> Purge Album Covers
+                                            </>
+                                          )}
+                                        </button>
+                                        {purgeStats && !isPurging && (
+                                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
+                                            <p>Albums: {purgeStats.albums}</p>
+                                            <p>Tracks: {purgeStats.tracks}</p>
+                                            <p>Files: {purgeStats.files}</p>
+                                          </div>
+                                        )}
+                                      </div>
                                     )}
                                     {!showModeration && (
                                       <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
