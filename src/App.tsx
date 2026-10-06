@@ -3048,15 +3048,27 @@ transition={{
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-white/5 pb-4 text-white gap-4">
                         <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 w-full">
                             <h2 className="text-[10px] md:text-[11px] uppercase tracking-[0.3em] md:tracking-[0.4em] font-bold text-white/40">{isMinigameActive ? "RECON MINIGAME - CLICK TO GUESS" : (selectedAlbumName ? `ALBUM: ${selectedAlbumName.toUpperCase()}` : (showModeration ? "PENDING QUEUE" : (activePlaylistId === 'all' ? "Global Top Tracks" : (activePlaylistId === 'liked' ? "Favorite Tracks" : "Playlist Stream"))))}</h2>
-                            {!selectedAlbumName && !showModeration && !isMinigameActive && (
+                            {!selectedAlbumName && !isMinigameActive && (
                                 <div className="flex flex-wrap items-center gap-3">
-                                    <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
+                                    {showModeration && userRole === 'admin' && (
+                                      <button
+                                        onClick={handlePurgeCovers}
+                                        className="px-3 py-1 rounded-full bg-amber-600 text-white text-[8px] font-bold uppercase tracking-widest hover:bg-amber-500 transition-all shadow-lg flex items-center gap-1.5"
+                                      >
+                                        <AlertTriangle size={10}/> Purge Album Covers
+                                      </button>
+                                    )}
+                                    {!showModeration && (
+                                      <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
                                         {(['all', 'mp3', 'flac'] as const).map(f => (<button key={f} onClick={() => setFormatFilter(f)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${formatFilter === f ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white'}`}>{f}</button>))}
-                                    </div>
-                                    <div className={`flex items-center gap-2 p-1 rounded-full border border-white/5 bg-white/5`}>
+                                      </div>
+                                    )}
+                                    {!showModeration && (
+                                      <div className={`flex items-center gap-2 p-1 rounded-full border border-white/5 bg-white/5`}>
                                         <div className="px-2 text-white/20"><ArrowUpDown size={12}/></div>
                                         {(['first', 'name', 'album', 'artist'] as const).map(s => (<button key={s} onClick={() => setSortBy(s)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${sortBy === s ? 'bg-white text-black' : 'text-white/30 hover:text-white'}`}>{s}</button>))}
-                                    </div>
+                                      </div>
+                                    )}
                                 </div>
                             )}
                         </div>
