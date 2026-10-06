@@ -1691,6 +1691,26 @@ useEffect(() => {
     loadContent();
   };
 
+  const confirmDeleteTrack = async () => {
+    if (!trackToDelete) return;
+    const activeToken = token || localStorage.getItem('aura_token');
+    try {
+      const res = await fetch(`${API_BASE}/api/tracks/${trackToDelete}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        setTrackToDelete(null);
+        loadContent();
+      } else {
+        alert("Failed to delete track.");
+      }
+    } catch (err) {
+      console.error("Error deleting track:", err);
+      alert("An error occurred while deleting the track.");
+    }
+  };
+
   const handleReorderPlaylist = async (newOrder: Song[]) => {
     if (activePlaylistId === 'all' || activePlaylistId === 'liked') return;
     const activeToken = token || localStorage.getItem('aura_token');
