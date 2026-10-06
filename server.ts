@@ -388,6 +388,8 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
     }
 });
 
+// --- AUTH ---
+const isCapacitorApp = (req: Request) => {
     return req.headers.origin === 'https://localhost';
 };
 
