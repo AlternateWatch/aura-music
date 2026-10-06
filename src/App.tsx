@@ -193,7 +193,26 @@ export default function App() {
   // --- CORE STATE ---
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
   const [user, setUser] = useState<any>(localStorage.getItem('aura_user') ? JSON.parse(localStorage.getItem('aura_user')!) : null);
-  const [userRole, setUserRole] = useState(localStorage.getItem('aura_role') || "user");
+  const [userRole, setUserRole] = useState("user");
+
+  useEffect(() => {
+    const tokenValue = localStorage.getItem('aura_token');
+    if (tokenValue) {
+      try {
+        const base64Url = tokenValue.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+          '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        ).join(''));
+        const decoded = JSON.parse(jsonPayload);
+        if (decoded.role) {
+          setUserRole(decoded.role);
+        }
+      } catch (e) {
+        console.error("Error decoding token for role:", e);
+      }
+    }
+  }, []);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   
@@ -757,8 +776,9 @@ useEffect(() => {
   };
   
   const handleLoginSuccess = (t: string, u: any, r: string) => {
-    localStorage.setItem('aura_token', t); localStorage.setItem('aura_user', JSON.stringify(u)); localStorage.setItem('aura_role', r);
-    window.location.reload(); 
+    localStorage.setItem('aura_token', t); localStorage.setItem('aura_user', JSON.stringify(u));
+    setUserRole(r);
+    window.location.reload();
   };
   const handleLogout = () => { localStorage.clear(); window.location.reload(); };
 
