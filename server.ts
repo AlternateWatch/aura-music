@@ -302,8 +302,92 @@ app.get('/api/social/activity', authenticateToken, async (req: any, res: Respons
     }
 });
 
-// --- AUTH ---
-const isCapacitorApp = (req: Request) => {
+// --- ADMIN UTILS ---
+const purgeAlbumCovers = async () => {
+    let albumsProcessed = 0;
+    let filesDeleted = 0;
+    let tracksUpdated = 0;
+    const potentialDeletions = new Set<string>();
+
+    try {
+        // 1. Identify albums with more than one track
+        const [albums]: any = await pool.execute(
+            "SELECT album FROM tracks WHERE album IS NOT NULL AND album != '' GROUP BY album HAVING COUNT(*) > 1"
+        );
+
+        for (const albumRow of albums) {
+            const albumName = albumRow.album;
+
+            // 2. Fetch all tracks in the album ordered by ID
+            const [tracks]: any = await pool.execute(
+                "SELECT id, cover_path, animated_cover_path FROM tracks WHERE album = ? ORDER BY id ASC",
+                [albumName]
+            );
+
+            if (tracks.length <= 1) continue;
+
+            const masterCover = tracks[0].cover_path;
+            const masterAnimCover = tracks[0].animated_cover_path;
+
+            // 3. Update other tracks and collect redundant files
+            for (let i = 1; i < tracks.length; i++) {
+                const track = tracks[i];
+                let updated = false;
+
+                if (track.cover_path !== masterCover) {
+                    if (track.cover_path) potentialDeletions.add(track.cover_path);
+                    updated = true;
+                }
+                if (track.animated_cover_path !== masterAnimCover) {
+                    if (track.animated_cover_path) potentialDeletions.add(track.animated_cover_path);
+                    updated = true;
+                }
+
+                if (updated) {
+                    await pool.execute(
+                        "UPDATE tracks SET cover_path = ?, animated_cover_path = ? WHERE id = ?",
+                        [masterCover, masterAnimCover, track.id]
+                    );
+                    tracksUpdated++;
+                }
+            }
+            albumsProcessed++;
+        }
+
+        // 4. Safe Deletion: Only delete if no other tracks in the whole DB use these files
+        for (const path of potentialDeletions) {
+            const [check]: any = await pool.execute(
+                "SELECT COUNT(*) as count FROM tracks WHERE cover_path = ? OR animated_cover_path = ?",
+                [path, path]
+            );
+
+            if (check[0].count === 0) {
+                const fullPath = path.startsWith('/') ? path.substring(1) : path;
+                const absPath = path.join(__dirname, 'public', fullPath);
+                if (fs.existsSync(absPath)) {
+                    fs.unlinkSync(absPath);
+                    filesDeleted++;
+                }
+            }
+        }
+
+        return { albumsProcessed, filesDeleted, tracksUpdated };
+    } catch (error) {
+        console.error("Purge covers error:", error);
+        throw error;
+    }
+};
+
+app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden: Admins only." });
+    try {
+        const result = await purgeAlbumCovers();
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ error: "Internal server error during purge." });
+    }
+});
+
     return req.headers.origin === 'https://localhost';
 };
 

@@ -1614,11 +1614,29 @@ useEffect(() => {
     }
   };
 
-  const confirmDeleteTrack = async () => {
-    if (!trackToDelete) return;
-    const activeToken = token || localStorage.getItem('aura_token');
-    const res = await fetch(`${API_BASE}/api/tracks/${trackToDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
-    if (res.ok) { setTrackToDelete(null); loadContent(); }
+  const handlePurgeCovers = async () => {
+    if (!window.confirm("⚠️ WARNING: This is a destructive operation. It will normalize all album covers and permanently delete redundant files from the server. Are you sure?")) {
+      return;
+    }
+
+    try {
+      const activeToken = token || localStorage.getItem('aura_token');
+      const res = await fetch(`${API_BASE}/api/admin/purge-album-covers`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to purge covers");
+      }
+
+      const data = await res.json();
+      alert(`✅ Purge Complete!\n\nAlbums Processed: ${data.albumsProcessed}\nTracks Updated: ${data.tracksUpdated}\nFiles Deleted: ${data.filesDeleted}`);
+      loadContent();
+    } catch (err: any) {
+      alert(`❌ Error: ${err.message}`);
+    }
   };
 
   const handleCreatePlaylist = async (e: React.FormEvent) => {
@@ -2899,12 +2917,23 @@ transition={{
                       <FileText size={14} /> Biografía / Información
                     </h3>
                     {(userRole === 'admin' || userRole === 'moderator') && (
-                      <button 
-                        onClick={() => setIsEditingBio(true)}
-                        className="text-[9px] font-bold uppercase text-brand-primary hover:underline flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Edit2 size={12} /> {artistBio ? 'Editar Descripción' : 'Añadir Descripción'}
-                      </button>
+                      <div className="flex flex-col gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 mt-6">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-amber-500 flex items-center gap-2">
+                          <AlertTriangle size={12} /> Maintenance
+                        </h4>
+                        <button
+                          onClick={handlePurgeCovers}
+                          disabled={userRole !== 'admin'}
+                          className={`w-full py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                            userRole === 'admin'
+                              ? 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 shadow-lg'
+                              : 'bg-white/5 text-white/20 cursor-not-allowed'
+                          }`}
+                        >
+                          Normalize & Purge Covers
+                        </button>
+                        {userRole !== 'admin' && <p className="text-[8px] text-white/30 italic">Only admins can execute this.</p>}
+                      </div>
                     )}
                   </div>
 
