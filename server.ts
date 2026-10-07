@@ -108,16 +108,11 @@ pool.execute(`
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-<<<<<<< HEAD
     if (!token) {
         console.log("❌ Error: No token recibido");
         return res.status(401).json({ error: "No token." });
     }
 
-=======
-    console.log("DEBUG AUTH HEADER:", authHeader);
-    if (!token) return res.status(401).json({ error: "No token." });
->>>>>>> 83f3af7416ca3f808da1b5e991cf4be219192d53
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
         if (err) {
             console.log("❌ Error de Verificación JWT:", err.message);
