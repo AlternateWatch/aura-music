@@ -355,14 +355,14 @@ const purgeAlbumCovers = async () => {
         }
 
         // 4. Safe Deletion: Only delete if no other tracks in the whole DB use these files
-        for (const path of potentialDeletions) {
+        for (const p of potentialDeletions) {
             const [check]: any = await pool.execute(
                 "SELECT COUNT(*) as count FROM tracks WHERE cover_path = ? OR animated_cover_path = ?",
-                [path, path]
+                [p, p]
             );
 
             if (check[0].count === 0) {
-                const fullPath = path.startsWith('/') ? path.substring(1) : path;
+                const fullPath = p.startsWith('/') ? p.substring(1) : p;
                 const absPath = path.join(__dirname, 'public', fullPath);
                 if (fs.existsSync(absPath)) {
                     fs.unlinkSync(absPath);
