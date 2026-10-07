@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "tauri": "tauri",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
