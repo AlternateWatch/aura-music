@@ -1603,16 +1603,16 @@ useEffect(() => {
     formData.append('video_url', songToEdit.video_url || "");
     formData.append('cover_path', songToEdit.coverUrl || "");
     formData.append('animated_cover_path', songToEdit.animated_cover_path || "");
-    
+
     if (newEditCover) { formData.append('cover', newEditCover); }
     if (newEditAnimatedCover) { formData.append('animated_cover', newEditAnimatedCover); }
-    
+
     const res = await fetch(`${API_BASE}/api/tracks/${songToEdit.id}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${activeToken}` }, body: formData });
-    if (res.ok) { 
-      setSongToEdit(null); 
-      setNewEditCover(null); 
+    if (res.ok) {
+      setSongToEdit(null);
+      setNewEditCover(null);
       setNewEditAnimatedCover(null);
-      loadContent(); 
+      loadContent();
     }
   };
 
@@ -2957,23 +2957,15 @@ transition={{
                       <FileText size={14} /> Biografía / Información
                     </h3>
                     {(userRole === 'admin' || userRole === 'moderator') && (
-                      <div className="flex flex-col gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 mt-6">
-                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-amber-500 flex items-center gap-2">
-                          <AlertTriangle size={12} /> Maintenance
-                        </h4>
-                        <button
-                          onClick={handlePurgeCovers}
-                          disabled={userRole !== 'admin'}
-                          className={`w-full py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                            userRole === 'admin'
-                              ? 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 shadow-lg'
-                              : 'bg-white/5 text-white/20 cursor-not-allowed'
-                          }`}
-                        >
-                          Normalize & Purge Covers
-                        </button>
-                        {userRole !== 'admin' && <p className="text-[8px] text-white/30 italic">Only admins can execute this.</p>}
-                      </div>
+                      <button
+                        onClick={() => {
+                          setNewBioText(artistBio || "");
+                          setIsEditingBio(true);
+                        }}
+                        className="flex items-center gap-1 px-3 py-1 rounded-full bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20 transition-all cursor-pointer text-[10px] font-bold uppercase tracking-wider"
+                      >
+                        <Edit2 size={12} /> Edit Bio
+                      </button>
                     )}
                   </div>
 
@@ -3090,37 +3082,6 @@ transition={{
                             <h2 className="text-[10px] md:text-[11px] uppercase tracking-[0.3em] md:tracking-[0.4em] font-bold text-white/40">{isMinigameActive ? "RECON MINIGAME - CLICK TO GUESS" : (selectedAlbumName ? `ALBUM: ${selectedAlbumName.toUpperCase()}` : (showModeration ? "PENDING QUEUE" : (activePlaylistId === 'all' ? "Global Top Tracks" : (activePlaylistId === 'liked' ? "Favorite Tracks" : "Playlist Stream"))))}</h2>
                             {!selectedAlbumName && !isMinigameActive && (
                                 <div className="flex flex-wrap items-center gap-3">
-                                    {showModeration && userRole === 'admin' && (
-                                      <div className="flex flex-col gap-3 w-full max-w-[200px]">
-                                        <button
-                                          onClick={handlePurgeCovers}
-                                          disabled={isPurging}
-                                          className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
-                                            isPurging
-                                              ? 'bg-white/20 text-white/40 cursor-not-allowed'
-                                              : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
-                                          }`}
-                                        >
-                                          {isPurging ? (
-                                            <>
-                                              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                              Purging...
-                                            </>
-                                          ) : (
-                                            <>
-                                              <AlertTriangle size={10}/> Purge Album Covers
-                                            </>
-                                          )}
-                                        </button>
-                                        {purgeStats && !isPurging && (
-                                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
-                                            <p>Albums: {purgeStats.albums}</p>
-                                            <p>Tracks: {purgeStats.tracks}</p>
-                                            <p>Files: {purgeStats.files}</p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
                                     {!showModeration && (
                                       <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
                                         {(['all', 'mp3', 'flac'] as const).map(f => (<button key={f} onClick={() => setFormatFilter(f)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${formatFilter === f ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white'}`}>{f}</button>))}
