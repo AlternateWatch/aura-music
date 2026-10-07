@@ -3565,12 +3565,22 @@ getCurrentTime={audioObj.getCurrentTime}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-white/30 ml-2">Cover Art (Estática)</label>
-                  <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0">
-                      {newEditCover ? ( 
-                        <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" /> 
-                      ) : ( 
-                        <img src={songToEdit.coverUrl} className="w-full h-full object-cover" /> 
+                  <div className="flex items-center gap-3 relative">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0 relative group">
+                      {newEditCover ? (
+                        <img src={URL.createObjectURL(newEditCover)} className="w-full h-full object-cover" />
+                      ) : (
+                        <img src={songToEdit.coverUrl} className="w-full h-full object-cover" />
+                      )}
+                      {(songToEdit.coverUrl || newEditCover) && (
+                        <button
+                          type="button"
+                          onClick={() => setSongToEdit({...songToEdit, coverUrl: ''})}
+                          className="absolute bottom-1 right-1 p-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Borrar portada"
+                        >
+                          <X size={10} />
+                        </button>
                       )}
                     </div>
                     <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-3 flex flex-col items-center justify-center hover:bg-white/10 transition-all text-center">
@@ -3585,8 +3595,8 @@ getCurrentTime={audioObj.getCurrentTime}
                   <label className="text-[10px] uppercase font-bold text-brand-primary ml-2 flex items-center gap-1">
                     <Film size={12} /> Portada Animada (Focus)
                   </label>
-                  <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0 flex items-center justify-center bg-black">
+                  <div className="flex items-center gap-3 relative">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0 relative group">
                       {newEditAnimatedCover ? (
                         newEditAnimatedCover.type.startsWith('video') ? (
                           <video src={URL.createObjectURL(newEditAnimatedCover)} autoPlay loop muted className="w-full h-full object-cover" />
@@ -3601,6 +3611,16 @@ getCurrentTime={audioObj.getCurrentTime}
                         )
                       ) : (
                         <Film size={20} className="text-white/20" />
+                      )}
+                      {(songToEdit.animated_cover_path || newEditAnimatedCover) && (
+                        <button
+                          type="button"
+                          onClick={() => setSongToEdit({...songToEdit, animated_cover_path: ''})}
+                          className="absolute bottom-1 right-1 p-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Borrar portada animada"
+                        >
+                          <X size={10} />
+                        </button>
                       )}
                     </div>
                     <label className="flex-1 cursor-pointer bg-white/5 border-2 border-dashed border-brand-primary/20 rounded-2xl p-3 flex flex-col items-center justify-center hover:bg-brand-primary/5 transition-all text-center">
