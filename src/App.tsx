@@ -2929,7 +2929,7 @@ transition={{
                       <User size={14} className="text-brand-primary" />
                       <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-primary">Perfil de Artista Oficial</span>
                     </div>
-                    <h1 className="text-4xl md:text-7xl font-serif italic font-bold text-white tracking-tight">{selectedArtistName} --- CLAUDE TEST ---</h1>
+                    <h1 className="text-4xl md:text-7xl font-serif italic font-bold text-white tracking-tight">{selectedArtistName}</h1>
                     <p className="text-xs font-mono text-white/40 uppercase tracking-widest">
                       {artistAlbums.length} Álbumes · {flattenedSongs.length} Pistas en AURA
                     </p>
