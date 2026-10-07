@@ -558,7 +558,6 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
     let animatedCoverPath = req.body.animated_cover_path;
 
     try {
-    try {
         if (req.files && req.files['cover']) {
             const coverFile = req.files['cover'][0];
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
