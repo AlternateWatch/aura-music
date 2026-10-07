@@ -3082,6 +3082,37 @@ transition={{
                             <h2 className="text-[10px] md:text-[11px] uppercase tracking-[0.3em] md:tracking-[0.4em] font-bold text-white/40">{isMinigameActive ? "RECON MINIGAME - CLICK TO GUESS" : (selectedAlbumName ? `ALBUM: ${selectedAlbumName.toUpperCase()}` : (showModeration ? "PENDING QUEUE" : (activePlaylistId === 'all' ? "Global Top Tracks" : (activePlaylistId === 'liked' ? "Favorite Tracks" : "Playlist Stream"))))}</h2>
                             {!selectedAlbumName && !isMinigameActive && (
                                 <div className="flex flex-wrap items-center gap-3">
+                                    {showModeration && userRole === 'admin' && (
+                                      <div className="flex flex-col gap-3 w-full max-w-[200px]">
+                                        <button
+                                          onClick={handlePurgeCovers}
+                                          disabled={isPurging}
+                                          className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
+                                            isPurging
+                                              ? 'bg-white/20 text-white/40 cursor-not-allowed'
+                                              : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
+                                          }`}
+                                        >
+                                          {isPurging ? (
+                                            <>
+                                              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                              Purging...
+                                            </>
+                                          ) : (
+                                            <>
+                                              <AlertTriangle size={10}/> Purge Album Covers
+                                            </>
+                                          )}
+                                        </button>
+                                        {purgeStats && !isPurging && (
+                                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
+                                            <p>Albums: {purgeStats.albums}</p>
+                                            <p>Tracks: {purgeStats.tracks}</p>
+                                            <p>Files: {purgeStats.files}</p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
                                     {!showModeration && (
                                       <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
                                         {(['all', 'mp3', 'flac'] as const).map(f => (<button key={f} onClick={() => setFormatFilter(f)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${formatFilter === f ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white'}`}>{f}</button>))}
