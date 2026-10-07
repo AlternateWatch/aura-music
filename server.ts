@@ -1430,8 +1430,10 @@ io.on('connection', (socket) => {
     socket.on('send-session-invite', ({ senderName, receiverId, code }) => { io.to(`user_${receiverId}`).emit('receive-session-invite', { from: senderName, code }); });
 });
 
+const distPath = __dirname.endsWith('dist') ? __dirname : path.join(__dirname, 'dist');
+
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'dist', 'index.html')); });
+app.use(express.static(distPath));
+app.get('*', (req, res) => { res.sendFile(path.join(distPath, 'index.html')); });
 
 httpServer.listen(PORT, () => { console.log(`🎵 Aura running on ${PORT}`); });
