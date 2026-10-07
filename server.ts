@@ -37,7 +37,24 @@ app.use(express.urlencoded({ limit: '200mb', extended: true }));
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'aura_ultimate_stable_secret_key_2026_production';
 
-// STORAGE
+// --- PATH UTILS ---
+const resolveAssetPath = (filePath: string | null) => {
+    if (!filePath) return null;
+    const baseUrl = process.env.BASE_URL || '';
+    // Ensure we don't double-slash if BASE_URL ends with / and filePath starts with /
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    return `${normalizedBase}${normalizedPath}`;
+};
+
+const normalizeAssetPath = (filePath: string | null) => {
+    if (!filePath) return null;
+    // Extract filename from absolute path (Windows or Unix)
+    const filename = path.basename(filePath);
+    return `/uploads/${filename}`;
+};
+
+// --- STORAGE ---
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
 const storage = multer.diskStorage({
@@ -310,7 +327,47 @@ app.get('/api/social/activity', authenticateToken, async (req: any, res: Respons
     }
 });
 
-// --- ADMIN UTILS ---
+const cleanupLocalPaths = async () => {
+    console.log("Starting cleanup of local paths...");
+    try {
+        const tables = [
+            { table: 'tracks', cols: ['file_path', 'cover_path', 'animated_cover_path'] },
+            { table: 'users', cols: ['profile_pic_path', 'custom_bg_path'] },
+            { table: 'artists', cols: ['image_url'] }
+        ];
+
+        let totalFixed = 0;
+
+        for (const { table, cols } of tables) {
+            for (const col of cols) {
+                const [rows]: any = await pool.execute(`SELECT id, ${col} FROM ${table} WHERE ${col} IS NOT NULL`);
+                for (const row of rows) {
+                    const currentPath = row[col];
+                    if (currentPath && (currentPath.includes(':\\') || currentPath.includes('/Users/') || currentPath.includes('/home/'))) {
+                        const fixedPath = normalizeAssetPath(currentPath);
+                        await pool.execute(`UPDATE ${table} SET ${col} = ? WHERE id = ?`, [fixedPath, row.id]);
+                        totalFixed++;
+                    }
+                }
+            }
+        }
+        console.log(`Cleanup finished. Fixed ${totalFixed} paths.`);
+        return { success: true, totalFixed };
+    } catch (e) {
+        console.error("Cleanup error:", e);
+        throw e;
+    }
+};
+
+app.post('/api/admin/cleanup-paths', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: "Forbidden: Admins only." });
+    try {
+        const result = await cleanupLocalPaths();
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: "Internal server error during cleanup." });
+    }
+});
 const purgeAlbumCovers = async () => {
     let albumsProcessed = 0;
     let filesDeleted = 0;
@@ -509,18 +566,24 @@ app.get('/api/tracks', async (req, res) => {
         try { const decoded: any = jwt.verify(token, JWT_SECRET); userId = decoded.userId; } catch(e) {}
     }
 
-    try { 
+    try {
         // Consulta que devuelve si la canción está en user_likes para el usuario actual
         const query = `
-            SELECT t.*, 
-            (SELECT COUNT(*) FROM user_likes WHERE track_id = t.id AND user_id = ?) as is_liked 
-            FROM tracks t 
-            WHERE t.status = ? 
+            SELECT t.*,
+            (SELECT COUNT(*) FROM user_likes WHERE track_id = t.id AND user_id = ?) as is_liked
+            FROM tracks t
+            WHERE t.status = ?
             ORDER BY t.album ASC, t.track_number ASC
         `;
-        const [t] = await pool.execute(query, [userId, s]); 
-        res.json(t); 
-    } catch (e) { res.status(500).send(); } 
+        const [t]: any = await pool.execute(query, [userId, s]);
+        const processedTracks = t.map((track: any) => ({
+            ...track,
+            file_path: resolveAssetPath(track.file_path),
+            cover_path: resolveAssetPath(track.cover_path),
+            animated_cover_path: resolveAssetPath(track.animated_cover_path)
+        }));
+        res.json(processedTracks);
+    } catch (e) { res.status(500).send(); }
 });
 
 app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { name: 'cover' }]), async (req: any, res: Response) => {
@@ -533,8 +596,8 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
 
     // 2. Guardamos video_url en la base de datos:
     const [result]: any = await pool.execute(
-        'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-        [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, req.files['cover'] ? `/uploads/${req.files['cover'][0].filename}` : null, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+        'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, artist, album, normalizeAssetPath(req.files['audio'][0].filename), normalizeAssetPath(req.files['cover'] ? req.files['cover'][0].filename : null), req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
     );
     res.status(201).json({ id: result.insertId });
 });
@@ -565,7 +628,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             }
-            coverPath = `/uploads/${coverFile.filename}`;
+            coverPath = normalizeAssetPath(coverFile.filename);
         } else if (coverPath === "" || coverPath === null) {
             // Borrado explícito de la portada
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
@@ -582,7 +645,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
                 if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
             }
-            animatedCoverPath = `/uploads/${animFile.filename}`;
+            animatedCoverPath = normalizeAssetPath(animFile.filename);
         } else if (animatedCoverPath === "" || animatedCoverPath === null) {
             // Borrado explícito de la portada animada
             const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
@@ -639,11 +702,13 @@ app.get('/api/artists/:name', async (req: Request, res: Response) => {
     try {
         const [rows]: any = await pool.execute('SELECT * FROM artists WHERE name = ?', [req.params.name]);
         if (rows.length > 0) {
-            res.json(rows[0]);
+            const artist = rows[0];
+            artist.image_url = resolveAssetPath(artist.image_url);
+            res.json(artist);
         } else {
             res.json({ name: req.params.name, bio: null });
         }
-    } catch (e) {
+    } catch (error) {
         res.status(500).json({ error: "Error fetching artist" });
     }
 });
@@ -699,27 +764,31 @@ app.get('/api/users/me', authenticateToken, async (req: any, res: Response) => {
     try {
         // 1. Get user details
         const [userRows]: any = await pool.execute(
-            'SELECT id, username, email, role, profile_pic_path, custom_bg_path FROM users WHERE id = ?', 
+            'SELECT id, username, email, role, profile_pic_path, custom_bg_path FROM users WHERE id = ?',
             [req.user.userId]
         );
-        
+
         if (userRows.length === 0) return res.status(404).json({ error: "User not found" });
+
+        const user = userRows[0];
+        user.profile_pic_path = resolveAssetPath(user.profile_pic_path);
+        user.custom_bg_path = resolveAssetPath(user.custom_bg_path);
 
         // 2. Calculate contributions (tracks uploaded)
         const [trackRows]: any = await pool.execute(
-            'SELECT COUNT(*) as count FROM tracks WHERE added_by = ?', 
+            'SELECT COUNT(*) as count FROM tracks WHERE added_by = ?',
             [req.user.userId]
         );
-        
+
         // 3. Calculate library lists (playlists owned)
         const [playlistRows]: any = await pool.execute(
-            'SELECT COUNT(*) as count FROM playlists WHERE owner_id = ?', 
+            'SELECT COUNT(*) as count FROM playlists WHERE owner_id = ?',
             [req.user.userId]
         );
 
         // Return everything merged
         res.json({
-            ...userRows[0],
+            ...user,
             stats: {
                 tracks: trackRows[0].count,
                 playlists: playlistRows[0].count
