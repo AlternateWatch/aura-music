@@ -40,7 +40,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'aura_ultimate_stable_secret_key_20
 // --- PATH UTILS ---
 const resolveAssetPath = (filePath: string | null) => {
     if (!filePath) return null;
+    if (filePath.startsWith('http')) return filePath;
     const baseUrl = process.env.BASE_URL || '';
+    if (!baseUrl) return filePath; // Return relative path if no BASE_URL is set
+
     // Ensure we don't double-slash if BASE_URL ends with / and filePath starts with /
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
