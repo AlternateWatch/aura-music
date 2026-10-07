@@ -558,6 +558,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
     let animatedCoverPath = req.body.animated_cover_path;
 
     try {
+    try {
         if (req.files && req.files['cover']) {
             const coverFile = req.files['cover'][0];
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
@@ -566,6 +567,13 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             }
             coverPath = `/uploads/${coverFile.filename}`;
+        } else if (coverPath === "" || coverPath === null) {
+            // Borrado explícito de la portada
+            const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
+            if (rows[0]?.cover_path) {
+                const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
+                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            }
         }
 
         if (req.files && req.files['animated_cover']) {
@@ -576,6 +584,13 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
             }
             animatedCoverPath = `/uploads/${animFile.filename}`;
+        } else if (animatedCoverPath === "" || animatedCoverPath === null) {
+            // Borrado explícito de la portada animada
+            const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
+            if (rows[0]?.animated_cover_path) {
+                const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
+                if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
+            }
         }
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
