@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build": "tsc server.ts --esModuleInterop --target es2020 --module esnext --moduleResolution node --resolveJsonModule true --outDir dist"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
