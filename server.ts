@@ -1528,6 +1528,11 @@ const distPath = __dirname.endsWith('dist') ? __dirname : path.join(__dirname, '
 
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 app.use(express.static(distPath));
-app.get('*', (req, res) => { res.sendFile(path.join(distPath, 'index.html')); });
+app.get('*', (req, res) => {
+    if (req.path.startsWith('/uploads') || req.path.match(/\.(jpg|jpeg|png|webp|gif|mp3|flac)$/i)) {
+        return res.status(404).send('Asset not found');
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+});
 
 httpServer.listen(PORT, () => { console.log(`🎵 Aura running on ${PORT}`); });
