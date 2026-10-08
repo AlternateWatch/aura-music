@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { firebaseService } from "../services/firebaseService";
 
 const urlCache = new Map<string, string>();
 
@@ -24,19 +23,6 @@ export async function resolveFileUrl(url: string): Promise<string | undefined> {
   // Standard path: handle relative uploads
   if (url.startsWith("/uploads/")) {
     return `${API_ORIGIN}${url}`;
-  }
-
-  // Legacy path: handle chunked Firestore files
-  if (url.startsWith("firestore-file://")) {
-    if (urlCache.has(url)) {
-      return urlCache.get(url);
-    }
-
-    const resolved = await firebaseService.getFileUrl(url);
-    if (resolved) {
-      urlCache.set(url, resolved);
-    }
-    return resolved || undefined;
   }
 
   return url;
