@@ -41,13 +41,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'aura_ultimate_stable_secret_key_20
 // --- PATH UTILS ---
 const resolveAssetPath = (filePath: string | null) => {
     if (!filePath) return null;
-    if (filePath.startsWith('http')) return filePath;
+    const trimmedPath = filePath.trim();
+    if (trimmedPath.startsWith('http')) return trimmedPath;
     const baseUrl = process.env.BASE_URL || '';
-    if (!baseUrl) return filePath; // Return relative path if no BASE_URL is set
+    if (!baseUrl) return trimmedPath;
 
-    // Ensure we don't double-slash if BASE_URL ends with / and filePath starts with /
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    const normalizedPath = trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`;
     return `${normalizedBase}${normalizedPath}`;
 };
 
@@ -766,7 +766,6 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
 // --- USERS & PROFILE ---
 app.get('/api/users/me', authenticateToken, async (req: any, res: Response) => {
     try {
-        // 1. Get user details
         const [userRows]: any = await pool.execute(
             'SELECT id, username, email, role, profile_pic_path, custom_bg_path FROM users WHERE id = ?',
             [req.user.userId]
