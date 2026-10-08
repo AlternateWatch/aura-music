@@ -11,6 +11,7 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import axios from "axios";
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase-admin/storage';
 import config from './config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
@@ -590,17 +591,34 @@ app.get('/api/tracks', async (req, res) => {
 });
 
 app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { name: 'cover' }]), async (req: any, res: Response) => {
-    // 1. Recogemos video_url del body:
     const { title, artist, album, tabs_url, track_number, video_url } = req.body;
     if (!req.files['audio']) return res.status(400).send("No audio");
     const format = path.extname(req.files['audio'][0].originalname).includes('flac') ? 'flac' : 'mp3';
-    
     const initialStatus = (req.user.role === 'admin' || req.user.role === 'moderator') ? 'approved' : 'pending';
 
-    // 2. Guardamos video_url en la base de datos:
+    let coverUrl = null;
+    if (req.files['cover']) {
+        try {
+            const file = req.files['cover'][0];
+            const bucket = getStorage().bucket();
+            const destination = `covers/${Date.now()}_${file.originalname}`;
+            const uploadPath = path.join(__dirname, 'public', file.filename);
+
+            await bucket.upload(uploadPath, {
+                destination,
+                public: true,
+            });
+
+            coverUrl = `https://storage.googleapis.com/${bucket.name}/${destination}`;
+        } catch (e) {
+            console.error("Firebase Storage upload error:", e);
+            coverUrl = normalizeAssetPath(req.files['cover'][0].filename);
+        }
+    }
+
     const [result]: any = await pool.execute(
         'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [title, artist, album, normalizeAssetPath(req.files['audio'][0].filename), normalizeAssetPath(req.files['cover'] ? req.files['cover'][0].filename : null), req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+        [title, artist, album, normalizeAssetPath(req.files['audio'][0].filename), coverUrl, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
     );
     res.status(201).json({ id: result.insertId });
 });
@@ -617,7 +635,7 @@ app.post('/api/tracks/:id/like', authenticateToken, async (req: any, res: Respon
     } catch (e) { res.status(500).send(); }
 });
 
-app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'animated_cover', maxCount: 1 }]), async (req: any, res: Response) => { 
+app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'animated_cover', maxCount: 1 }]), async (req: any, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') return res.status(403).json({ error: "Forbidden" });
     const { title, artist, album, track_number, tabs_url, video_url } = req.body;
     let coverPath = req.body.cover_path;
@@ -631,9 +649,18 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             }
-            coverPath = normalizeAssetPath(coverFile.filename);
+
+            try {
+                const bucket = getStorage().bucket();
+                const destination = `covers/${Date.now()}_${coverFile.originalname}`;
+                const uploadPath = path.join(__dirname, 'public', coverFile.filename);
+                await bucket.upload(uploadPath, { destination, public: true });
+                coverPath = `https://storage.googleapis.com/${bucket.name}/${destination}`;
+            } catch (e) {
+                console.error("Firebase Storage upload error (cover):", e);
+                coverPath = normalizeAssetPath(coverFile.filename);
+            }
         } else if (coverPath === "" || coverPath === null) {
-            // Borrado explícito de la portada
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
             if (rows[0]?.cover_path) {
                 const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
@@ -648,9 +675,18 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
                 if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
             }
-            animatedCoverPath = normalizeAssetPath(animFile.filename);
+
+            try {
+                const bucket = getStorage().bucket();
+                const destination = `animated_covers/${Date.now()}_${animFile.originalname}`;
+                const uploadPath = path.join(__dirname, 'public', animFile.filename);
+                await bucket.upload(uploadPath, { destination, public: true });
+                animatedCoverPath = `https://storage.googleapis.com/${bucket.name}/${destination}`;
+            } catch (e) {
+                console.error("Firebase Storage upload error (animated_cover):", e);
+                animatedCoverPath = normalizeAssetPath(animFile.filename);
+            }
         } else if (animatedCoverPath === "" || animatedCoverPath === null) {
-            // Borrado explícito de la portada animada
             const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
             if (rows[0]?.animated_cover_path) {
                 const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
@@ -660,13 +696,13 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
         await pool.execute(
-            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?', 
+            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?',
             [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null, req.params.id]
-        ); 
-        res.send(); 
-    } catch (e) { 
+        );
+        res.send();
+    } catch (e) {
         console.error("Error updating track:", e);
-        res.status(500).send(); 
+        res.status(500).send();
     }
 });
 

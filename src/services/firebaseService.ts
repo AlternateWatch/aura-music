@@ -137,40 +137,31 @@ export const firebaseService = {
   ): Promise<string> {
     if (!auth.currentUser) throw new Error("Not logged in");
 
-    const dataURL = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    try {
+      // Use Firebase Storage instead of Firestore chunks
+      const storageRef = ref(storage, `covers/${Date.now()}_${file.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
 
-    const CHUNK_SIZE = 250 * 1024; // 250KB
-    const numChunks = Math.ceil(dataURL.length / CHUNK_SIZE);
-    const id = path.replace(/\//g, "_");
-
-    for (let i = 0; i < numChunks; i++) {
-      const chunkStr = dataURL.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      try {
-        await setDoc(doc(db, "file_chunks", `${id}_${i}`), {
-          fileId: id,
-          index: i,
-          data: chunkStr,
-          createdAt: serverTimestamp(),
-          uploaderId: auth.currentUser.uid,
-        });
-        // Delay to allow the internal grpc stream buffer to flush
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (err) {
-        handleFirestoreError(
-          err,
-          OperationType.WRITE,
-          `file_chunks/${id}_${i}`,
+      return new Promise((resolve, reject) => {
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            if (onProgress) {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              onProgress(Math.round(progress));
+            }
+          },
+          (error) => reject(error),
+          async () => {
+            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+            resolve(downloadURL);
+          }
         );
-      }
-      if (onProgress) onProgress(Math.round(((i + 1) / numChunks) * 100));
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, "storage");
+      throw err;
     }
-
-    return `firestore-file://${id}`;
   },
 
   async getFileUrl(url: string): Promise<string> {

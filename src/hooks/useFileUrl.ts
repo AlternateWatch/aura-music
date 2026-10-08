@@ -11,22 +11,35 @@ const API_ORIGIN = "https://aura.basildo.me";
 export async function resolveFileUrl(url: string): Promise<string | undefined> {
   if (!url) return undefined;
 
-  if (!url.startsWith("firestore-file://")) {
-    if (url.startsWith("/uploads/")) {
-      return `${API_ORIGIN}${url}`;
-    }
+  // Fast path: if it's already a full URL, return it immediately
+  if (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("blob:") ||
+    url.startsWith("data:")
+  ) {
     return url;
   }
 
-  if (urlCache.has(url)) {
-    return urlCache.get(url);
+  // Standard path: handle relative uploads
+  if (url.startsWith("/uploads/")) {
+    return `${API_ORIGIN}${url}`;
   }
 
-  const resolved = await firebaseService.getFileUrl(url);
-  if (resolved) {
-    urlCache.set(url, resolved);
+  // Legacy path: handle chunked Firestore files
+  if (url.startsWith("firestore-file://")) {
+    if (urlCache.has(url)) {
+      return urlCache.get(url);
+    }
+
+    const resolved = await firebaseService.getFileUrl(url);
+    if (resolved) {
+      urlCache.set(url, resolved);
+    }
+    return resolved || undefined;
   }
-  return resolved || undefined;
+
+  return url;
 }
 
 export function useFileUrl(url: string | undefined): string | undefined {
