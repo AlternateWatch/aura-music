@@ -11,7 +11,7 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import axios from "axios";
-import admin from 'firebase-admin';
+import * as admin from 'firebase-admin';
 import { getStorage } from 'firebase-admin/storage';
 import config from './config.json' assert { type: 'json' };
 
