@@ -11,9 +11,8 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import axios from "axios";
-import admin from 'firebase-admin';
-// Use admin.storage().bucket() directly in the handlers to avoid import issues
 import config from './config.json' assert { type: 'json' };
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -599,22 +598,7 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
 
     let coverUrl = null;
     if (req.files['cover']) {
-        try {
-            const file = req.files['cover'][0];
-            const bucket = getStorage().bucket();
-            const destination = `covers/${Date.now()}_${file.originalname}`;
-            const uploadPath = path.join(__dirname, 'public', file.filename);
-
-            await bucket.upload(uploadPath, {
-                destination,
-                public: true,
-            });
-
-            coverUrl = `https://storage.googleapis.com/${bucket.name}/${destination}`;
-        } catch (e) {
-            console.error("Firebase Storage upload error:", e);
-            coverUrl = normalizeAssetPath(req.files['cover'][0].filename);
-        }
+        coverUrl = normalizeAssetPath(req.files['cover'][0].filename);
     }
 
     const [result]: any = await pool.execute(
@@ -650,17 +634,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             }
-
-            try {
-                const bucket = admin.storage().bucket();
-                const destination = `covers/${Date.now()}_${coverFile.originalname}`;
-                const uploadPath = path.join(__dirname, 'public', coverFile.filename);
-                await bucket.upload(uploadPath, { destination, public: true });
-                coverPath = `https://storage.googleapis.com/${bucket.name}/${destination}`;
-            } catch (e) {
-                console.error("Firebase Storage upload error (cover):", e);
-                coverPath = normalizeAssetPath(coverFile.filename);
-            }
+            coverPath = normalizeAssetPath(coverFile.filename);
         } else if (coverPath === "" || coverPath === null) {
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
             if (rows[0]?.cover_path) {
@@ -676,17 +650,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
                 const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
                 if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
             }
-
-            try {
-                const bucket = admin.storage().bucket();
-                const destination = `animated_covers/${Date.now()}_${animFile.originalname}`;
-                const uploadPath = path.join(__dirname, 'public', animFile.filename);
-                await bucket.upload(uploadPath, { destination, public: true });
-                animatedCoverPath = `https://storage.googleapis.com/${bucket.name}/${destination}`;
-            } catch (e) {
-                console.error("Firebase Storage upload error (animated_cover):", e);
-                animatedCoverPath = normalizeAssetPath(animFile.filename);
-            }
+            animatedCoverPath = normalizeAssetPath(animFile.filename);
         } else if (animatedCoverPath === "" || animatedCoverPath === null) {
             const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
             if (rows[0]?.animated_cover_path) {
