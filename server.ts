@@ -11,7 +11,7 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import axios from "axios";
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase-admin/storage';
+import { getStorage } from 'firebase-admin/storage';
 import config from './config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
