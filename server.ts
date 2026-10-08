@@ -11,8 +11,8 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import axios from "axios";
-import * as admin from 'firebase-admin';
-import { getStorage } from 'firebase-admin/storage';
+import admin from 'firebase-admin';
+// Use admin.storage().bucket() directly in the handlers to avoid import issues
 import config from './config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
@@ -652,7 +652,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
             }
 
             try {
-                const bucket = getStorage().bucket();
+                const bucket = admin.storage().bucket();
                 const destination = `covers/${Date.now()}_${coverFile.originalname}`;
                 const uploadPath = path.join(__dirname, 'public', coverFile.filename);
                 await bucket.upload(uploadPath, { destination, public: true });
@@ -678,7 +678,7 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
             }
 
             try {
-                const bucket = getStorage().bucket();
+                const bucket = admin.storage().bucket();
                 const destination = `animated_covers/${Date.now()}_${animFile.originalname}`;
                 const uploadPath = path.join(__dirname, 'public', animFile.filename);
                 await bucket.upload(uploadPath, { destination, public: true });
