@@ -80,6 +80,7 @@ const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, onPlay, onMove 
       >
         <img
           src={song.coverUrl || '/default-cover.jpg'}
+          onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
           className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none"
           alt=""
           draggable={false}
@@ -182,6 +183,7 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
               <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-lg">
                 <img
                   src={currentSong.coverUrl || '/default-cover.jpg'}
+                  onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
                   className="w-full h-full object-cover pointer-events-none"
                   alt=""
                   draggable={false}

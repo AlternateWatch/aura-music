@@ -627,36 +627,27 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
     let animatedCoverPath = req.body.animated_cover_path;
 
     try {
+        let oldCoverPath = null;
+        let oldAnimCoverPath = null;
+
         if (req.files && req.files['cover']) {
             const coverFile = req.files['cover'][0];
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            if (rows[0]?.cover_path) {
-                const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
-                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-            }
+            oldCoverPath = rows[0]?.cover_path;
             coverPath = normalizeAssetPath(coverFile.filename);
         } else if (coverPath === "" || coverPath === null) {
             const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            if (rows[0]?.cover_path) {
-                const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
-                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-            }
+            oldCoverPath = rows[0]?.cover_path;
         }
 
         if (req.files && req.files['animated_cover']) {
             const animFile = req.files['animated_cover'][0];
             const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            if (rows[0]?.animated_cover_path) {
-                const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
-                if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
-            }
+            oldAnimCoverPath = rows[0]?.animated_cover_path;
             animatedCoverPath = normalizeAssetPath(animFile.filename);
         } else if (animatedCoverPath === "" || animatedCoverPath === null) {
             const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            if (rows[0]?.animated_cover_path) {
-                const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
-                if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
-            }
+            oldAnimCoverPath = rows[0]?.animated_cover_path;
         }
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
@@ -664,6 +655,17 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
             'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?',
             [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null, req.params.id]
         );
+
+        // Borrado seguro: solo después de que la BD se ha actualizado con éxito
+        if (oldCoverPath) {
+            const fullPath = path.join(__dirname, 'public', oldCoverPath.startsWith('/') ? oldCoverPath.substring(1) : oldCoverPath);
+            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        }
+        if (oldAnimCoverPath) {
+            const fullPath = path.join(__dirname, 'public', oldAnimCoverPath.startsWith('/') ? oldAnimCoverPath.substring(1) : oldAnimCoverPath);
+            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        }
+
         res.send();
     } catch (e) {
         console.error("Error updating track:", e);

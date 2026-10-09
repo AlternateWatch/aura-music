@@ -109,7 +109,12 @@ export const TabsOverlay: React.FC<TabsOverlayProps> = ({ song, onClose }) => {
             <div className="absolute inset-0 bg-gradient-to-b from-brand-primary/5 to-transparent pointer-events-none" />
             <div className="relative z-10">
                 <div className="w-24 h-24 mx-auto mb-8 rounded-3xl overflow-hidden shadow-2xl border border-white/10">
-                    <img src={song.coverUrl || '/default-cover.jpg'} className="w-full h-full object-cover" alt="" />
+                    <img
+                      src={song.coverUrl || '/default-cover.jpg'}
+                      onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
+                      className="w-full h-full object-cover"
+                      alt=""
+                    />
                 </div>
                 <p className="text-brand-primary text-[10px] font-bold uppercase tracking-[0.4em] mb-3">Engine Synchronized</p>
                 <h3 className="text-4xl md:text-5xl font-serif italic text-white tracking-tighter mb-2">{song.title}</h3>
