@@ -627,27 +627,16 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
     let animatedCoverPath = req.body.animated_cover_path;
 
     try {
-        let oldCoverPath = null;
-        let oldAnimCoverPath = null;
+        const [currentTrack]: any = await pool.execute('SELECT cover_path, animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
+        const oldCover = currentTrack[0]?.cover_path;
+        const oldAnimCover = currentTrack[0]?.animated_cover_path;
 
         if (req.files && req.files['cover']) {
-            const coverFile = req.files['cover'][0];
-            const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            oldCoverPath = rows[0]?.cover_path;
-            coverPath = normalizeAssetPath(coverFile.filename);
-        } else if (coverPath === "" || coverPath === null) {
-            const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            oldCoverPath = rows[0]?.cover_path;
+            coverPath = normalizeAssetPath(req.files['cover'][0].filename);
         }
 
         if (req.files && req.files['animated_cover']) {
-            const animFile = req.files['animated_cover'][0];
-            const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            oldAnimCoverPath = rows[0]?.animated_cover_path;
-            animatedCoverPath = normalizeAssetPath(animFile.filename);
-        } else if (animatedCoverPath === "" || animatedCoverPath === null) {
-            const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
-            oldAnimCoverPath = rows[0]?.animated_cover_path;
+            animatedCoverPath = normalizeAssetPath(req.files['animated_cover'][0].filename);
         }
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
@@ -657,12 +646,12 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
         );
 
         // Borrado seguro: solo después de que la BD se ha actualizado con éxito
-        if (oldCoverPath) {
-            const fullPath = path.join(__dirname, 'public', oldCoverPath.startsWith('/') ? oldCoverPath.substring(1) : oldCoverPath);
+        if (req.files?.['cover'] && oldCover && coverPath !== oldCover) {
+            const fullPath = path.join(__dirname, 'public', oldCover.startsWith('/') ? oldCover.substring(1) : oldCover);
             if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
         }
-        if (oldAnimCoverPath) {
-            const fullPath = path.join(__dirname, 'public', oldAnimCoverPath.startsWith('/') ? oldAnimCoverPath.substring(1) : oldAnimCoverPath);
+        if (req.files?.['animated_cover'] && oldAnimCover && animatedCoverPath !== oldAnimCover) {
+            const fullPath = path.join(__dirname, 'public', oldAnimCover.startsWith('/') ? oldAnimCover.substring(1) : oldAnimCover);
             if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
         }
 
