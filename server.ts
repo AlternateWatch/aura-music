@@ -1528,7 +1528,12 @@ io.on('connection', (socket) => {
 
 const distPath = __dirname.endsWith('dist') ? __dirname : path.join(__dirname, 'dist');
 
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+app.use('/uploads', (req, res, next) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    next();
+}, express.static(path.join(__dirname, 'public', 'uploads')));
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || req.path.match(/\.(jpg|jpeg|png|webp|gif|mp3|flac)$/i)) {
