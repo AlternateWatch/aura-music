@@ -26,9 +26,13 @@ const MAX_CACHED_TRACKS = 30;
 // Firebase Storage, y extensiones de audio habituales por si vienen de
 // otro origen (CDN, iTunes preview, etc.).
 function looksLikeAudio(url) {
+  const path = url.pathname;
+  const isAudioExt = /\.(mp3|flac|m4a|wav|ogg|aac)(\?|$)/i.test(path);
+  const isImageExt = /\.(jpg|jpeg|png|webp|gif|svg)(\?|$)/i.test(path);
+
   return (
-    /\.(mp3|flac|m4a|wav|ogg|aac)(\?|$)/i.test(url.pathname) ||
-    url.pathname.includes("/uploads/") ||
+    isAudioExt ||
+    (path.includes("/uploads/") && !isImageExt) ||
     url.hostname.endsWith("firebasestorage.app") ||
     url.hostname.includes("firebasestorage.googleapis.com")
   );
