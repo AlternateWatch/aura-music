@@ -174,7 +174,7 @@ const unlinkTrackAssetIfUnused = async (dbPath: string | null | undefined, exclu
     if (!dbPath) return false;
     try {
         const filename = path.basename(dbPath.split('?')[0]);
-        if (!filename) return false;
+        if (!filename || /^default[-_\s]?cover\./i.test(filename)) return false;
         const likePattern = `%/${filename}`;
         const [rows]: any = await pool.execute(
             'SELECT COUNT(*) as cnt FROM tracks WHERE id != ? AND (file_path = ? OR file_path LIKE ? OR cover_path = ? OR cover_path LIKE ? OR animated_cover_path = ? OR animated_cover_path LIKE ?)',
@@ -2188,14 +2188,182 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
     }
 });
 
+// Auto-reparación de portadas perdidas (extrae del FLAC/MP3 o descarga de iTunes si el archivo .jpg/.webp no existe en disco)
+const healInFlight = new Map<string, Promise<string | null>>();
+
+const healTrackCoverToDisk = async (track: any): Promise<string | null> => {
+    const rawCover = track.cover_path ? String(track.cover_path).trim() : '';
+    const existingDisk = rawCover ? resolveDiskPath(rawCover) : null;
+    if (existingDisk && fs.existsSync(existingDisk)) {
+        const norm = normalizeMediaPath(rawCover);
+        if (norm && norm !== rawCover) {
+            await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [norm, track.id]);
+        }
+        return existingDisk;
+    }
+
+    const filename = rawCover
+        ? path.basename(rawCover.split('?')[0])
+        : `healed-${track.id}-${Date.now()}.jpg`;
+    const destPath = path.join(uploadDir, filename);
+    const normalizedDbPath = `/uploads/${filename}`;
+
+    if (healInFlight.has(filename)) {
+        return healInFlight.get(filename)!;
+    }
+
+    const job = (async (): Promise<string | null> => {
+        try {
+            // 1. Intentar extraer la carátula embebida del propio archivo de audio (.flac / .mp3)
+            const audioDiskPath = resolveDiskPath(track.file_path);
+            if (audioDiskPath && fs.existsSync(audioDiskPath)) {
+                try {
+                    const mm: any = await import('music-metadata');
+                    const meta = await mm.parseFile(audioDiskPath, { skipCovers: false });
+                    const pic = meta?.common?.picture?.[0];
+                    if (pic?.data && pic.data.length > 0) {
+                        fs.writeFileSync(destPath, pic.data);
+                        await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [normalizedDbPath, track.id]);
+                        console.log(`🎨 Portada restaurada desde audio embebido para "${track.title}" -> ${filename}`);
+                        return destPath;
+                    }
+                } catch {}
+            }
+
+            // 2. Fallback: descargar carátula de alta resolución desde iTunes API
+            const queries = [
+                `${track.artist || ''} ${track.title || ''}`.trim(),
+                `${track.artist || ''} ${track.album || ''}`.trim()
+            ].filter(Boolean);
+
+            for (const q of queries) {
+                try {
+                    const searchRes = await axios.get('https://itunes.apple.com/search', {
+                        params: { term: q, entity: 'song', limit: 5 },
+                        timeout: 10000
+                    });
+                    const results: any[] = searchRes.data?.results || [];
+                    const match = results.find((r) => r.artworkUrl100) || results[0];
+                    if (match?.artworkUrl100) {
+                        const artworkUrl = String(match.artworkUrl100).replace('100x100bb', '600x600bb');
+                        const imgRes = await axios.get(artworkUrl, {
+                            responseType: 'arraybuffer',
+                            timeout: 12000,
+                            headers: { 'User-Agent': 'Mozilla/5.0 (AuraMusic/2.0)' }
+                        });
+                        if (imgRes.data && imgRes.data.byteLength > 0) {
+                            fs.writeFileSync(destPath, Buffer.from(imgRes.data));
+                            await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [normalizedDbPath, track.id]);
+                            console.log(`🌐 Portada restaurada desde iTunes para "${track.title}" -> ${filename}`);
+                            return destPath;
+                        }
+                    }
+                } catch {}
+            }
+        } catch (err) {
+            console.warn(`No se pudo auto-restaurar portada de "${track.title}":`, err);
+        } finally {
+            healInFlight.delete(filename);
+        }
+        return null;
+    })();
+
+    healInFlight.set(filename, job);
+    return job;
+};
+
+// Localiza el archivo default-cover.jpg (o "default cover.jpg") en uploads
+const resolveDefaultCoverDiskPath = (): string | null => {
+    const candidates = ['default-cover.jpg', 'default cover.jpg', 'default_cover.jpg', 'default-cover.png', 'default-cover.webp'];
+    const dirs = [
+        uploadDir,
+        path.join(ROOT_DIR, 'public', 'uploads'),
+        path.join(DIST_DIR, 'uploads'),
+        path.join(ROOT_DIR, 'public'),
+        DIST_DIR
+    ];
+    for (const d of dirs) {
+        for (const name of candidates) {
+            const p = path.join(d, name);
+            if (fs.existsSync(p)) return p;
+        }
+    }
+    return null;
+};
+
+const healMissingCoversOnStartup = async () => {
+    try {
+        const [tracks]: any = await pool.execute('SELECT id, title, artist, album, file_path, cover_path FROM tracks');
+        let healedCount = 0;
+        const defaultCoverDisk = resolveDefaultCoverDiskPath();
+        const defaultCoverDbPath = defaultCoverDisk ? `/uploads/${path.basename(defaultCoverDisk)}` : '/uploads/default-cover.jpg';
+
+        for (const track of tracks || []) {
+            if (track.cover_path && String(track.cover_path).includes('/uploads/') && String(track.cover_path).startsWith('http')) {
+                const norm = normalizeMediaPath(track.cover_path);
+                if (norm) {
+                    await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [norm, track.id]);
+                    track.cover_path = norm;
+                }
+            }
+            const diskPath = track.cover_path ? resolveDiskPath(track.cover_path) : null;
+            if (!diskPath || !fs.existsSync(diskPath)) {
+                const restored = await healTrackCoverToDisk(track);
+                if (restored) {
+                    healedCount++;
+                } else if (defaultCoverDisk) {
+                    await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [defaultCoverDbPath, track.id]);
+                    console.log(`🖼️ Asignada portada por defecto (${defaultCoverDbPath}) a "${track.title}"`);
+                }
+                await new Promise((r) => setTimeout(r, 200));
+            }
+        }
+        if (healedCount > 0) {
+            console.log(`✨ Auto-reparación completada: ${healedCount} portadas recuperadas en ${uploadDir}`);
+        }
+    } catch (e) {
+        console.warn("Aviso en auto-reparación inicial de portadas:", e);
+    }
+};
+
+// Soportar tanto /default-cover.jpg como /uploads/default-cover.jpg
+app.get(['/default-cover.jpg', '/uploads/default-cover.jpg', '/uploads/default%20cover.jpg'], (req, res, next) => {
+    const fallback = resolveDefaultCoverDiskPath();
+    if (fallback && fs.existsSync(fallback)) {
+        return res.sendFile(fallback);
+    }
+    next();
+});
+
 // Servir uploads desde uploadDir persistente (y respaldos si existieran)
 app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
 app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
-// Si un archivo en /uploads no existe en disco, devolver 404 con no-store para que
-// ni Cloudflare ni el navegador cacheen index.html (text/html 200 OK) como si fuera una imagen.
-app.use('/uploads', (req, res) => {
+// Si un archivo en /uploads no existe en disco, intentar auto-repararlo al vuelo si es portada;
+// y si nada funciona, devolver default-cover.jpg para que ninguna portada salga rota.
+app.use('/uploads', async (req, res) => {
+    const requestedFile = path.basename(decodeURIComponent(req.path.split('?')[0]));
+    if (requestedFile && /\.(jpg|jpeg|png|webp|gif)$/i.test(requestedFile)) {
+        try {
+            const [rows]: any = await pool.execute(
+                'SELECT id, title, artist, album, file_path, cover_path FROM tracks WHERE cover_path = ? OR cover_path LIKE ? LIMIT 1',
+                [`/uploads/${requestedFile}`, `%/${requestedFile}`]
+            );
+            if (rows?.[0]) {
+                const restoredPath = await healTrackCoverToDisk(rows[0]);
+                if (restoredPath && fs.existsSync(restoredPath)) {
+                    return res.sendFile(restoredPath);
+                }
+            }
+        } catch {}
+
+        const defaultCover = resolveDefaultCoverDiskPath();
+        if (defaultCover && fs.existsSync(defaultCover)) {
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+            return res.sendFile(defaultCover);
+        }
+    }
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.status(404).send('Asset not found');
 });
@@ -2209,6 +2377,11 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 
-httpServer.listen(PORT, () => { console.log(`🎵 Aura running on ${PORT} (uploads: ${uploadDir})`); });
+httpServer.listen(PORT, () => {
+    console.log(`🎵 Aura running on ${PORT} (uploads: ${uploadDir})`);
+    healMissingCoversOnStartup();
+});
+
+
 
 

@@ -189,7 +189,7 @@ const liveCurrentTime = useAudioPlaybackTime(
                     src={animUrl}
                     poster={
                       resolveMediaUrl(currentSong.coverUrl) ||
-                      '/default-cover.jpg'
+                      '/uploads/default-cover.jpg'
                     }
                     preload="auto"
                     autoPlay
@@ -202,13 +202,23 @@ const liveCurrentTime = useAudioPlaybackTime(
                   <img 
                     key={animUrl}
                     src={animUrl} 
+                    onError={(e) => {
+                      if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                        e.currentTarget.src = '/uploads/default-cover.jpg';
+                      }
+                    }}
                     className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
                     alt={currentSong.title} 
                   />
                 )
               ) : (
                 <img 
-                  src={resolveMediaUrl(currentSong.coverUrl) || '/default-cover.jpg'} 
+                  src={resolveMediaUrl(currentSong.coverUrl) || '/uploads/default-cover.jpg'} 
+                  onError={(e) => {
+                    if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                      e.currentTarget.src = '/uploads/default-cover.jpg';
+                    }
+                  }}
                   className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
                   alt={currentSong.title} 
                 />

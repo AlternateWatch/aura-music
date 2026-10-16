@@ -79,8 +79,12 @@ const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, onPlay, onMove 
         className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-white/5 cursor-pointer"
       >
         <img
-          src={song.coverUrl || '/default-cover.jpg'}
-          onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
+          src={song.coverUrl || '/uploads/default-cover.jpg'}
+          onError={(e) => {
+            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+              e.currentTarget.src = '/uploads/default-cover.jpg';
+            }
+          }}
           className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none"
           alt=""
           draggable={false}
@@ -182,8 +186,12 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
             <div className="flex items-center gap-4 p-3 bg-white/5 rounded-2xl border border-brand-primary/20 shadow-[0_0_30px_rgba(99,102,241,0.1)]">
               <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-lg">
                 <img
-                  src={currentSong.coverUrl || '/default-cover.jpg'}
-                  onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
+                  src={currentSong.coverUrl || '/uploads/default-cover.jpg'}
+                  onError={(e) => {
+                    if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                      e.currentTarget.src = '/uploads/default-cover.jpg';
+                    }
+                  }}
                   className="w-full h-full object-cover pointer-events-none"
                   alt=""
                   draggable={false}

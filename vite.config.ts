@@ -2,7 +2,10 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
+import {fileURLToPath} from 'url';
 import {defineConfig, loadEnv} from 'vite';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Antes de que `vite build` vacíe la carpeta `dist/`, rescatamos cualquier archivo
 // que ejecuciones anteriores de `./dist/server.js` hayan guardado en `dist/public/uploads`.

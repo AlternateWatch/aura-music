@@ -2902,7 +2902,12 @@ transition={{
                   <div className="relative group/avatar w-36 h-36 md:w-48 md:h-48 rounded-full overflow-hidden shrink-0 border-2 border-brand-primary/40 shadow-[0_0_50px_rgba(99,102,241,0.2)] bg-white/5">
                     <img 
                       key={selectedArtistName}
-                      src={resolvedArtistImageUrl || flattenedSongs[0]?.coverUrl || '/default-cover.jpg'} 
+                      src={resolvedArtistImageUrl || flattenedSongs[0]?.coverUrl || '/uploads/default-cover.jpg'} 
+                      onError={(e) => {
+                        if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                          e.currentTarget.src = '/uploads/default-cover.jpg';
+                        }
+                      }}
                       alt={selectedArtistName} 
                       className="w-full h-full object-cover"
                     />
@@ -3010,7 +3015,16 @@ transition={{
                           className="group p-4 rounded-3xl bg-white/5 border border-white/5 hover:border-brand-primary/40 cursor-pointer transition-all flex flex-col"
                         >
                           <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-white/5">
-                            <img src={alb.coverUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="" />
+                            <img
+                              src={alb.coverUrl || '/uploads/default-cover.jpg'}
+                              onError={(e) => {
+                                if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                  e.currentTarget.src = '/uploads/default-cover.jpg';
+                                }
+                              }}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              alt=""
+                            />
                           </div>
                           <p className="text-sm font-bold text-white truncate">{alb.title}</p>
                           <p className="text-[10px] text-white/40 font-mono mt-0.5">{alb.trackCount} Pistas</p>
@@ -3192,7 +3206,12 @@ transition={{
                                     >
                                       <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
                                         <img 
-                                          src={item.coverUrl || '/default-cover.jpg'} 
+                                          src={item.coverUrl || '/uploads/default-cover.jpg'} 
+                                          onError={(e) => {
+                                            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                              e.currentTarget.src = '/uploads/default-cover.jpg';
+                                            }
+                                          }}
                                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 pointer-events-none" 
                                           alt={item.title} 
                                         />
@@ -3217,7 +3236,16 @@ transition={{
                                 ) : item.type === 'album' ? (
                                     <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
-                                        <img src={item.coverUrl} className="w-full h-full object-cover transition-transform duration-700" alt={item.title} />
+                                        <img
+                                          src={item.coverUrl || '/uploads/default-cover.jpg'}
+                                          onError={(e) => {
+                                            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                              e.currentTarget.src = '/uploads/default-cover.jpg';
+                                            }
+                                          }}
+                                          className="w-full h-full object-cover transition-transform duration-700"
+                                          alt={item.title}
+                                        />
                                       </div>
                                       <h3 className="text-xl md:text-sm font-bold truncate text-white">{item.title}</h3>
                                       <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40">{item.trackCount} Tracks Found</p>

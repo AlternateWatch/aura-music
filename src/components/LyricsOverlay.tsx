@@ -127,7 +127,12 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       <div className="h-24 flex items-center justify-between px-10 shrink-0 border-b border-white/5">
         <div className="flex items-center gap-6">
           <img 
-            src={currentSong?.coverUrl || '/default-cover.jpg'} 
+            src={currentSong?.coverUrl || '/uploads/default-cover.jpg'} 
+            onError={(e) => {
+              if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                e.currentTarget.src = '/uploads/default-cover.jpg';
+              }
+            }}
             className="w-12 h-12 rounded-lg shadow-2xl border border-white/10" 
             alt="" 
           />

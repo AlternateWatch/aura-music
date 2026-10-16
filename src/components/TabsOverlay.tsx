@@ -110,8 +110,12 @@ export const TabsOverlay: React.FC<TabsOverlayProps> = ({ song, onClose }) => {
             <div className="relative z-10">
                 <div className="w-24 h-24 mx-auto mb-8 rounded-3xl overflow-hidden shadow-2xl border border-white/10">
                     <img
-                      src={song.coverUrl || '/default-cover.jpg'}
-                      onError={(e) => { (e.currentTarget.src = '/default-cover.jpg'); }}
+                      src={song.coverUrl || '/uploads/default-cover.jpg'}
+                      onError={(e) => {
+                        if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                          e.currentTarget.src = '/uploads/default-cover.jpg';
+                        }
+                      }}
                       className="w-full h-full object-cover"
                       alt=""
                     />

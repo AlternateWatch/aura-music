@@ -145,11 +145,18 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
         <img
-          src={song.coverUrl || '/default-cover.jpg'}
+          src={song.coverUrl || '/uploads/default-cover.jpg'}
           className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'} ${coverLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
           alt={song.title}
           draggable={false}
           onLoad={() => setCoverLoaded(true)}
+          onError={(e) => {
+            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+              e.currentTarget.src = '/uploads/default-cover.jpg';
+            } else {
+              setCoverLoaded(true);
+            }
+          }}
         />
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
           {isPlaying && isActive ? <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white" /> : <Play size={48} fill="white" className="ml-1.5 md:w-8 md:h-8 md:ml-1 text-white" />}
