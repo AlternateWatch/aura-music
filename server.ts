@@ -592,20 +592,37 @@ app.get('/api/tracks', async (req, res) => {
 
 app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { name: 'cover' }]), async (req: any, res: Response) => {
     const { title, artist, album, tabs_url, track_number, video_url } = req.body;
-    if (!req.files['audio']) return res.status(400).send("No audio");
-    const format = path.extname(req.files['audio'][0].originalname).includes('flac') ? 'flac' : 'mp3';
-    const initialStatus = (req.user.role === 'admin' || req.user.role === 'moderator') ? 'approved' : 'pending';
+    if (!req.files?.['audio']) return res.status(400).json({ error: "No audio" });
 
-    let coverUrl = null;
-    if (req.files['cover']) {
-        coverUrl = normalizeAssetPath(req.files['cover'][0].filename);
+    // Si algo falla, borrar los archivos que multer ya guardó en disco
+    const cleanupUploaded = () => {
+        for (const field of ['audio', 'cover']) {
+            const f = req.files?.[field]?.[0];
+            if (f?.path && fs.existsSync(f.path)) {
+                try { fs.unlinkSync(f.path); } catch {}
+            }
+        }
+    };
+
+    try {
+        const format = path.extname(req.files['audio'][0].originalname).includes('flac') ? 'flac' : 'mp3';
+        const initialStatus = (req.user.role === 'admin' || req.user.role === 'moderator') ? 'approved' : 'pending';
+
+        let coverUrl = null;
+        if (req.files['cover']) {
+            coverUrl = normalizeAssetPath(req.files['cover'][0].filename);
+        }
+
+        const [result]: any = await pool.execute(
+            'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [title, artist, album, normalizeAssetPath(req.files['audio'][0].filename), coverUrl, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+        );
+        res.status(201).json({ id: result.insertId });
+    } catch (e) {
+        console.error("Error uploading track:", e);
+        cleanupUploaded();
+        res.status(500).json({ error: "Error guardando la pista en la base de datos." });
     }
-
-    const [result]: any = await pool.execute(
-        'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [title, artist, album, normalizeAssetPath(req.files['audio'][0].filename), coverUrl, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
-    );
-    res.status(201).json({ id: result.insertId });
 });
 app.post('/api/tracks/:id/like', authenticateToken, async (req: any, res: Response) => {
     try {
@@ -1110,7 +1127,7 @@ app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: an
         );
 
         if (playlistRows.length === 0) {
-            connection.release();
+            // release() lo hace el finally
             return res.status(403).json({ error: "Forbidden" });
         }
 

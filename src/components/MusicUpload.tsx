@@ -36,6 +36,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [isLoadingCover, setIsLoadingCover] = useState(false);
 
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -103,17 +104,31 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     if (track.artworkUrl100) {
       const highRes = track.artworkUrl100.replace('100x100bb', '600x600bb');
       setCoverPreview(highRes);
+      setCoverFile(null);
+      setIsLoadingCover(true);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       try {
-        const response = await fetch(highRes);
+        const response = await fetch(highRes, { signal: controller.signal, cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
-        setCoverFile(new File([blob], "cover.jpg", { type: "image/jpeg" }));
-      } catch(e) {}
+        if (!blob.type.startsWith('image/') || blob.size === 0) throw new Error('Respuesta no es una imagen');
+        setCoverFile(new File([blob], "cover.jpg", { type: blob.type }));
+      } catch (e) {
+        console.warn('No se pudo descargar la carátula de iTunes:', e);
+        setCoverPreview(null);
+        setError("No se pudo descargar la carátula de iTunes. Puedes subir una manualmente o intentarlo de nuevo.");
+      } finally {
+        clearTimeout(timeoutId);
+        setIsLoadingCover(false);
+      }
     }
   };
 
   const handleSingleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!audioFile) { setError("Selecciona un archivo MP3 o FLAC válido."); return; }
+    if (isLoadingCover) return;
 
     setIsUploading(true);
     setError(null);
@@ -128,22 +143,34 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     formData.append('audio', audioFile);
     if (coverFile) formData.append('cover', coverFile);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
     try {
       const response = await fetch('/api/tracks', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` },
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
 
       if (response.ok) {
         setSuccess(true);
         setTimeout(() => { onUploadComplete(); onClose(); }, 1800);
+      } else if (response.status === 401 || response.status === 403) {
+        setError("Tu sesión ha caducado. Vuelve a iniciar sesión.");
       } else {
-        const data = await response.json();
-        setError(data.error || "Fallo en la subida.");
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || `Fallo en la subida (error ${response.status}).`);
       }
-    } catch (err) { setError("No se pudo conectar con el servidor."); }
-    setIsUploading(false);
+    } catch (err: any) {
+      setError(err?.name === 'AbortError'
+        ? "La subida tardó demasiado y se canceló. Inténtalo de nuevo."
+        : "No se pudo conectar con el servidor.");
+    } finally {
+      clearTimeout(timeoutId);
+      setIsUploading(false);
+    }
   };
 
   // =============================================================
@@ -500,8 +527,8 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
                 {error && <div className="text-red-500 text-[10px] font-bold uppercase p-3 bg-red-500/10 rounded-xl border border-red-500/20"><AlertCircle size={14} className="inline mr-2" /> {error}</div>}
 
-                <button type="submit" disabled={isUploading || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
-                  {isUploading ? <Loader2 className="animate-spin" size={16} /> : 'Subir pista'}
+                <button type="submit" disabled={isUploading || isLoadingCover || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
+                  {isUploading ? <Loader2 className="animate-spin" size={16} /> : isLoadingCover ? <><Loader2 className="animate-spin" size={16} /> Cargando carátula</> : 'Subir pista'}
                 </button>
               </form>
             )}
