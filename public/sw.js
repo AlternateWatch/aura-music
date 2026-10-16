@@ -67,23 +67,62 @@ async function touchAndEvict(cache, url) {
   await saveIndex(cache, index);
 }
 
-async function cacheFullTrack(cache, request) {
+// Descargas completas en curso, por URL. Sin esto, CADA petición Range del
+// <audio> (se hacen muchas durante la reproducción y al hacer seek) lanzaba
+// una descarga completa nueva del mismo archivo en paralelo, porque la
+// copia aún no estaba en caché. Con el tiempo se acumulaban decenas de
+// descargas de FLAC/MP3 enteros que saturaban las conexiones al servidor y
+// dejaban colgadas otras peticiones (p.ej. la subida de canciones).
+const inFlight = new Map();
+
+// Cola: solo una descarga en segundo plano a la vez, para no competir con
+// la reproducción ni con las peticiones normales de la app.
+let downloadChain = Promise.resolve();
+
+async function doCacheFullTrack(cache, url, accept) {
   // Pedimos el fichero entero (sin Range) para tener una copia completa
   // reutilizable tanto para reproducción offline como para servir
   // cualquier Range que pida el <audio> después.
-  const fullRequest = new Request(request.url, {
+  const fullRequest = new Request(url, {
     method: "GET",
-    headers: { Accept: request.headers.get("Accept") || "*/*" },
+    headers: { Accept: accept || "*/*" },
     mode: "cors",
     credentials: "omit",
   });
 
-  const response = await fetch(fullRequest);
-  if (!response.ok) return null;
+  // Si una descarga se queda colgada, abortarla para no bloquear la cola.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  try {
+    const response = await fetch(fullRequest, { signal: controller.signal });
+    if (!response.ok) return null;
 
-  await cache.put(request.url, response.clone());
-  await touchAndEvict(cache, request.url);
-  return response;
+    await cache.put(url, response.clone());
+    await touchAndEvict(cache, url);
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function cacheFullTrack(cache, request) {
+  const url = request.url;
+  if (inFlight.has(url)) return inFlight.get(url);
+
+  const accept = request.headers.get("Accept");
+  const job = downloadChain
+    .catch(() => {})
+    .then(async () => {
+      // Puede que otra petición la haya cacheado mientras esperábamos turno.
+      const already = await cache.match(url);
+      if (already) return already;
+      return doCacheFullTrack(cache, url, accept);
+    })
+    .finally(() => inFlight.delete(url));
+
+  downloadChain = job.catch(() => {});
+  inFlight.set(url, job);
+  return job;
 }
 
 // Cache API no soporta Range de forma nativa: si tenemos el fichero
@@ -149,28 +188,12 @@ self.addEventListener("fetch", (event) => {
         return cached.clone();
       }
 
-      // No está en caché todavía.
-      if (rangeHeader) {
-        // Dejamos que la petición con Range vaya a red normal para no
-        // penalizar el arranque de la reproducción, y de paso lanzamos
-        // en segundo plano la descarga completa para futuras veces / para
-        // aguantar un corte de conexión más adelante en esta misma canción.
-        event.waitUntil(
-          cache.match(request.url).then((already) => {
-            if (!already) return cacheFullTrack(cache, request).catch(() => {});
-          })
-        );
-        return fetch(request);
-      }
-
-      // GET normal sin Range: cacheamos directamente la respuesta de red.
-      try {
-        const response = await cacheFullTrack(cache, request);
-        if (response) return response.clone();
-        return fetch(request);
-      } catch {
-        return fetch(request);
-      }
+      // No está en caché todavía: la petición va a red normal (para no
+      // penalizar el arranque ni el seek) y en segundo plano se encola UNA
+      // descarga completa (deduplicada) para futuras veces / para aguantar
+      // un corte de conexión más adelante en esta misma canción.
+      event.waitUntil(cacheFullTrack(cache, request).catch(() => {}));
+      return fetch(request);
     })()
   );
 });
