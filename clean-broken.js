@@ -25,11 +25,18 @@ const cleanBrokenTracks = async () => {
         let deletedCount = 0;
 
         for (const track of tracks) {
-            // Limpiar la ruta relativa para obtener el nombre o ruta local correcta
             const getAbsPath = (p) => {
                 if (!p) return null;
-                const clean = p.startsWith('/') ? p.substring(1) : p;
-                return path.join(__dirname, 'public', clean);
+                const filename = path.basename(String(p).split('?')[0]);
+                if (!filename) return null;
+                if (process.platform !== 'win32' && fs.existsSync(path.join('/var/www/aura-uploads', filename))) {
+                    return path.join('/var/www/aura-uploads', filename);
+                }
+                const inPublic = path.join(__dirname, 'public', 'uploads', filename);
+                if (fs.existsSync(inPublic)) return inPublic;
+                const inDist = path.join(__dirname, 'dist', 'public', 'uploads', filename);
+                if (fs.existsSync(inDist)) return inDist;
+                return inPublic;
             };
 
             const audioAbs = getAbsPath(track.file_path);

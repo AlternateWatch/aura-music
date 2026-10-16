@@ -29,155 +29,181 @@ import config from './config.json' assert { type: 'json' };
 
 
 const __filename = fileURLToPath(import.meta.url);
-
 const __dirname = path.dirname(__filename);
+// Cuando PM2 ejecuta ./dist/server.js, __dirname es /var/www/aura-music/dist.
+// Calculamos ROOT_DIR siempre en la raíz del proyecto para que las subidas NUNCA vayan a dist/public/uploads.
+const ROOT_DIR = path.basename(__dirname) === 'dist' ? path.resolve(__dirname, '..') : __dirname;
+const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
 
-dotenv.config();
-
-
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 const app = express();
-
 const httpServer = createServer(app);
-
 const io = new Server(httpServer, {
-
   cors: {
-
     origin: true,
-
     credentials: true,
-
     methods: ["GET", "POST"]
-
   }
-
 });
 
-
-
 app.use(cors({
-
   origin: true,
-
   credentials: true
-
 }));
-
 app.use(express.json({ limit: '200mb' }));
-
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
-
-
 const PORT = process.env.PORT || 4000;
-
 const JWT_SECRET = process.env.JWT_SECRET || 'aura_ultimate_stable_secret_key_2026_production';
 
-
-
 // STORAGE
+const resolveUploadDir = (): string => {
+    if (process.env.UPLOAD_DIR) return process.env.UPLOAD_DIR;
+    if (process.platform !== 'win32' && fs.existsSync('/var/www/aura-uploads')) {
+        return '/var/www/aura-uploads';
+    }
+    const rootUploads = path.join(ROOT_DIR, 'public', 'uploads');
+    try {
+        if (fs.existsSync(rootUploads)) {
+            const st = fs.statSync(rootUploads);
+            if (st.isDirectory()) return rootUploads;
+            // En Windows sin symlinks git, public/uploads puede ser el archivo de texto del symlink (21 bytes)
+            if (st.isFile() && st.size < 256) {
+                const winFallback = path.join(ROOT_DIR, 'uploads_local');
+                if (!fs.existsSync(winFallback)) fs.mkdirSync(winFallback, { recursive: true });
+                return winFallback;
+            }
+        }
+    } catch {}
+    if (!fs.existsSync(rootUploads)) {
+        try { fs.mkdirSync(rootUploads, { recursive: true }); } catch {}
+    }
+    return rootUploads;
+};
 
-const uploadDir = path.join(__dirname, 'public', 'uploads');
+const uploadDir = resolveUploadDir();
+if (!fs.existsSync(uploadDir)) {
+    try { fs.mkdirSync(uploadDir, { recursive: true }); } catch {}
+}
 
-if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
+// Auto-rescate: si ejecuciones previas de dist/server.js guardaron archivos en dist/public/uploads,
+// moverlos al uploadDir persistente para que vite build no los borre jamás.
+for (const trappedDir of [path.join(DIST_DIR, 'public', 'uploads'), path.join(DIST_DIR, 'uploads')]) {
+    try {
+        if (trappedDir !== uploadDir && fs.existsSync(trappedDir) && fs.statSync(trappedDir).isDirectory()) {
+            for (const f of fs.readdirSync(trappedDir)) {
+                const src = path.join(trappedDir, f);
+                const dest = path.join(uploadDir, f);
+                if (!fs.existsSync(dest) && fs.statSync(src).isFile()) {
+                    fs.copyFileSync(src, dest);
+                    console.log(`🛟 Archivo rescatado a uploadDir persistente: ${f}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Aviso al rescatar archivos antiguos de dist:", e);
+    }
+}
+
+// Normaliza rutas guardadas en BD (convierte https://aura.basildo.me/uploads/x.jpg -> /uploads/x.jpg)
+const normalizeMediaPath = (rawPath: string | null | undefined): string | null => {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+    if (trimmed.includes('/uploads/')) {
+        const cleanName = path.basename(trimmed.split('?')[0]);
+        return `/uploads/${cleanName}`;
+    }
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        return trimmed;
+    }
+    return `/uploads/${path.basename(trimmed)}`;
+};
+
+// Resuelve un path de BD (/uploads/x.jpg o URL completa) a su ruta física real en disco
+const resolveDiskPath = (dbPath: string | null | undefined): string | null => {
+    if (!dbPath || typeof dbPath !== 'string') return null;
+    const trimmed = dbPath.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+    const filename = path.basename(trimmed.split('?')[0]);
+    if (!filename || filename === '.' || filename === '..') return null;
+    const primary = path.join(uploadDir, filename);
+    if (fs.existsSync(primary)) return primary;
+    const fallbackRoot = path.join(ROOT_DIR, 'public', 'uploads', filename);
+    if (fs.existsSync(fallbackRoot)) return fallbackRoot;
+    const fallbackDist = path.join(DIST_DIR, 'uploads', filename);
+    if (fs.existsSync(fallbackDist)) return fallbackDist;
+    return primary;
+};
 
 const storage = multer.diskStorage({
-
     destination: (req, file, cb) => { cb(null, uploadDir); },
-
     filename: (req, file, cb) => {
-
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-
         cb(null, uniqueSuffix + path.extname(file.originalname));
-
     }
-
 });
 
 const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } });
 
-
-
 // DATABASE
-
 const pool = mysql.createPool({
-
     host: process.env.DB_HOST || 'localhost',
-
     user: process.env.DB_USER || 'admin',
-
     password: process.env.DB_PASSWORD,
-
     database: process.env.DB_NAME || 'aura_music_db',
-
     waitForConnections: true,
-
     connectionLimit: 10,
-
     enableKeepAlive: true
-
 });
 
-
-
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
-
     const authHeader = req.headers['authorization'];
-
     const token = authHeader && authHeader.split(' ')[1];
-
     if (!token) return res.status(401).json({ error: "No token." });
-
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-
         if (err) return res.status(403).json({ error: "Invalid session." });
-
         req.user = user;
-
         next();
-
     });
-
 };
 
-
+// Solo borra un archivo de disco si ninguna otra canción en la BD lo sigue referenciando
+const unlinkTrackAssetIfUnused = async (dbPath: string | null | undefined, excludeTrackId?: string | number): Promise<boolean> => {
+    if (!dbPath) return false;
+    try {
+        const filename = path.basename(dbPath.split('?')[0]);
+        if (!filename) return false;
+        const likePattern = `%/${filename}`;
+        const [rows]: any = await pool.execute(
+            'SELECT COUNT(*) as cnt FROM tracks WHERE id != ? AND (file_path = ? OR file_path LIKE ? OR cover_path = ? OR cover_path LIKE ? OR animated_cover_path = ? OR animated_cover_path LIKE ?)',
+            [excludeTrackId ?? -1, `/uploads/${filename}`, likePattern, `/uploads/${filename}`, likePattern, `/uploads/${filename}`, likePattern]
+        );
+        if ((rows[0]?.cnt ?? 0) > 0) {
+            return false; // Sigue en uso por otra canción (ej. portada compartida de álbum)
+        }
+        const diskPath = resolveDiskPath(dbPath);
+        if (diskPath && fs.existsSync(diskPath)) {
+            fs.unlinkSync(diskPath);
+            return true;
+        }
+    } catch (e) {
+        console.error("Error checking/deleting asset:", e);
+    }
+    return false;
+};
 
 const deleteTrackFiles = async (trackId: string) => {
-
     try {
-
         const [rows]: any = await pool.execute('SELECT file_path, cover_path, animated_cover_path FROM tracks WHERE id = ?', [trackId]);
-
         if (rows[0]) {
-
             const track = rows[0];
-
-            const audioPath = path.join(__dirname, 'public', track.file_path.startsWith('/') ? track.file_path.substring(1) : track.file_path);
-
-            if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
-            if (track.cover_path) {
-
-                const coverPath = path.join(__dirname, 'public', track.cover_path.startsWith('/') ? track.cover_path.substring(1) : track.cover_path);
-
-                if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
-
-            }
-
-            if (track.animated_cover_path) {
-
-                const animPath = path.join(__dirname, 'public', track.animated_cover_path.startsWith('/') ? track.animated_cover_path.substring(1) : track.animated_cover_path);
-
-                if (fs.existsSync(animPath)) fs.unlinkSync(animPath);
-
-            }
-
+            await unlinkTrackAssetIfUnused(track.file_path, trackId);
+            await unlinkTrackAssetIfUnused(track.cover_path, trackId);
+            await unlinkTrackAssetIfUnused(track.animated_cover_path, trackId);
         }
-
     } catch (e) { console.error("Cleanup failed", e); }
-
 };
 
 // --- AUTH ---
@@ -468,7 +494,6 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
                 });
                 const filename = `cover_${Date.now()}_${Math.round(Math.random() * 1e9)}.jpg`;
-                const uploadDir = path.join(__dirname, 'public', 'uploads');
                 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
                 downloadedCoverFile = path.join(uploadDir, filename);
                 fs.writeFileSync(downloadedCoverFile, Buffer.from(imgRes.data));
@@ -538,74 +563,42 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
 
     const { title, artist, album, track_number, tabs_url, video_url } = req.body;
 
-    let coverPath = req.body.cover_path;
-
-    let animatedCoverPath = req.body.animated_cover_path;
-
-
-
     try {
+        const [rows]: any = await pool.execute('SELECT cover_path, animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
+        const oldCover = rows[0]?.cover_path || null;
+        const oldAnimCover = rows[0]?.animated_cover_path || null;
+
+        let coverPath = req.body.cover_path !== undefined ? normalizeMediaPath(req.body.cover_path) : normalizeMediaPath(oldCover);
+        let animatedCoverPath = req.body.animated_cover_path !== undefined ? normalizeMediaPath(req.body.animated_cover_path) : normalizeMediaPath(oldAnimCover);
 
         if (req.files && req.files['cover']) {
-
-            const coverFile = req.files['cover'][0];
-
-            const [rows]: any = await pool.execute('SELECT cover_path FROM tracks WHERE id = ?', [req.params.id]);
-
-            if (rows[0]?.cover_path) {
-
-                const oldPath = path.join(__dirname, 'public', rows[0].cover_path.startsWith('/') ? rows[0].cover_path.substring(1) : rows[0].cover_path);
-
-                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-
-            }
-
-            coverPath = `/uploads/${coverFile.filename}`;
-
+            coverPath = `/uploads/${req.files['cover'][0].filename}`;
         }
-
-
 
         if (req.files && req.files['animated_cover']) {
-
-            const animFile = req.files['animated_cover'][0];
-
-            const [rows]: any = await pool.execute('SELECT animated_cover_path FROM tracks WHERE id = ?', [req.params.id]);
-
-            if (rows[0]?.animated_cover_path) {
-
-                const oldAnimPath = path.join(__dirname, 'public', rows[0].animated_cover_path.startsWith('/') ? rows[0].animated_cover_path.substring(1) : rows[0].animated_cover_path);
-
-                if (fs.existsSync(oldAnimPath)) fs.unlinkSync(oldAnimPath);
-
-            }
-
-            animatedCoverPath = `/uploads/${animFile.filename}`;
-
+            animatedCoverPath = `/uploads/${req.files['animated_cover'][0].filename}`;
         }
-
-
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
 
         await pool.execute(
-
             'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?', 
-
             [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null, req.params.id]
+        );
 
-        ); 
+        // Borrado seguro: solo después de actualizar la BD y solo si ninguna otra canción usa el archivo antiguo
+        if (oldCover && normalizeMediaPath(oldCover) !== coverPath) {
+            await unlinkTrackAssetIfUnused(oldCover, req.params.id);
+        }
+        if (oldAnimCover && normalizeMediaPath(oldAnimCover) !== animatedCoverPath) {
+            await unlinkTrackAssetIfUnused(oldAnimCover, req.params.id);
+        }
 
         res.send(); 
-
     } catch (e) { 
-
         console.error("Error updating track:", e);
-
         res.status(500).send(); 
-
     }
-
 });
 
 
@@ -753,13 +746,9 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
         // Borramos la imagen vieja del disco si ya tenía una
 
         const [rows]: any = await pool.execute('SELECT image_url FROM artists WHERE name = ?', [req.params.name]);
-
         if (rows.length > 0 && rows[0].image_url) {
-
-            const oldPath = path.join(__dirname, 'public', rows[0].image_url.startsWith('/') ? rows[0].image_url.substring(1) : rows[0].image_url);
-
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-
+            const oldPath = resolveDiskPath(rows[0].image_url);
+            if (oldPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
 
@@ -991,93 +980,42 @@ app.post('/api/users/profile-pic', authenticateToken, upload.single('profile_pic
 
 
         // Get current profile pic so we can delete the old file from the hard drive
-
         const [userRows]: any = await pool.execute('SELECT profile_pic_path FROM users WHERE id = ?', [req.user.userId]);
-
         if (userRows[0]?.profile_pic_path) {
-
-            const oldPath = path.join(__dirname, 'public', userRows[0].profile_pic_path.startsWith('/') ? userRows[0].profile_pic_path.substring(1) : userRows[0].profile_pic_path);
-
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); // Free up storage space
-
+            const oldPath = resolveDiskPath(userRows[0].profile_pic_path);
+            if (oldPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath); // Free up storage space
         }
-
-
 
         // Update the database with the new image path
-
         await pool.execute('UPDATE users SET profile_pic_path = ? WHERE id = ?', [newPicPath, req.user.userId]);
-
         
-
         res.json({ profile_pic_path: newPicPath });
-
     } catch (error) {
-
         console.error("Profile pic upload error:", error);
-
         res.status(500).json({ error: "Server error uploading profile pic" });
-
     }
-
 });
 
-
-
 app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), async (req: any, res: Response) => {
-
     try {
-
         if (!req.file) {
-
             return res.status(400).json({ error: "No image uploaded" });
-
         }
-
-
 
         const newBgPath = `/uploads/${req.file.filename}`;
 
-
-
         // Obtener el wallpaper anterior
-
         const [userRows]: any = await pool.execute(
-
             'SELECT custom_bg_path FROM users WHERE id = ?',
-
             [req.user.userId]
-
         );
 
-
-
         // Eliminar el wallpaper anterior del disco
-
         if (userRows[0]?.custom_bg_path) {
-
-            const oldPath = path.join(
-
-                __dirname,
-
-                'public',
-
-                userRows[0].custom_bg_path.startsWith('/')
-
-                    ? userRows[0].custom_bg_path.substring(1)
-
-                    : userRows[0].custom_bg_path
-
-            );
-
-
-
-            if (fs.existsSync(oldPath)) {
-
+            const oldPath = resolveDiskPath(userRows[0].custom_bg_path);
+            if (oldPath && fs.existsSync(oldPath)) {
                 fs.unlinkSync(oldPath);
-
             }
-
         }
 
 
@@ -2181,53 +2119,55 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
 
             if (tracks.length <= 1) continue;
 
-            // La primera pista de esta lista ordenada INTELIGENTE será la maestra (la que tenga una portada válida y buen número)
-            const masterTrack = tracks.find((t: any) => t.cover_path && t.cover_path !== '');
-            if (!masterTrack) continue; // Si ninguna canción del álbum tiene portada, pasamos al siguiente
+            // Elegimos como maestra la primera pista cuya portada EXISTA físicamente en el disco duro
+            const masterTrack = tracks.find((t: any) => {
+                if (!t.cover_path || t.cover_path === '') return false;
+                const diskPath = resolveDiskPath(t.cover_path);
+                return Boolean(diskPath && fs.existsSync(diskPath));
+            });
+            if (!masterTrack) continue; // Si ninguna canción del álbum tiene portada válida en disco, no destruimos nada
 
-            const masterCover = masterTrack.cover_path;
-            const masterAnimCover = masterTrack.animated_cover_path;
+            const masterCover = normalizeMediaPath(masterTrack.cover_path);
+            const masterAnimTrack = tracks.find((t: any) => {
+                if (!t.animated_cover_path || t.animated_cover_path === '') return false;
+                const diskPath = resolveDiskPath(t.animated_cover_path);
+                return Boolean(diskPath && fs.existsSync(diskPath));
+            });
+            const masterAnimCover = masterAnimTrack ? normalizeMediaPath(masterAnimTrack.animated_cover_path) : null;
+
+            if (masterTrack.cover_path !== masterCover) {
+                await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [masterCover, masterTrack.id]);
+            }
 
             // Aplicamos la portada maestra a TODAS las demás pistas del álbum
             for (let i = 0; i < tracks.length; i++) {
                 const currentTrack = tracks[i];
-                // No tocamos la pista maestra a menos que queramos asegurarnos, pero saltamos su propia id
                 if (currentTrack.id === masterTrack.id) continue;
 
-                let needsUpdate = false;
-                let newCover = currentTrack.cover_path;
-                let newAnimCover = currentTrack.animated_cover_path;
+                const oldCover = currentTrack.cover_path;
+                const oldAnim = currentTrack.animated_cover_path;
 
-                // 1. Si la pista actual no tiene portada o tiene una distinta a la maestra
-                if (currentTrack.cover_path !== masterCover) {
-                    if (currentTrack.cover_path && currentTrack.cover_path !== '') {
-                        const oldPath = path.join(__dirname, 'public', currentTrack.cover_path.startsWith('/') ? currentTrack.cover_path.substring(1) : currentTrack.cover_path);
-                        if (fs.existsSync(oldPath)) {
-                            try { fs.unlinkSync(oldPath); deletedFilesCount++; } catch (e) {}
-                        }
-                    }
-                    newCover = masterCover;
-                    needsUpdate = true;
-                }
+                const newCover = masterCover;
+                const newAnimCover = masterAnimCover || normalizeMediaPath(oldAnim);
 
-                // 2. Si la pista actual no tiene portada animada o tiene una distinta a la maestra
-                if (masterAnimCover && currentTrack.animated_cover_path !== masterAnimCover) {
-                    if (currentTrack.animated_cover_path && currentTrack.animated_cover_path !== '') {
-                        const oldAnimPath = path.join(__dirname, 'public', currentTrack.animated_cover_path.startsWith('/') ? currentTrack.animated_cover_path.substring(1) : currentTrack.animated_cover_path);
-                        if (fs.existsSync(oldAnimPath)) {
-                            try { fs.unlinkSync(oldAnimPath); deletedFilesCount++; } catch (e) {}
-                        }
-                    }
-                    newAnimCover = masterAnimCover;
-                    needsUpdate = true;
-                }
+                const coverChanged = normalizeMediaPath(oldCover) !== newCover;
+                const animChanged = Boolean(masterAnimCover && normalizeMediaPath(oldAnim) !== masterAnimCover);
 
-                if (needsUpdate) {
+                if (coverChanged || animChanged) {
                     await pool.execute(
                         'UPDATE tracks SET cover_path = ?, animated_cover_path = ? WHERE id = ?',
                         [newCover, newAnimCover, currentTrack.id]
                     );
                     updatedTracksCount++;
+
+                    if (coverChanged && oldCover) {
+                        const deleted = await unlinkTrackAssetIfUnused(oldCover, currentTrack.id);
+                        if (deleted) deletedFilesCount++;
+                    }
+                    if (animChanged && oldAnim) {
+                        const deleted = await unlinkTrackAssetIfUnused(oldAnim, currentTrack.id);
+                        if (deleted) deletedFilesCount++;
+                    }
                 }
             }
         }
@@ -2248,11 +2188,27 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
     }
 });
 
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+// Servir uploads desde uploadDir persistente (y respaldos si existieran)
+app.use('/uploads', express.static(uploadDir));
+app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
+app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
-app.use(express.static(__dirname));
-app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
+// Si un archivo en /uploads no existe en disco, devolver 404 con no-store para que
+// ni Cloudflare ni el navegador cacheen index.html (text/html 200 OK) como si fuera una imagen.
+app.use('/uploads', (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.status(404).send('Asset not found');
+});
 
+app.use(express.static(DIST_DIR));
+app.get('*', (req, res) => {
+    if (req.path.startsWith('/uploads') || /\.(jpg|jpeg|png|webp|gif|mp3|flac|wav|ogg|m4a)$/i.test(req.path)) {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        return res.status(404).send('Asset not found');
+    }
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+});
 
-httpServer.listen(PORT, () => { console.log(`🎵 Aura running on ${PORT}`); });
+httpServer.listen(PORT, () => { console.log(`🎵 Aura running on ${PORT} (uploads: ${uploadDir})`); });
+
 
