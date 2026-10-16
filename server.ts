@@ -435,13 +435,12 @@ app.get('/api/tracks', async (req, res) => {
 
 
 app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { name: 'cover' }]), async (req: any, res: Response) => {
-
-    // 1. Recogemos video_url del body:
-
-    const { title, artist, album, tabs_url, track_number, video_url } = req.body;
+    const { title, artist, album, tabs_url, track_number, video_url, cover_url } = req.body;
     if (!req.files?.['audio']) return res.status(400).json({ error: "No audio" });
 
-    // Si algo falla, borrar los archivos que multer ya guardo en disco
+    let downloadedCoverFile: string | null = null;
+
+    // Si algo falla, borrar los archivos que multer o la descarga remota ya guardo en disco
     const cleanupUploaded = () => {
         for (const field of ['audio', 'cover']) {
             const f = req.files?.[field]?.[0];
@@ -449,22 +448,61 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
                 try { fs.unlinkSync(f.path); } catch {}
             }
         }
+        if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
+            try { fs.unlinkSync(downloadedCoverFile); } catch {}
+        }
     };
 
     try {
         const format = path.extname(req.files['audio'][0].originalname).includes('flac') ? 'flac' : 'mp3';
         const initialStatus = (req.user.role === 'admin' || req.user.role === 'moderator') ? 'approved' : 'pending';
 
-        // 2. Guardamos video_url en la base de datos:
+        let coverPath: string | null = null;
+        if (req.files?.['cover']?.[0]) {
+            coverPath = `/uploads/${req.files['cover'][0].filename}`;
+        } else if (cover_url && typeof cover_url === 'string' && cover_url.startsWith('http')) {
+            try {
+                const imgRes = await axios.get(cover_url, {
+                    responseType: 'arraybuffer',
+                    timeout: 10000,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                const filename = `cover_${Date.now()}_${Math.round(Math.random() * 1e9)}.jpg`;
+                const uploadDir = path.join(__dirname, 'public', 'uploads');
+                if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+                downloadedCoverFile = path.join(uploadDir, filename);
+                fs.writeFileSync(downloadedCoverFile, Buffer.from(imgRes.data));
+                coverPath = `/uploads/${filename}`;
+            } catch (coverErr) {
+                console.warn("No se pudo descargar la portada remota en el servidor:", coverErr);
+            }
+        }
+
         const [result]: any = await pool.execute(
             'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, req.files['cover'] ? `/uploads/${req.files['cover'][0].filename}` : null, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+            [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
         );
         res.status(201).json({ id: result.insertId });
     } catch (e) {
         console.error("Error uploading track:", e);
         cleanupUploaded();
         res.status(500).json({ error: "Error guardando la pista en la base de datos." });
+    }
+});
+
+app.post('/api/stats/ping', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const { trackId, title, artist, album, ms } = req.body || {};
+        const cleanMs = Math.max(1000, Math.min(Number(ms) || 0, 60000));
+        if (title && artist) {
+            await pool.execute(
+                'INSERT INTO listen_pings (user_id, track_id, title, artist, album, ms) VALUES (?, ?, ?, ?, ?, ?)',
+                [req.user.userId, trackId || null, String(title).slice(0, 255), String(artist).slice(0, 255), album ? String(album).slice(0, 255) : null, cleanMs]
+            ).catch(() => {}); // silenciar si la tabla aun no existe
+        }
+        res.sendStatus(204);
+    } catch {
+        res.sendStatus(204);
     }
 });
 

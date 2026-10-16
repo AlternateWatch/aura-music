@@ -36,6 +36,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [isLoadingCover, setIsLoadingCover] = useState(false);
 
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -57,6 +58,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const [selectedAlbum, setSelectedAlbum] = useState<any | null>(null);
   const [albumTracks, setAlbumTracks] = useState<ITunesTrack[]>([]);
   const [albumCoverFile, setAlbumCoverFile] = useState<File | null>(null);
+  const [albumCoverUrl, setAlbumCoverUrl] = useState<string | null>(null);
   const [albumCoverPreview, setAlbumCoverPreview] = useState<string | null>(null);
   
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -104,20 +106,23 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     if (track.artworkUrl100) {
       const highRes = track.artworkUrl100.replace('100x100bb', '600x600bb');
       setCoverPreview(highRes);
+      setCoverUrl(highRes);
       setCoverFile(null);
       setIsLoadingCover(true);
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       try {
-        const response = await fetch(highRes, { signal: controller.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        if (!blob.type.startsWith('image/') || blob.size === 0) throw new Error('Respuesta no es una imagen');
-        setCoverFile(new File([blob], "cover.jpg", { type: blob.type }));
+        const response = await fetch(highRes, { signal: controller.signal });
+        if (response.ok) {
+          const blob = await response.blob();
+          if (blob.type.startsWith('image/') && blob.size > 0) {
+            setCoverFile(new File([blob], "cover.jpg", { type: blob.type }));
+          }
+        }
       } catch (e) {
-        console.warn('No se pudo descargar la carátula de iTunes:', e);
-        setCoverPreview(null);
-        setError("No se pudo descargar la carátula de iTunes. Puedes subir una manualmente o intentarlo de nuevo.");
+        // Si el navegador falla por CORS o ERR_CONNECTION_CLOSED, el backend la descargará con cover_url
+        console.warn('El navegador no pudo precargar el blob de la carátula directamente; se descargará desde el servidor:', e);
       } finally {
         clearTimeout(timeoutId);
         setIsLoadingCover(false);
@@ -128,7 +133,6 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const handleSingleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!audioFile) { setError("Selecciona un archivo MP3 o FLAC válido."); return; }
-    if (isLoadingCover) return;
 
     setIsUploading(true);
     setError(null);
@@ -141,7 +145,11 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     formData.append('tabs_url', tabsUrl);
     formData.append('video_url', videoUrl);
     formData.append('audio', audioFile);
-    if (coverFile) formData.append('cover', coverFile);
+    if (coverFile) {
+      formData.append('cover', coverFile);
+    } else if (coverUrl) {
+      formData.append('cover_url', coverUrl);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000);
@@ -254,11 +262,19 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     if (albumItem.artworkUrl100) {
       const highRes = albumItem.artworkUrl100.replace('100x100bb', '1000x1000bb');
       setAlbumCoverPreview(highRes);
+      setAlbumCoverUrl(highRes);
+      setAlbumCoverFile(null);
       try {
         const response = await fetch(highRes);
-        const blob = await response.blob();
-        setAlbumCoverFile(new File([blob], "album_cover.jpg", { type: "image/jpeg" }));
-      } catch(e) {}
+        if (response.ok) {
+          const blob = await response.blob();
+          if (blob.type.startsWith('image/') && blob.size > 0) {
+            setAlbumCoverFile(new File([blob], "album_cover.jpg", { type: blob.type }));
+          }
+        }
+      } catch(e) {
+        console.warn('El navegador no pudo precargar la carátula del álbum directamente; se usará la URL remota:', e);
+      }
     }
 
     try {
@@ -336,7 +352,11 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       formData.append('album', track.collectionName);
       formData.append('track_number', track.trackNumber.toString());
       formData.append('audio', file);
-      if (albumCoverFile) formData.append('cover', albumCoverFile);
+      if (albumCoverFile) {
+        formData.append('cover', albumCoverFile);
+      } else if (albumCoverUrl) {
+        formData.append('cover_url', albumCoverUrl);
+      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 45000);
@@ -518,7 +538,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-center px-2 truncate w-full">{audioFile ? audioFile.name : 'Seleccionar MP3 / FLAC'}</p>
                     </div>
                     <div onClick={() => coverInputRef.current?.click()} className="relative cursor-pointer overflow-hidden flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-2xl h-[100px] hover:border-white/20">
-                      <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={e => { if(e.target.files?.[0]){ setCoverFile(e.target.files[0]); setCoverPreview(URL.createObjectURL(e.target.files[0])); } }} />
+                      <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={e => { if(e.target.files?.[0]){ setCoverFile(e.target.files[0]); setCoverUrl(null); setCoverPreview(URL.createObjectURL(e.target.files[0])); } }} />
                       {coverPreview ? <img src={coverPreview} className="absolute inset-0 w-full h-full object-cover opacity-40" alt="" /> : <ImageIcon className="text-white/20" size={24} />}
                       <p className="relative text-[10px] font-bold uppercase tracking-[0.2em] z-10">{coverFile || coverPreview ? 'Cambiar Carátula' : 'Seleccionar Carátula'}</p>
                     </div>
@@ -527,8 +547,8 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
                 {error && <div className="text-red-500 text-[10px] font-bold uppercase p-3 bg-red-500/10 rounded-xl border border-red-500/20"><AlertCircle size={14} className="inline mr-2" /> {error}</div>}
 
-                <button type="submit" disabled={isUploading || isLoadingCover || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
-                  {isUploading ? <Loader2 className="animate-spin" size={16} /> : isLoadingCover ? <><Loader2 className="animate-spin" size={16} /> Cargando carátula</> : 'Subir pista'}
+                <button type="submit" disabled={isUploading || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
+                  {isUploading ? <Loader2 className="animate-spin" size={16} /> : 'Subir pista'}
                 </button>
               </form>
             )}
