@@ -16,9 +16,10 @@ import config from './config.json' assert { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -59,7 +60,7 @@ const normalizeAssetPath = (filePath: string | null) => {
 };
 
 // --- STORAGE ---
-const uploadDir = path.join(__dirname, 'public', 'uploads');
+const uploadDir = path.join(__dirname, '../public', 'uploads');
 if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
 const storage = multer.diskStorage({
     destination: (req, file, cb) => { cb(null, uploadDir); },
@@ -150,14 +151,15 @@ const deleteTrackFiles = async (trackId: string) => {
         const [rows]: any = await pool.execute('SELECT file_path, cover_path, animated_cover_path FROM tracks WHERE id = ?', [trackId]);
         if (rows[0]) {
             const track = rows[0];
-            const audioPath = path.join(__dirname, 'public', track.file_path.startsWith('/') ? track.file_path.substring(1) : track.file_path);
+            // Borrar los archivos de la pista
+            const audioPath = path.join(__dirname, '../public', track.file_path.startsWith('/') ? track.file_path.substring(1) : track.file_path);
             if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
             if (track.cover_path) {
-                const coverPath = path.join(__dirname, 'public', track.cover_path.startsWith('/') ? track.cover_path.substring(1) : track.cover_path);
+                const coverPath = path.join(__dirname, '../public', track.cover_path.startsWith('/') ? track.cover_path.substring(1) : track.cover_path);
                 if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
             }
             if (track.animated_cover_path) {
-                const animPath = path.join(__dirname, 'public', track.animated_cover_path.startsWith('/') ? track.animated_cover_path.substring(1) : track.animated_cover_path);
+                const animPath = path.join(__dirname, '../public', track.animated_cover_path.startsWith('/') ? track.animated_cover_path.substring(1) : track.animated_cover_path);
                 if (fs.existsSync(animPath)) fs.unlinkSync(animPath);
             }
         }
@@ -432,7 +434,7 @@ const purgeAlbumCovers = async () => {
 
             if (check[0].count === 0) {
                 const fullPath = p.startsWith('/') ? p.substring(1) : p;
-                const absPath = path.join(__dirname, 'public', fullPath);
+                const absPath = path.join(__dirname, '../public', fullPath);
                 if (fs.existsSync(absPath)) {
                     fs.unlinkSync(absPath);
                     filesDeleted++;
@@ -647,11 +649,12 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
 
         // Borrado seguro: solo después de que la BD se ha actualizado con éxito
         if (req.files?.['cover'] && oldCover && coverPath !== oldCover) {
-            const fullPath = path.join(__dirname, 'public', oldCover.startsWith('/') ? oldCover.substring(1) : oldCover);
+            // Borrar la imagen antigua
+            const fullPath = path.join(__dirname, '../public', oldCover.startsWith('/') ? oldCover.substring(1) : oldCover);
             if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
         }
         if (req.files?.['animated_cover'] && oldAnimCover && animatedCoverPath !== oldAnimCover) {
-            const fullPath = path.join(__dirname, 'public', oldAnimCover.startsWith('/') ? oldAnimCover.substring(1) : oldAnimCover);
+            const fullPath = path.join(__dirname, '../public', oldAnimCover.startsWith('/') ? oldAnimCover.substring(1) : oldAnimCover);
             if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
         }
 
@@ -737,7 +740,8 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
         // Borramos la imagen vieja del disco si ya tenía una
         const [rows]: any = await pool.execute('SELECT image_url FROM artists WHERE name = ?', [req.params.name]);
         if (rows.length > 0 && rows[0].image_url) {
-            const oldPath = path.join(__dirname, 'public', rows[0].image_url.startsWith('/') ? rows[0].image_url.substring(1) : rows[0].image_url);
+            // Borrar la imagen antigua
+            const oldPath = path.join(__dirname, '../public', rows[0].image_url.startsWith('/') ? rows[0].image_url.substring(1) : rows[0].image_url);
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
 
@@ -860,7 +864,7 @@ app.post('/api/users/profile-pic', authenticateToken, upload.single('profile_pic
         // Get current profile pic so we can delete the old file from the hard drive
         const [userRows]: any = await pool.execute('SELECT profile_pic_path FROM users WHERE id = ?', [req.user.userId]);
         if (userRows[0]?.profile_pic_path) {
-            const oldPath = path.join(__dirname, 'public', userRows[0].profile_pic_path.startsWith('/') ? userRows[0].profile_pic_path.substring(1) : userRows[0].profile_pic_path);
+            const oldPath = path.join(__dirname, '../public', userRows[0].profile_pic_path.startsWith('/') ? userRows[0].profile_pic_path.substring(1) : userRows[0].profile_pic_path);
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); // Free up storage space
         }
 
@@ -892,7 +896,7 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
         if (userRows[0]?.custom_bg_path) {
             const oldPath = path.join(
                 __dirname,
-                'public',
+                '../public',
                 userRows[0].custom_bg_path.startsWith('/')
                     ? userRows[0].custom_bg_path.substring(1)
                     : userRows[0].custom_bg_path
@@ -1522,7 +1526,7 @@ app.use('/uploads', (req, res, next) => {
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
     next();
-}, express.static(path.join(__dirname, 'public', 'uploads')));
+}, express.static(path.join(__dirname, '../public', 'uploads')));
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || req.path.match(/\.(jpg|jpeg|png|webp|gif|mp3|flac)$/i)) {
