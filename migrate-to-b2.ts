@@ -91,25 +91,34 @@ async function main() {
         return;
     }
 
-    const CONCURRENCY = 4;
+    const CONCURRENCY = 3;
     let completed = 0;
     let failed = 0;
     let totalBytesUploaded = 0;
     const startTime = Date.now();
 
-    const uploadWorker = async (filename: string) => {
+    const uploadWorker = async (filename: string, maxRetries = 4) => {
         const filePath = path.join(sourceDir, filename);
-        try {
-            const stat = fs.statSync(filePath);
-            const stream = fs.createReadStream(filePath);
-            await uploadToB2(filename, stream, undefined, stat.size);
-            totalBytesUploaded += stat.size;
-            completed++;
-            const pct = Math.round((completed / pending.length) * 100);
-            console.log(`[${completed}/${pending.length}] (${pct}%) ✅ Subido: ${filename} (${formatBytes(stat.size)})`);
-        } catch (e: any) {
-            failed++;
-            console.error(`❌ Falló la subida de ${filename}:`, e.message);
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const stat = fs.statSync(filePath);
+                const stream = fs.createReadStream(filePath);
+                await uploadToB2(filename, stream, undefined, stat.size);
+                totalBytesUploaded += stat.size;
+                completed++;
+                const pct = Math.round((completed / pending.length) * 100);
+                console.log(`[${completed}/${pending.length}] (${pct}%) ✅ Subido: ${filename} (${formatBytes(stat.size)})`);
+                return;
+            } catch (e: any) {
+                if (attempt < maxRetries) {
+                    const delay = attempt * 1500;
+                    console.warn(`⚠️ Reintento ${attempt}/${maxRetries} para ${filename} en ${delay}ms (${e.message})...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    failed++;
+                    console.error(`❌ Falló definitivamente la subida de ${filename} tras ${maxRetries} intentos:`, e.message);
+                }
+            }
         }
     };
 
