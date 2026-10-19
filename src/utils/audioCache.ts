@@ -4,6 +4,8 @@
 // Android/desconocido puede no soportar SW de la misma forma que un
 // navegador de verdad.
 
+import { Capacitor } from "@capacitor/core";
+
 let registrationPromise: Promise<ServiceWorkerRegistration | null> | null = null;
 
 export function registerAudioCacheSW(): Promise<ServiceWorkerRegistration | null> {
@@ -11,6 +13,25 @@ export function registerAudioCacheSW(): Promise<ServiceWorkerRegistration | null
 
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
     registrationPromise = Promise.resolve(null);
+    return registrationPromise;
+  }
+
+  // En Android/iOS nativo (Capacitor) el App Shell ya vive dentro del APK y
+  // las descargas offline van por IndexedDB/Dexie. Un Service Worker en el
+  // WebView interceptando streams Range de FLACs de 40-50 MB en RAM provoca
+  // microcortes de I/O y compite con el buffer de reproducción.
+  if (Capacitor.isNativePlatform()) {
+    registrationPromise = (async () => {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.allSettled(regs.map((r) => r.unregister()));
+        if (typeof caches !== "undefined") {
+          const keys = await caches.keys();
+          await Promise.allSettled(keys.map((k) => caches.delete(k)));
+        }
+      } catch {}
+      return null;
+    })();
     return registrationPromise;
   }
 
@@ -50,7 +71,7 @@ export function registerAudioCacheSW(): Promise<ServiceWorkerRegistration | null
 // reproducirla. Pensado para precargar la siguiente canción de la cola en
 // cuanto arranca la actual.
 export async function prefetchAudio(url: string | undefined | null) {
-  if (!url) return;
+  if (!url || Capacitor.isNativePlatform()) return;
 
   const registration = await registerAudioCacheSW();
   const target = registration?.active || navigator.serviceWorker?.controller;
@@ -60,6 +81,7 @@ export async function prefetchAudio(url: string | undefined | null) {
 }
 
 export async function clearAudioCache() {
+  if (Capacitor.isNativePlatform()) return;
   const registration = await registerAudioCacheSW();
   const target = registration?.active || navigator.serviceWorker?.controller;
   target?.postMessage({ type: "CLEAR_CACHE" });

@@ -19,13 +19,21 @@ export interface IntegratedResult {
   gatedSeconds: number;
 }
 
+// Umbral absoluto de -70 LUFS expresado directamente en energía media lineal:
+// -0.691 + 10 * log10(ms) = -70  =>  ms = 10^((-70 + 0.691) / 10)
+const ABS_GATE_MS = Math.pow(10, (-70 - LUFS_OFFSET) / 10);
+
 export class TrackAnalysis {
   private slots = new Float32Array(6000).fill(NaN);
   private filled = 0;
+  private maxIndex = -1;
 
   reset() {
-    this.slots.fill(NaN);
+    if (this.maxIndex >= 0) {
+      this.slots.fill(NaN, 0, Math.min(this.slots.length, this.maxIndex + 1));
+    }
     this.filled = 0;
+    this.maxIndex = -1;
   }
 
   set(index: number, ms: number) {
@@ -37,6 +45,7 @@ export class TrackAnalysis {
     }
     if (Number.isNaN(this.slots[index])) this.filled++;
     this.slots[index] = ms;
+    if (index > this.maxIndex) this.maxIndex = index;
   }
 
   /** Fracción [0..1] de la canción ya medida. */
@@ -46,26 +55,36 @@ export class TrackAnalysis {
   }
 
   integrated(): IntegratedResult {
-    const n = this.slots.length;
+    const limit = Math.min(this.slots.length, this.maxIndex + 1);
+    if (limit < 4) return { lufs: null, gatedSeconds: 0 };
     const s = this.slots;
-    const windows: number[] = [];
-
-    for (let i = 0; i + 3 < n; i++) {
-      const a = s[i], b = s[i + 1], c = s[i + 2], d = s[i + 3];
-      // NaN en cualquiera => hueco sin medir; se ignora esa ventana.
-      if (a !== a || b !== b || c !== c || d !== d) continue;
-      const m = (a + b + c + d) / 4;
-      if (msToLufs(m) > -70) windows.push(m);
-    }
-    if (windows.length === 0) return { lufs: null, gatedSeconds: 0 };
 
     let sum = 0;
-    for (const m of windows) sum += m;
-    const relThreshold = msToLufs(sum / windows.length) - 10;
+    let count = 0;
+
+    for (let i = 0; i + 3 < limit; i++) {
+      const a = s[i], b = s[i + 1], c = s[i + 2], d = s[i + 3];
+      if (a !== a || b !== b || c !== c || d !== d) continue;
+      const m = (a + b + c + d) * 0.25;
+      if (m > ABS_GATE_MS) {
+        sum += m;
+        count++;
+      }
+    }
+    if (count === 0) return { lufs: null, gatedSeconds: 0 };
+
+    // Puerta relativa de -10 LU respecto a la media equivale a 0.1x en energía lineal
+    const relThresholdMs = (sum / count) * 0.1;
 
     let gsum = 0, gcount = 0;
-    for (const m of windows) {
-      if (msToLufs(m) > relThreshold) { gsum += m; gcount++; }
+    for (let i = 0; i + 3 < limit; i++) {
+      const a = s[i], b = s[i + 1], c = s[i + 2], d = s[i + 3];
+      if (a !== a || b !== b || c !== c || d !== d) continue;
+      const m = (a + b + c + d) * 0.25;
+      if (m > ABS_GATE_MS && m > relThresholdMs) {
+        gsum += m;
+        gcount++;
+      }
     }
     if (gcount === 0) return { lufs: null, gatedSeconds: 0 };
 

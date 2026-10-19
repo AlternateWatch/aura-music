@@ -134,13 +134,6 @@ public class AuraMediaPlugin extends Plugin {
                         ? Math.round(positionValue)
                         : 0L;
 
-        Log.d(
-                "AuraMedia",
-                "setPosition recibido: "
-                        + positionMs
-                        + " ms"
-        );
-
         AuraMediaService service =
                 AuraMediaService.getInstance();
 

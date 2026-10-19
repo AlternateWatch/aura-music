@@ -426,36 +426,6 @@ public class AuraMediaService extends MediaSessionService {
                         )
                 );
 
-        /*
-         * Barra de progreso de la notificación.
-         *
-         * Solo se actualiza una vez por segundo, para no
-         * generar trabajo innecesario.
-         */
-        if (durationMs > 0) {
-
-            int progressMax =
-                    (int) Math.min(
-                            durationMs,
-                            Integer.MAX_VALUE
-                    );
-
-            int progress =
-                    (int) Math.max(
-                            0,
-                            Math.min(
-                                    positionMs,
-                                    durationMs
-                            )
-                    );
-
-            builder.setProgress(
-                    progressMax,
-                    progress,
-                    false
-            );
-        }
-
         if (Build.VERSION.SDK_INT >=
                 Build.VERSION_CODES.S) {
 
@@ -586,18 +556,6 @@ public class AuraMediaService extends MediaSessionService {
             }
 
             player.setPosition(positionMs);
-
-            android.util.Log.d(
-                    "AuraMedia",
-                    "Posición recibida: "
-                            + positionMs
-                            + " ms"
-                            + " / duración: "
-                            + player.getDurationMs()
-                            + " ms"
-            );
-
-            updateNotification();
         });
     }
 

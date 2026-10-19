@@ -20,7 +20,8 @@ export function useAudioEngine(
   volume: number,
   settings: AudioSettings,
   setIsPlaying: (val: boolean) => void,
-  resolvedAudioUrl: string | undefined
+  resolvedAudioUrl: string | undefined,
+  visualizerActive = false
 ) {
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -39,7 +40,11 @@ export function useAudioEngine(
   volumeRef.current = volume;
   settingsRef.current = settings;
 
-  const needsGraph = settings.normalizer.enabled || settings.eq.enabled || settings.visualizer.enabled || settings.crossfade.enabled;
+  const needsGraph =
+    settings.normalizer.enabled ||
+    settings.eq.enabled ||
+    settings.crossfade.enabled ||
+    visualizerActive;
 
   const currentTimeRef = useRef(0);
   // Posición (s) a aplicar cuando termine de cargar la próxima canción.

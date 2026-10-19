@@ -426,7 +426,8 @@ useEffect(() => {
   const resolvedProfilePic = useFileUrl(user?.profile_pic_path);
 
   // --- LOGIC MODULES ---
-  const audioObj = useAudioEngine(currentSong, isPlaying, volume, audioSettings, setIsPlaying, resolvedAudioUrl);
+  const visualizerActive = audioSettings.visualizer.enabled && (isFocusMode || isSessionOpen);
+  const audioObj = useAudioEngine(currentSong, isPlaying, volume, audioSettings, setIsPlaying, resolvedAudioUrl, visualizerActive);
   const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue);
   const mainRef = useRef<HTMLElement | null>(null);
   
@@ -2208,6 +2209,8 @@ useEffect(() => {
     return;
   }
 
+  const currentPosMs = Math.max(0, Math.round(audioObj.getCurrentTime() * 1000));
+  AuraMedia.setPosition({ positionMs: currentPosMs }).catch(() => {});
   AuraMedia.setPlaying({
     playing: isPlaying
   }).catch((error) => {
@@ -2230,13 +2233,25 @@ useEffect(() => {
     return;
   }
 
+  let lastSentPosMs = -1;
+  let lastSentWallMs = 0;
+
   const syncPosition = () => {
     const currentTime = audioObj.getCurrentTime();
+    const positionMs = Math.max(0, Math.round(currentTime * 1000));
+    const now = performance.now();
 
-    const positionMs = Math.max(
-      0,
-      Math.round(currentTime * 1000)
-    );
+    if (lastSentPosMs >= 0) {
+      const elapsedWallMs = now - lastSentWallMs;
+      const expectedPosMs = lastSentPosMs + elapsedWallMs;
+      const isSeekJump = Math.abs(positionMs - expectedPosMs) > 1500;
+      if (!isSeekJump && elapsedWallMs < 15000) {
+        return;
+      }
+    }
+
+    lastSentPosMs = positionMs;
+    lastSentWallMs = now;
 
     AuraMedia.setPosition({
       positionMs

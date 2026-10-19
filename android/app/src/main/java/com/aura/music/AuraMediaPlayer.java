@@ -44,6 +44,8 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
 
     private long currentPositionMs = 0;
 
+    private long positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
+
     private long durationMs = 0;
 
     private boolean shuffleEnabled = false;
@@ -57,6 +59,18 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         super(looper);
 
         this.callback = callback;
+    }
+
+    private long getExtrapolatedPositionMs() {
+        long pos = currentPositionMs;
+        if (playing) {
+            long elapsed = Math.max(0L, android.os.SystemClock.elapsedRealtime() - positionUpdateRealtimeMs);
+            pos += elapsed;
+        }
+        if (durationMs > 0) {
+            pos = Math.min(pos, durationMs);
+        }
+        return Math.max(0L, pos);
     }
 
     public void setMedia(
@@ -116,6 +130,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
                 );
 
         this.currentPositionMs = 0;
+        this.positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
 
         invalidateState();
     }
@@ -123,16 +138,18 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
     public void setPlaying(
             boolean playing
     ) {
+        this.currentPositionMs = getExtrapolatedPositionMs();
+        this.positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
+        if (this.playing == playing) {
+            return;
+        }
         this.playing = playing;
 
         invalidateState();
     }
 
     public void setPosition(long positionMs) {
-        android.util.Log.d(
-                "AuraMedia",
-                "PLAYER setPosition ENTRADA: " + positionMs
-        );
+        long extrapolated = getExtrapolatedPositionMs();
 
         if (durationMs > 0) {
             currentPositionMs = Math.max(
@@ -145,34 +162,32 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
                     positionMs
             );
         }
+        positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
 
-        android.util.Log.d(
-                "AuraMedia",
-                "PLAYER currentPositionMs DESPUES: "
-                        + currentPositionMs
-                        + " / durationMs: "
-                        + durationMs
-        );
-
-        invalidateState();
+        // Solo invalidamos el MediaSession cuando hay un salto real (seek > 1.5s).
+        // Durante la reproducción normal, PositionSupplier.getExtrapolating mueve la barra
+        // a 60fps sin saturar SystemUI ni MIUI con IPC cada 250ms.
+        if (Math.abs(currentPositionMs - extrapolated) > 1500L) {
+            invalidateState();
+        }
     }
 
     public void setDuration(
             long durationMs
     ) {
-        this.durationMs =
-                Math.max(
-                        0,
-                        durationMs
-                );
+        long clamped = Math.max(0, durationMs);
+        if (this.durationMs == clamped) {
+            return;
+        }
+        this.durationMs = clamped;
 
         if (this.durationMs > 0) {
-
             currentPositionMs =
                     Math.min(
-                            currentPositionMs,
+                            getExtrapolatedPositionMs(),
                             this.durationMs
                     );
+            positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
         }
 
         invalidateState();
@@ -183,7 +198,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
     }
 
     public long getPositionMs() {
-        return currentPositionMs;
+        return getExtrapolatedPositionMs();
     }
 
     public long getDurationMs() {
@@ -296,7 +311,9 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
                         )
 
                         .setContentPositionMs(
-                                currentPositionMs
+                                playing && currentMediaItem != null
+                                        ? PositionSupplier.getExtrapolating(getExtrapolatedPositionMs(), 1.0f)
+                                        : PositionSupplier.getConstant(getExtrapolatedPositionMs())
                         )
 
                         .setShuffleModeEnabled(
@@ -337,6 +354,8 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
     protected ListenableFuture<?> handleSetPlayWhenReady(
             boolean playWhenReady
     ) {
+        currentPositionMs = getExtrapolatedPositionMs();
+        positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
         playing = playWhenReady;
 
         if (callback != null) {
@@ -383,7 +402,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         if (seekCommand == Player.COMMAND_SEEK_FORWARD) {
 
             long newPosition =
-                    currentPositionMs + 10_000L;
+                    getExtrapolatedPositionMs() + 10_000L;
 
             if (durationMs > 0) {
                 newPosition =
@@ -398,6 +417,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
                             0,
                             newPosition
                     );
+            positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
 
             if (callback != null) {
                 callback.onSeek(
@@ -413,13 +433,14 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         if (seekCommand == Player.COMMAND_SEEK_BACK) {
 
             long newPosition =
-                    currentPositionMs - 10_000L;
+                    getExtrapolatedPositionMs() - 10_000L;
 
             currentPositionMs =
                     Math.max(
                             0,
                             newPosition
                     );
+            positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
 
             if (callback != null) {
                 callback.onSeek(
@@ -455,6 +476,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
                             positionMs
                     );
         }
+        positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
 
         if (callback != null) {
             callback.onSeek(

@@ -182,14 +182,10 @@ async function servePartial(cachedResponse, rangeHeader, url) {
   }
 
   const total = buffer.byteLength;
-  const MAX_CHUNK_BYTES = 4 * 1024 * 1024; // 4 MB por bloque para no clonar 40 MB de golpe en RAM
 
   const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader || "");
   let start = match && match[1] ? parseInt(match[1], 10) : 0;
-  const hasExplicitEnd = Boolean(match && match[2]);
-  let end = hasExplicitEnd
-    ? parseInt(match[2], 10)
-    : Math.min(total - 1, start + MAX_CHUNK_BYTES - 1);
+  let end = match && match[2] ? parseInt(match[2], 10) : total - 1;
 
   if (Number.isNaN(start)) start = 0;
   if (Number.isNaN(end) || end >= total) end = total - 1;
@@ -198,7 +194,7 @@ async function servePartial(cachedResponse, rangeHeader, url) {
     return new Response(null, { status: 416 });
   }
 
-  const slice = buffer.slice(start, end + 1);
+  const slice = start === 0 && end === total - 1 ? buffer : buffer.slice(start, end + 1);
   return new Response(slice, {
     status: 206,
     statusText: "Partial Content",
@@ -209,18 +205,6 @@ async function servePartial(cachedResponse, rangeHeader, url) {
       "Accept-Ranges": "bytes",
     },
   });
-}
-
-const delayedCacheTimers = new Map();
-function scheduleDelayedCacheFullTrack(cache, request, delayMs = 20000) {
-  const url = request.url;
-  if (inFlight.has(url) || delayedCacheTimers.has(url)) return;
-  const accept = request.headers.get("Accept");
-  const timer = setTimeout(() => {
-    delayedCacheTimers.delete(url);
-    cacheFullTrack(cache, new Request(url, { headers: accept ? { Accept: accept } : {} })).catch(() => {});
-  }, delayMs);
-  delayedCacheTimers.set(url, timer);
 }
 
 self.addEventListener("install", (event) => {
@@ -255,16 +239,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 1. Peticiones de audio: Cache-First con soporte de Range requests sin bloqueo
+  // 1. Peticiones de audio: si ya está cacheada por PREFETCH, servimos desde caché;
+  // si no está en caché, dejamos que el <audio> haga streaming directo desde red sin
+  // lanzar una segunda descarga paralela del mismo fichero que compita por ancho de banda/I/O.
   if (looksLikeAudio(url)) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME);
-        const cached = await cache.match(request.url); // sin Range: copia completa
+        const cached = await cache.match(request.url);
         const rangeHeader = request.headers.get("Range");
 
         if (cached) {
-          // Actualizar LRU en segundo plano SIN bloquear la entrega de bytes al <audio>
           event.waitUntil(touchAndEvict(cache, request.url).catch(() => {}));
           if (rangeHeader) {
             return servePartial(cached.clone(), rangeHeader, request.url);
@@ -272,10 +257,6 @@ self.addEventListener("fetch", (event) => {
           return cached.clone();
         }
 
-        // No está en caché todavía: dejamos que la petición Range vaya directa a red con el 100%
-        // del ancho de banda disponible, y retrasamos 20s la copia en segundo plano para no competir
-        // con el buffer de reproducción en directo desde Backblaze B2.
-        scheduleDelayedCacheFullTrack(cache, request, 20000);
         return fetch(request);
       })()
     );

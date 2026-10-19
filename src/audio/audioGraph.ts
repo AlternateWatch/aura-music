@@ -84,6 +84,8 @@ export class AudioGraph {
   private limiter: DynamicsCompressorNode;
   private master: GainNode;
   private meterNode: AudioWorkletNode | null = null;
+  private meterInitStarted = false;
+  private meterConnected = false;
   private meterState: AudioStatus["meter"] = "loading";
   private fadeGain: GainNode;
   private tailAudio: HTMLAudioElement;
@@ -91,6 +93,7 @@ export class AudioGraph {
   private tailGain: GainNode;
   private tailTimer: ReturnType<typeof setTimeout> | null = null;
   private nextPreparedSrc: string | null = null;
+  private activeDspChainKey = "";
 
 
   private settings: AudioSettings = JSON.parse(JSON.stringify(DEFAULT_AUDIO_SETTINGS));
@@ -151,15 +154,10 @@ export class AudioGraph {
     this.fadeGain.gain.value = 1;
 
     this.master = ctx.createGain();
-    this.master.gain.value = this.volume * this.limiterComp;
+    this.master.gain.value = this.volume;
 
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 64;
-
-    let node: AudioNode = this.source;
-    const chain: AudioNode[] = [this.norm, this.preamp, ...this.filters, this.limiter, this.fadeGain, this.master, this.analyser];
-    for (const next of chain) { node.connect(next); node = next; }
-    node.connect(ctx.destination);
 
     // Segundo reproductor para el solapamiento (cola saliente del crossfade)
     this.tailAudio = new Audio();
@@ -172,13 +170,62 @@ export class AudioGraph {
     this.tailSource.connect(this.tailGain);
     this.tailGain.connect(this.preamp);
 
+    this.rebuildChain(false, false);
+
     // El volumen pasa a ser un GainNode; el elemento va siempre a tope para
     // que el medidor vea la señal real de la canción.
     audio.volume = 1;
     audio.addEventListener("seeked", this.onSeeked);
     audio.addEventListener("ended", this.onEnded);
+  }
 
-    void this.initMeter();
+  private rebuildChain(eqOn: boolean, normOn: boolean) {
+    const key = `${eqOn ? 1 : 0}:${normOn ? 1 : 0}`;
+    if (this.activeDspChainKey === key) return;
+    this.activeDspChainKey = key;
+
+    const useLimiter = eqOn || normOn;
+    const allNodes: AudioNode[] = [
+      this.source,
+      this.norm,
+      this.preamp,
+      ...this.filters,
+      this.limiter,
+      this.fadeGain,
+      this.master,
+      this.analyser,
+    ];
+    for (const n of allNodes) {
+      try { n.disconnect(); } catch {}
+    }
+
+    const chain: AudioNode[] = [this.norm, this.preamp];
+    if (eqOn) {
+      chain.push(...this.filters);
+    }
+    if (useLimiter) {
+      chain.push(this.limiter);
+    }
+    chain.push(this.fadeGain, this.master, this.analyser);
+
+    let node: AudioNode = this.source;
+    for (const next of chain) {
+      node.connect(next);
+      node = next;
+    }
+    node.connect(this.ctx.destination);
+
+    if (this.meterNode && normOn) {
+      try {
+        this.source.connect(this.meterNode);
+        this.meterConnected = true;
+      } catch {}
+    } else {
+      this.meterConnected = false;
+    }
+
+    const comp = useLimiter ? this.limiterComp : 1;
+    this.master.gain.setTargetAtTime(this.volume * comp, this.ctx.currentTime, 0.015);
   }
 
   // ---- API pública --------------------------------------------------------
@@ -192,18 +239,41 @@ export class AudioGraph {
 
   setVolume(v: number) {
     this.volume = v;
-    this.master.gain.setTargetAtTime(v * this.limiterComp, this.ctx.currentTime, 0.015);
+    const useLimiter = this.settings.eq.enabled || this.settings.normalizer.enabled;
+    const comp = useLimiter ? this.limiterComp : 1;
+    this.master.gain.setTargetAtTime(v * comp, this.ctx.currentTime, 0.015);
   }
 
   applySettings(s: AudioSettings) {
     this.settings = s;
     const now = this.ctx.currentTime;
 
-    // EQ: siempre en la cadena; "desactivado" = todas las bandas a 0 dB.
     const eqOn = s.eq.enabled;
-    this.filters.forEach((f, i) => {
-      f.gain.setTargetAtTime(eqOn ? s.eq.bands[i] ?? 0 : 0, now, 0.02);
-    });
+    const normOn = s.normalizer.enabled;
+    this.rebuildChain(eqOn, normOn);
+
+    if (normOn) {
+      if (!this.meterInitStarted) {
+        this.meterInitStarted = true;
+        void this.initMeter();
+      } else if (this.meterNode && !this.meterConnected) {
+        try {
+          this.source.connect(this.meterNode);
+          this.meterConnected = true;
+        } catch {}
+      }
+    } else if (this.meterNode && this.meterConnected) {
+      try {
+        this.source.disconnect(this.meterNode);
+      } catch {}
+      this.meterConnected = false;
+    }
+
+    if (eqOn) {
+      this.filters.forEach((f, i) => {
+        f.gain.setTargetAtTime(s.eq.bands[i] ?? 0, now, 0.02);
+      });
+    }
     const preDb = eqOn ? s.eq.preamp + (s.eq.autoPreamp ? autoPreampDb(s.eq.bands) : 0) : 0;
     this.preamp.gain.setTargetAtTime(dbToLin(preDb), now, 0.03);
 
@@ -346,11 +416,16 @@ export class AudioGraph {
       // conectamos a través de una ganancia 0 (silencio).
       const sink = this.ctx.createGain();
       sink.gain.value = 0;
-      this.source.connect(node);
       node.connect(sink);
       sink.connect(this.ctx.destination);
 
       this.meterNode = node;
+      if (this.settings.normalizer.enabled) {
+        try {
+          this.source.connect(node);
+          this.meterConnected = true;
+        } catch {}
+      }
       this.meterState = "ready";
     } catch (e) {
       console.warn("Medidor de sonoridad no disponible; el normalizador solo usará valores guardados:", e);
@@ -360,6 +435,8 @@ export class AudioGraph {
   }
 
   private onBlock = (e: MessageEvent<{ ms: number; peak: number }>) => {
+    if (!this.settings.normalizer.enabled) return;
+
     const ms = e.data.ms;
     const audio = this.audio;
 
@@ -372,7 +449,7 @@ export class AudioGraph {
 
     if (!playing) {
       this.momentary = null;
-      this.publish(false);
+      if (this.listeners.size > 0) this.publish(false);
       return;
     }
 
@@ -401,7 +478,7 @@ export class AudioGraph {
     }
 
     this.evaluate({});
-    this.publish(false);
+    if (this.listeners.size > 0) this.publish(false);
   };
 
   private commitToCache(lufs: number) {
