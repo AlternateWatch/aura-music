@@ -41,28 +41,33 @@ function resolveSyncFallbackUrl(url: string | undefined | null): string | undefi
 }
 
 export function useFileUrl(url: string | undefined | null): string | undefined {
-  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(() =>
-    resolveSyncFallbackUrl(url)
-  );
+  const [state, setState] = useState<{ inputUrl: string | undefined | null; resolvedUrl: string | undefined }>(() => ({
+    inputUrl: url,
+    resolvedUrl: resolveSyncFallbackUrl(url),
+  }));
+
+  // Si la url cambia durante el render, actualizamos síncronamente el estado
+  // para que ningún hook hijo (como useAudioEngine) reciba una URL obsoleta de la canción previa
+  let effectiveResolvedUrl = state.resolvedUrl;
+  if (state.inputUrl !== url) {
+    effectiveResolvedUrl = resolveSyncFallbackUrl(url);
+    setState({
+      inputUrl: url,
+      resolvedUrl: effectiveResolvedUrl,
+    });
+  }
 
   useEffect(() => {
     if (!url) {
-      setResolvedUrl(undefined);
       return;
     }
-
-    // Actualizar inmediatamente al valor síncrono si cambió la canción
-    setResolvedUrl((prev) => {
-      const syncVal = resolveSyncFallbackUrl(url);
-      return prev === syncVal ? prev : syncVal;
-    });
 
     let isMounted = true;
 
     const update = () => {
       resolveFileUrl(url).then((resolved) => {
         if (isMounted && resolved) {
-          setResolvedUrl((prev) => (prev === resolved ? prev : resolved));
+          setState((prev) => (prev.inputUrl === url && prev.resolvedUrl !== resolved ? { inputUrl: url, resolvedUrl: resolved } : prev));
         }
       });
     };
@@ -76,5 +81,5 @@ export function useFileUrl(url: string | undefined | null): string | undefined {
     };
   }, [url]);
 
-  return resolvedUrl;
+  return effectiveResolvedUrl;
 }

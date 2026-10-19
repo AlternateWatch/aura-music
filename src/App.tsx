@@ -1650,6 +1650,8 @@ useEffect(() => {
   // esperan su play-track (si no llega en 3 s, avanzan ellos para no quedarse parados).
   const handleNextRef = useRef<() => void>(() => {});
   handleNextRef.current = handleNext;
+  const handlePreviousRef = useRef<() => void>(() => {});
+  handlePreviousRef.current = handlePrevious;
   const handleSongEnded = () => {
     if (!socketObj.currentSession || socketObj.isLeader()) return handleNext();
     const endedId = socketObj.getTrackId();
@@ -2201,14 +2203,14 @@ useEffect(() => {
       const nextListener = await AuraMedia.addListener(
         'next',
         () => {
-          handleNext();
+          handleNextRef.current();
         }
       );
 
       const previousListener = await AuraMedia.addListener(
         'previous',
         () => {
-          handlePrevious();
+          handlePreviousRef.current();
         }
       );
 
@@ -2287,10 +2289,7 @@ useEffect(() => {
       listener.remove().catch(() => {});
     }
   };
-}, [
-  handleNext,
-  handlePrevious
-]);
+}, []);
 
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) {

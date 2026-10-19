@@ -218,12 +218,16 @@ export function useAudioEngine(
       window.location.origin
     ).href;
 
-    const isSameSongAlreadyLoaded =
-      loadedSongIdRef.current === currentSong.id &&
+    const isDifferentSong = loadedSongIdRef.current !== currentSong.id;
+    const isUrlDifferent = audio.src !== targetUrl;
+    // Solo evitamos recargar si es exactamente LA MISMA canción y ya está sonando
+    // (para que no se corte en el segundo 5 si IndexedDB descarga la versión offline en segundo plano)
+    const isSameSongMidTrack =
+      !isDifferentSong &&
       Boolean(audio.src) &&
       audio.currentTime > 0.2;
 
-    if (audio.src !== targetUrl && !isSameSongAlreadyLoaded) {
+    if ((isDifferentSong || isUrlDifferent) && !isSameSongMidTrack) {
       loadedSongIdRef.current = currentSong.id;
       audio.pause();
       currentTimeRef.current = 0;
@@ -245,7 +249,6 @@ export function useAudioEngine(
 
       audio.addEventListener("canplay", canPlayHandler);
     } else {
-      loadedSongIdRef.current = currentSong.id;
       if (isPlaying) {
         startPlayback();
       } else {
