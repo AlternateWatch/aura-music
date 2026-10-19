@@ -181,28 +181,15 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             }
           }}
         />
-        {(anyDownloaded || anyDownloading) && (
+        {(isOffline || isDownloading) && (
           <div
-            className="absolute top-2.5 right-2.5 z-10 px-2 py-1 rounded-full bg-black/75 backdrop-blur-md border border-emerald-500/30 flex items-center gap-1 shadow-lg"
-            title={
-              anyDownloading
-                ? "Descargando..."
-                : isOffline && isDiskDownloaded
-                  ? "Descargada sin conexión y en disco"
-                  : isDiskDownloaded
-                    ? "Descargada en tu dispositivo"
-                    : "Disponible sin conexión"
-            }
+            className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/70 backdrop-blur-md border border-white/10 flex items-center justify-center"
+            title={isDownloading ? "Descargando para modo sin conexión..." : "Disponible sin conexión"}
           >
-            {anyDownloading ? (
+            {isDownloading ? (
               <Loader2 size={12} className="text-brand-primary animate-spin" />
             ) : (
-              <>
-                <Check size={11} className="text-emerald-400 stroke-[3]" />
-                <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">
-                  {isOffline ? 'Offline' : 'Guardada'}
-                </span>
-              </>
+              <Download size={12} className="text-emerald-400" />
             )}
           </div>
         )}
@@ -220,8 +207,8 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
               {song.title}
             </h3>
-            {anyDownloaded && !anyDownloading && (
-              <Download size={12} className="text-emerald-400 shrink-0" title="Canción descargada" />
+            {isOffline && !isDownloading && (
+              <Download size={12} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
             )}
           </div>
           <p className="text-sm md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate" title={song.artist}>
