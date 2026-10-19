@@ -181,18 +181,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             }
           }}
         />
-        {(isOffline || isDownloading) && (
-          <div
-            className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/70 backdrop-blur-md border border-white/10 flex items-center justify-center"
-            title={isDownloading ? "Descargando para modo sin conexión..." : "Disponible sin conexión"}
-          >
-            {isDownloading ? (
-              <Loader2 size={12} className="text-brand-primary animate-spin" />
-            ) : (
-              <Download size={12} className="text-emerald-400" />
-            )}
-          </div>
-        )}
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
           {isPlaying && isActive ? <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white" /> : <Play size={48} fill="white" className="ml-1.5 md:w-8 md:h-8 md:ml-1 text-white" />}
         </div>
@@ -207,9 +195,11 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
               {song.title}
             </h3>
-            {isOffline && !isDownloading && (
+            {isDownloading ? (
+              <Loader2 size={12} className="text-brand-primary animate-spin shrink-0" title="Descargando para modo sin conexión..." />
+            ) : isOffline ? (
               <Download size={12} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
-            )}
+            ) : null}
           </div>
           <p className="text-sm md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate" title={song.artist}>
             {song.artist}
