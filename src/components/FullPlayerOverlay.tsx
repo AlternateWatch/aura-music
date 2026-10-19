@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { 
   X, Play, Pause, SkipBack, SkipForward, 
   Shuffle, Repeat, ChevronDown, Music2,
-  Volume2, Mic2, ListMusic, VolumeX, Volume1, SlidersHorizontal, Moon
+  Volume2, Mic2, ListMusic, VolumeX, Volume1, SlidersHorizontal
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
@@ -33,9 +33,6 @@ interface FullPlayerOverlayProps {
   onToggleLyrics: () => void;
   onToggleQueue: () => void;
   onOpenAudioSettings: () => void;
-  onOpenSleepTimer?: () => void;
-  isSleepTimerActive?: boolean;
-  sleepTimerRemainingText?: string;
   activeTheme: string;
   onOpenMinigameLobby: () => void; 
 }
@@ -86,9 +83,6 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
   onToggleLyrics,
   onToggleQueue,
   onOpenAudioSettings,
-  onOpenSleepTimer,
-  isSleepTimerActive,
-  sleepTimerRemainingText,
   activeTheme,
   onOpenMinigameLobby,
   getCurrentTime,
@@ -303,30 +297,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                       <span className="hidden lg:inline text-[9px] md:text-[10px] font-bold uppercase tracking-[0.3em]">EQ</span>
                   </button>
 
-                  {/* Botón SLEEP TIMER */}
-                  {onOpenSleepTimer && (
-                    <button
-                      onClick={onOpenSleepTimer}
-                      title="Temporizador de apagado"
-                      aria-label="Temporizador de apagado"
-                      className={`flex items-center gap-2 md:gap-3 cursor-pointer transition-all group shrink-0 active:scale-95 outline-none ${
-                        isSleepTimerActive ? 'text-amber-300' : 'text-white/40 hover:text-white'
-                      }`}
-                    >
-                      <div className={`p-3 rounded-xl md:rounded-2xl transition-all ${
-                        isSleepTimerActive
-                          ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.3)]'
-                          : 'bg-white/5 group-hover:bg-amber-400 group-hover:text-black'
-                      }`}>
-                        <Moon size={18} className="md:w-5 md:h-5" />
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] ${
-                        isSleepTimerActive ? 'text-amber-300 inline font-mono' : 'hidden lg:inline'
-                      }`}>
-                        {isSleepTimerActive ? sleepTimerRemainingText : 'Sleep'}
-                      </span>
-                    </button>
-                  )}
+
               </div>
 
               {/* Volume Controller (solo Desktop/Tablets) */}

@@ -3901,7 +3901,7 @@ transition={{
 getCurrentTime={audioObj.getCurrentTime}
  onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
           if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
-      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} onOpenSleepTimer={() => setIsSleepTimerOpen(true)} isSleepTimerActive={sleepTimer.isActive} sleepTimerRemainingText={sleepTimerRemainingText} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
