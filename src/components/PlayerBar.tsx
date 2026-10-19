@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
+import { useFileUrl } from "../hooks/useFileUrl";
 import { motion } from "motion/react";
 import { hapticImpact } from "../utils/haptics";
 
@@ -76,6 +77,7 @@ export function PlayerBar({
 
 const [localProgress, setLocalProgress] = useState(currentTime);
 const [isDragging, setIsDragging] = useState(false);
+const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
 
   const formatTime = (time: number) => {
@@ -147,7 +149,7 @@ const [isDragging, setIsDragging] = useState(false);
           <div className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none">
             <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-lg">
               <img
-                src={currentSong.coverUrl}
+                src={resolvedCoverUrl || currentSong.coverUrl}
                 className="w-full h-full object-cover"
                 alt={currentSong.title}
               />
@@ -307,7 +309,7 @@ const [isDragging, setIsDragging] = useState(false);
         <div className="flex items-center gap-4 w-1/3 min-w-0 shrink-0">
           <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-xl">
             <img
-              src={currentSong.coverUrl}
+              src={resolvedCoverUrl || currentSong.coverUrl}
               className="w-full h-full object-cover"
               alt={currentSong.title}
             />

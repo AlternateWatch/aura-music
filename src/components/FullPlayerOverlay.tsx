@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
+import { useFileUrl } from "../hooks/useFileUrl";
 import { hapticImpact } from "../utils/haptics";
 
 interface FullPlayerOverlayProps {
@@ -92,8 +93,7 @@ const liveCurrentTime = useAudioPlaybackTime(
   getCurrentTime,
   subscribeToTime
 );
-
-  
+const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
   if (!isOpen || !currentSong) return null;
 
@@ -112,6 +112,7 @@ const liveCurrentTime = useAudioPlaybackTime(
   (currentSong as any)?.animatedCoverUrl
 );
   const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
+  const coverSrc = resolvedCoverUrl || resolveMediaUrl(currentSong.coverUrl) || '/default-cover.jpg';
 
   return (
     <motion.div 
@@ -187,10 +188,7 @@ const liveCurrentTime = useAudioPlaybackTime(
                     }}
                     key={animUrl}
                     src={animUrl}
-                    poster={
-                      resolveMediaUrl(currentSong.coverUrl) ||
-                      '/uploads/default-cover.jpg'
-                    }
+                    poster={coverSrc}
                     preload="auto"
                     autoPlay
                     loop
@@ -204,7 +202,7 @@ const liveCurrentTime = useAudioPlaybackTime(
                     src={animUrl} 
                     onError={(e) => {
                       if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                        e.currentTarget.src = '/uploads/default-cover.jpg';
+                        e.currentTarget.src = '/default-cover.jpg';
                       }
                     }}
                     className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
@@ -213,10 +211,10 @@ const liveCurrentTime = useAudioPlaybackTime(
                 )
               ) : (
                 <img 
-                  src={resolveMediaUrl(currentSong.coverUrl) || '/uploads/default-cover.jpg'} 
+                  src={coverSrc} 
                   onError={(e) => {
                     if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                      e.currentTarget.src = '/uploads/default-cover.jpg';
+                      e.currentTarget.src = '/default-cover.jpg';
                     }
                   }}
                   className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 

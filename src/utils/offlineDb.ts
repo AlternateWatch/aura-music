@@ -97,10 +97,14 @@ export function initOfflineStore(): Promise<void> {
   }
 
   initPromise = offlineDb.tracks
-    .toCollection()
-    .primaryKeys()
-    .then((keys) => {
-      offlineIdsSnapshot = new Set(keys.map(String));
+    .toArray()
+    .then((rows) => {
+      offlineIdsSnapshot = new Set(rows.map((r) => String(r.id)));
+      for (const r of rows) {
+        if (r.coverUrl && r.coverBlob) {
+          cacheBlobForUrls(r.coverUrl, r.coverBlob);
+        }
+      }
       notify();
     })
     .catch((err) => {
@@ -151,6 +155,36 @@ export function isSongDownloading(songId: string | undefined | null): boolean {
   return downloadingIdsSnapshot.has(String(songId));
 }
 
+function getUrlVariants(url: string): string[] {
+  if (!url) return [];
+  const variants = new Set<string>([url]);
+  if (url.startsWith('/uploads/')) {
+    variants.add(`https://aura.basildo.me${url}`);
+  } else if (url.startsWith('https://aura.basildo.me/uploads/')) {
+    variants.add(url.replace('https://aura.basildo.me', ''));
+  }
+  return Array.from(variants);
+}
+
+function cacheBlobForUrls(rawUrl: string, blob: Blob): string {
+  const existing = blobUrlCache.get(rawUrl);
+  if (existing) return existing;
+  const objUrl = URL.createObjectURL(blob);
+  for (const v of getUrlVariants(rawUrl)) {
+    blobUrlCache.set(v, objUrl);
+  }
+  return objUrl;
+}
+
+export function getCachedOfflineBlobUrl(originalUrl?: string | null): string | undefined {
+  if (!originalUrl) return undefined;
+  for (const v of getUrlVariants(originalUrl)) {
+    const cached = blobUrlCache.get(v);
+    if (cached) return cached;
+  }
+  return undefined;
+}
+
 /**
  * Si la URL (audio o portada) está guardada en IndexedDB, devuelve un blob: URL local.
  */
@@ -160,22 +194,23 @@ export async function getOfflineBlobUrl(originalUrl: string): Promise<string | n
   await initOfflineStore();
   if (offlineIdsSnapshot.size === 0) return null;
 
-  const cached = blobUrlCache.get(originalUrl);
-  if (cached) return cached;
+  const variants = getUrlVariants(originalUrl);
+  for (const v of variants) {
+    const cached = blobUrlCache.get(v);
+    if (cached) return cached;
+  }
 
   try {
-    const byAudio = await offlineDb.tracks.where('audioUrl').equals(originalUrl).first();
-    if (byAudio && byAudio.audioBlob) {
-      const objUrl = URL.createObjectURL(byAudio.audioBlob);
-      blobUrlCache.set(originalUrl, objUrl);
-      return objUrl;
-    }
+    for (const v of variants) {
+      const byAudio = await offlineDb.tracks.where('audioUrl').equals(v).first();
+      if (byAudio && byAudio.audioBlob) {
+        return cacheBlobForUrls(byAudio.audioUrl || originalUrl, byAudio.audioBlob);
+      }
 
-    const byCover = await offlineDb.tracks.where('coverUrl').equals(originalUrl).first();
-    if (byCover && byCover.coverBlob) {
-      const objUrl = URL.createObjectURL(byCover.coverBlob);
-      blobUrlCache.set(originalUrl, objUrl);
-      return objUrl;
+      const byCover = await offlineDb.tracks.where('coverUrl').equals(v).first();
+      if (byCover && byCover.coverBlob) {
+        return cacheBlobForUrls(byCover.coverUrl || originalUrl, byCover.coverBlob);
+      }
     }
   } catch (err) {
     console.warn('[OfflineDB] Error leyendo blob offline:', err);
@@ -231,6 +266,9 @@ export async function downloadSongOffline(song: Song): Promise<boolean> {
       sizeBytes,
     });
 
+    if (song.audioUrl) cacheBlobForUrls(song.audioUrl, audioBlob);
+    if (song.coverUrl && coverBlob) cacheBlobForUrls(song.coverUrl, coverBlob);
+
     offlineIdsSnapshot.add(id);
     setNotice({
       status: 'completed',
@@ -261,10 +299,12 @@ export async function removeSongOffline(songId: string): Promise<void> {
     const record = await offlineDb.tracks.get(id);
     if (record) {
       for (const u of [record.audioUrl, record.coverUrl]) {
-        const objUrl = blobUrlCache.get(u);
-        if (objUrl) {
-          URL.revokeObjectURL(objUrl);
-          blobUrlCache.delete(u);
+        for (const v of getUrlVariants(u)) {
+          const objUrl = blobUrlCache.get(v);
+          if (objUrl) {
+            URL.revokeObjectURL(objUrl);
+            blobUrlCache.delete(v);
+          }
         }
       }
     }
@@ -291,11 +331,20 @@ export async function toggleSongOffline(song: Song): Promise<boolean> {
 }
 
 /**
- * Devuelve todas las canciones guardadas en IndexedDB (para modo sin conexión).
+ * Devuelve todas las canciones guardadas en IndexedDB (para modo sin conexión)
+ * y precalienta sus blob: URLs en memoria para reproducción e imágenes instantáneas.
  */
 export async function getAllOfflineSongs(): Promise<Song[]> {
   try {
     const rows = await offlineDb.tracks.orderBy('downloadedAt').reverse().toArray();
+    for (const r of rows) {
+      if (r.audioUrl && r.audioBlob) {
+        cacheBlobForUrls(r.audioUrl, r.audioBlob);
+      }
+      if (r.coverUrl && r.coverBlob) {
+        cacheBlobForUrls(r.coverUrl, r.coverBlob);
+      }
+    }
     return rows.map((r) => r.song);
   } catch {
     return [];

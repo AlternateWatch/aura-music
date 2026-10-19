@@ -59,7 +59,7 @@ import { AuthForm } from "./hooks/AuthSection";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useWindowsThumbbar } from "./hooks/useWindowsThumbbar";
 import { prefetchAudio } from "./utils/audioCache";
-import { getAllOfflineSongs, subscribeOfflineStore, getOfflineIdsSnapshot, getDownloadNoticeSnapshot } from "./utils/offlineDb";
+import { getAllOfflineSongs, getCachedOfflineBlobUrl, subscribeOfflineStore, getOfflineIdsSnapshot, getDownloadNoticeSnapshot } from "./utils/offlineDb";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -980,18 +980,38 @@ useEffect(() => {
   const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
   const downloadNotice = useSyncExternalStore(subscribeOfflineStore, getDownloadNoticeSnapshot, getDownloadNoticeSnapshot);
 
+  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 4500) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const applyOfflineFallback = async () => {
+    const offlineTracks = await getAllOfflineSongs();
+    setSongs(offlineTracks);
+    if (offlineTracks.length > 0 && (!currentSong || !offlineTracks.some(s => String(s.id) === String(currentSong.id)))) {
+      setCurrentSong(offlineTracks[0]);
+      setHeroImageError(false);
+    }
+  };
+
   const loadContent = async () => {
     setIsLoading(true);
     try {
-      if (activePlaylistId === 'offline') {
-        const offlineTracks = await getAllOfflineSongs();
-        setSongs(offlineTracks);
+      const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (activePlaylistId === 'offline' || isBrowserOffline) {
+        await applyOfflineFallback();
         setIsLoading(false);
         return;
       }
       const activeToken = token || localStorage.getItem('aura_token');
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
-      const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
+      const res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 5000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         const mapped = data.map((s: any) => ({
@@ -1026,22 +1046,22 @@ useEffect(() => {
             })
             .catch(() => {});
         });
+      } else {
+        await applyOfflineFallback();
       }
     } catch (e) {
       console.warn("Load failed, falling back to offline tracks:", e);
-      const offlineTracks = await getAllOfflineSongs();
-      if (offlineTracks.length > 0) {
-        setSongs(offlineTracks);
-      }
+      await applyOfflineFallback();
     }
     setIsLoading(false);
   };
 
   const loadPlaylists = async () => {
     const activeToken = token || localStorage.getItem('aura_token');
-    if (!activeToken) return;
+    if (!activeToken || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
+      const res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 4500);
+      if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) setPlaylists(data);
     } catch (e) { console.error("Playlists failed"); }
@@ -1065,16 +1085,17 @@ useEffect(() => {
     const localCoverPreload = preloadHeroCover(currentSong?.coverUrl);
 
     const activeToken = token || localStorage.getItem('aura_token');
-    if (!activeToken) {
+    const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (!activeToken || isBrowserOffline) {
       await localCoverPreload;
       markHeroReady();
       return;
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/users/me/last-track`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/users/me/last-track`, {
         headers: { 'Authorization': `Bearer ${activeToken}` }
-      });
+      }, 4000);
       if (!res.ok) { await localCoverPreload; markHeroReady(); return; }
       const data = await res.json();
       if (!data) { await localCoverPreload; markHeroReady(); return; }
@@ -1111,6 +1132,22 @@ useEffect(() => {
   useEffect(() => { loadContent(); }, [showModeration, activePlaylistId]);
   useEffect(() => { loadPlaylists(); }, [token]);
   useEffect(() => { loadLastTrack(); }, [token]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      loadContent();
+      loadPlaylists();
+    };
+    const handleOffline = () => {
+      loadContent();
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [activePlaylistId, showModeration, token]);
 
   // En cuanto se sabe cuál es la canción actual —ya sea la del arranque
   // (recuperada de localStorage) o una nueva que el usuario acaba de
@@ -1921,7 +1958,9 @@ useEffect(() => {
 
     const GRID_PRELOAD_COUNT = 24;
     Promise.allSettled(
-      displayItems.slice(0, GRID_PRELOAD_COUNT).map((item: any) => preloadImage(item.coverUrl))
+      displayItems.slice(0, GRID_PRELOAD_COUNT).map((item: any) =>
+        resolveFileUrl(item.coverUrl).then((url) => preloadImage(url))
+      )
     ).then(() => {
       readinessRef.current.grid = true;
       maybeMarkInitialContentReady();
@@ -2954,7 +2993,7 @@ transition={{
                           </div>
                       </div>
                     )}
-                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
+                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
                 <div className="mt-auto pt-6"><div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all"><Palette size={18} className="text-brand-primary" /><span className="text-[10px] font-bold uppercase tracking-widest text-white/80">Aesthetic</span></div></div>
             </motion.aside>
@@ -2980,10 +3019,10 @@ transition={{
                   <div className="relative group/avatar w-36 h-36 md:w-48 md:h-48 rounded-full overflow-hidden shrink-0 border-2 border-brand-primary/40 shadow-[0_0_50px_rgba(99,102,241,0.2)] bg-white/5">
                     <img 
                       key={selectedArtistName}
-                      src={resolvedArtistImageUrl || flattenedSongs[0]?.coverUrl || '/uploads/default-cover.jpg'} 
+                      src={resolvedArtistImageUrl || getCachedOfflineBlobUrl(flattenedSongs[0]?.coverUrl) || flattenedSongs[0]?.coverUrl || '/default-cover.jpg'} 
                       onError={(e) => {
                         if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                          e.currentTarget.src = '/uploads/default-cover.jpg';
+                          e.currentTarget.src = '/default-cover.jpg';
                         }
                       }}
                       alt={selectedArtistName} 
@@ -3094,10 +3133,10 @@ transition={{
                         >
                           <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-white/5">
                             <img
-                              src={alb.coverUrl || '/uploads/default-cover.jpg'}
+                              src={getCachedOfflineBlobUrl(alb.coverUrl) || alb.coverUrl || '/default-cover.jpg'}
                               onError={(e) => {
                                 if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                  e.currentTarget.src = '/uploads/default-cover.jpg';
+                                  e.currentTarget.src = '/default-cover.jpg';
                                 }
                               }}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform"
@@ -3284,10 +3323,10 @@ transition={{
                                     >
                                       <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
                                         <img 
-                                          src={item.coverUrl || '/uploads/default-cover.jpg'} 
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || '/default-cover.jpg'} 
                                           onError={(e) => {
                                             if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                              e.currentTarget.src = '/uploads/default-cover.jpg';
+                                              e.currentTarget.src = '/default-cover.jpg';
                                             }
                                           }}
                                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 pointer-events-none" 
@@ -3315,10 +3354,10 @@ transition={{
                                     <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
                                         <img
-                                          src={item.coverUrl || '/uploads/default-cover.jpg'}
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || '/default-cover.jpg'}
                                           onError={(e) => {
                                             if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                              e.currentTarget.src = '/uploads/default-cover.jpg';
+                                              e.currentTarget.src = '/default-cover.jpg';
                                             }
                                           }}
                                           className="w-full h-full object-cover transition-transform duration-700"

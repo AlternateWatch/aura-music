@@ -16,6 +16,28 @@ export function registerAudioCacheSW(): Promise<ServiceWorkerRegistration | null
 
   registrationPromise = navigator.serviceWorker
     .register("/sw.js")
+    .then(async (reg) => {
+      try {
+        const readyReg = await navigator.serviceWorker.ready;
+        const target = readyReg?.active || reg?.active || navigator.serviceWorker?.controller;
+        if (target && typeof document !== "undefined") {
+          const urls = new Set<string>([
+            window.location.href,
+            "/",
+            "/index.html",
+            "/default-cover.jpg",
+          ]);
+          document.querySelectorAll<HTMLScriptElement>("script[src]").forEach((s) => {
+            if (s.src && s.src.startsWith(window.location.origin)) urls.add(s.src);
+          });
+          document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href], link[rel="modulepreload"][href]').forEach((l) => {
+            if (l.href && l.href.startsWith(window.location.origin)) urls.add(l.href);
+          });
+          target.postMessage({ type: "WARM_APP_SHELL", urls: Array.from(urls) });
+        }
+      } catch {}
+      return reg;
+    })
     .catch((err) => {
       console.error("No se pudo registrar el Service Worker de audio:", err);
       return null;

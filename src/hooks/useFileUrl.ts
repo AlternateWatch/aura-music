@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getOfflineBlobUrl, subscribeOfflineStore } from "../utils/offlineDb";
+import { getOfflineBlobUrl, getCachedOfflineBlobUrl, subscribeOfflineStore } from "../utils/offlineDb";
 
 const API_ORIGIN = "https://aura.basildo.me";
 
@@ -33,7 +33,9 @@ export async function resolveFileUrl(url: string): Promise<string | undefined> {
 }
 
 export function useFileUrl(url: string | undefined | null): string | undefined {
-  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
+  const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(() =>
+    getCachedOfflineBlobUrl(url) || (url ?? undefined)
+  );
 
   useEffect(() => {
     if (!url) {

@@ -18,8 +18,16 @@
 //  - Caché con límite de nº de pistas (LRU simple).
 
 const CACHE_NAME = "aura-audio-cache-v1";
+const SHELL_CACHE_NAME = "aura-app-shell-v1";
 const META_KEY = "https://aura.internal/__cache-index__";
 const MAX_CACHED_TRACKS = 30;
+
+const CORE_SHELL_URLS = [
+  "/",
+  "/index.html",
+  "/default-cover.jpg",
+  "/manifest.json",
+];
 
 // Solo interceptamos peticiones que "huelen" a audio: evita cachear por
 // error HTML/JS/API/websockets. Cubre el backend propio (/uploads/...),
@@ -36,6 +44,29 @@ function looksLikeAudio(url) {
     url.hostname.endsWith("firebasestorage.app") ||
     url.hostname.includes("firebasestorage.googleapis.com")
   );
+}
+
+function isStaticShellAsset(url) {
+  if (url.origin !== self.location.origin) return false;
+  const path = url.pathname;
+  if (path.startsWith("/api/") || path.startsWith("/socket.io/") || path.startsWith("/uploads/")) {
+    return false;
+  }
+  return (
+    path.startsWith("/assets/") ||
+    path.startsWith("/icons/") ||
+    /\.(js|css|woff2?|ttf|otf|png|jpe?g|webp|svg|ico|json|webmanifest)(\?|$)/i.test(path)
+  );
+}
+
+async function fetchWithTimeout(request, timeoutMs = 3500) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(request, { signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 async function getIndex(cache) {
@@ -155,7 +186,20 @@ async function servePartial(cachedResponse, rangeHeader) {
 }
 
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    (async () => {
+      try {
+        const shellCache = await caches.open(SHELL_CACHE_NAME);
+        await Promise.allSettled(
+          CORE_SHELL_URLS.map(async (u) => {
+            const res = await fetch(u, { cache: "no-cache" });
+            if (res.ok) await shellCache.put(u, res);
+          })
+        );
+      } catch {}
+      await self.skipWaiting();
+    })()
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -172,34 +216,106 @@ self.addEventListener("fetch", (event) => {
   } catch {
     return;
   }
-  if (!looksLikeAudio(url)) return;
 
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(request.url); // sin Range: copia completa
-      const rangeHeader = request.headers.get("Range");
+  // 1. Peticiones de audio: Cache-First con soporte de Range requests
+  if (looksLikeAudio(url)) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(request.url); // sin Range: copia completa
+        const rangeHeader = request.headers.get("Range");
 
-      if (cached) {
-        await touchAndEvict(cache, request.url);
-        if (rangeHeader) {
-          return servePartial(cached.clone(), rangeHeader);
+        if (cached) {
+          await touchAndEvict(cache, request.url);
+          if (rangeHeader) {
+            return servePartial(cached.clone(), rangeHeader);
+          }
+          return cached.clone();
         }
-        return cached.clone();
-      }
 
-      // No está en caché todavía: la petición va a red normal (para no
-      // penalizar el arranque ni el seek) y en segundo plano se encola UNA
-      // descarga completa (deduplicada) para futuras veces / para aguantar
-      // un corte de conexión más adelante en esta misma canción.
-      event.waitUntil(cacheFullTrack(cache, request).catch(() => {}));
-      return fetch(request);
-    })()
-  );
+        // No está en caché todavía: la petición va a red normal (para no
+        // penalizar el arranque ni el seek) y en segundo plano se encola UNA
+        // descarga completa (deduplicada) para futuras veces / para aguantar
+        // un corte de conexión más adelante en esta misma canción.
+        event.waitUntil(cacheFullTrack(cache, request).catch(() => {}));
+        return fetch(request);
+      })()
+    );
+    return;
+  }
+
+  // 2. Navegación HTML (abrir la web o la app de escritorio Tauri en ?app=desktop):
+  // Network-First con timeout corto y fallback al App Shell en caché si no hay internet.
+  if (request.mode === "navigate" && url.origin === self.location.origin && !url.pathname.startsWith("/api/")) {
+    event.respondWith(
+      (async () => {
+        const shellCache = await caches.open(SHELL_CACHE_NAME);
+        try {
+          const networkResponse = await fetchWithTimeout(request, 3500);
+          if (networkResponse && networkResponse.ok) {
+            await shellCache.put(request.url, networkResponse.clone());
+            await shellCache.put("/index.html", networkResponse.clone());
+            return networkResponse;
+          }
+        } catch {
+          // Sin conexión o timeout: servimos el App Shell cacheado
+        }
+
+        const cachedPage =
+          (await shellCache.match(request.url)) ||
+          (await shellCache.match("/index.html")) ||
+          (await shellCache.match("/"));
+
+        if (cachedPage) return cachedPage;
+        return fetch(request);
+      })()
+    );
+    return;
+  }
+
+  // 3. Recursos estáticos del App Shell (/assets/*, iconos, fuentes, CSS/JS):
+  if (isStaticShellAsset(url)) {
+    event.respondWith(
+      (async () => {
+        const shellCache = await caches.open(SHELL_CACHE_NAME);
+        const isHashedAsset = url.pathname.startsWith("/assets/");
+
+        // Los bundles de Vite en /assets/* llevan hash en el nombre: Cache-First
+        if (isHashedAsset) {
+          const cached = await shellCache.match(request.url);
+          if (cached) return cached;
+          try {
+            const netRes = await fetch(request);
+            if (netRes && netRes.ok) {
+              await shellCache.put(request.url, netRes.clone());
+            }
+            return netRes;
+          } catch (err) {
+            const fallback = await shellCache.match(url.pathname);
+            if (fallback) return fallback;
+            throw err;
+          }
+        }
+
+        // Resto de estáticos del mismo origen: Network-First con fallback a caché
+        try {
+          const netRes = await fetchWithTimeout(request, 3500);
+          if (netRes && netRes.ok) {
+            await shellCache.put(request.url, netRes.clone());
+            return netRes;
+          }
+        } catch {}
+
+        const cached = (await shellCache.match(request.url)) || (await shellCache.match(url.pathname));
+        if (cached) return cached;
+        return fetch(request);
+      })()
+    );
+  }
 });
 
 self.addEventListener("message", (event) => {
-  const { type, url } = event.data || {};
+  const { type, url, urls } = event.data || {};
 
   if (type === "PREFETCH" && url) {
     event.waitUntil(
@@ -220,7 +336,29 @@ self.addEventListener("message", (event) => {
     );
   }
 
+  if (type === "WARM_APP_SHELL" && Array.isArray(urls)) {
+    event.waitUntil(
+      (async () => {
+        try {
+          const shellCache = await caches.open(SHELL_CACHE_NAME);
+          await Promise.allSettled(
+            urls.map(async (u) => {
+              if (!u) return;
+              const existing = await shellCache.match(u);
+              if (existing) return;
+              const res = await fetch(u);
+              if (res && res.ok) {
+                await shellCache.put(u, res);
+              }
+            })
+          );
+        } catch {}
+      })()
+    );
+  }
+
   if (type === "CLEAR_CACHE") {
     event.waitUntil(caches.delete(CACHE_NAME));
   }
 });
+
