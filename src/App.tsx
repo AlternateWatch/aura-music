@@ -59,7 +59,7 @@ import { AuthForm } from "./hooks/AuthSection";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useWindowsThumbbar } from "./hooks/useWindowsThumbbar";
 import { prefetchAudio } from "./utils/audioCache";
-import { getAllOfflineSongs, subscribeOfflineStore, getOfflineIdsSnapshot } from "./utils/offlineDb";
+import { getAllOfflineSongs, subscribeOfflineStore, getOfflineIdsSnapshot, getDownloadNoticeSnapshot } from "./utils/offlineDb";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -978,6 +978,7 @@ useEffect(() => {
   };
 
   const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
+  const downloadNotice = useSyncExternalStore(subscribeOfflineStore, getDownloadNoticeSnapshot, getDownloadNoticeSnapshot);
 
   const loadContent = async () => {
     setIsLoading(true);
@@ -3547,6 +3548,37 @@ getCurrentTime={audioObj.getCurrentTime}
         <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
           className="fixed top-6 left-1/2 -translate-x-1/2 z-[600] bg-[#121212] border border-amber-400/30 text-amber-300 text-[11px] font-bold px-4 py-2.5 rounded-full shadow-2xl">
           {hostOnlyNotice}
+        </motion.div>
+      )}</AnimatePresence>
+      <AnimatePresence>{downloadNotice && (
+        <motion.div
+          key={downloadNotice.uid}
+          initial={{ opacity: 0, y: -16, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -16, scale: 0.95 }}
+          className={`fixed top-6 left-1/2 -translate-x-1/2 z-[750] bg-[#141414]/95 backdrop-blur-xl border px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 max-w-[92vw] ${
+            downloadNotice.status === 'completed'
+              ? 'border-emerald-500/40 text-emerald-400'
+              : downloadNotice.status === 'error'
+                ? 'border-red-500/40 text-red-400'
+                : 'border-brand-primary/40 text-white'
+          }`}
+        >
+          <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+            downloadNotice.status === 'completed'
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : downloadNotice.status === 'error'
+                ? 'bg-red-500/20 text-red-400'
+                : 'bg-brand-primary/20 text-brand-primary'
+          }`}>
+            <Download size={14} className={downloadNotice.status === 'downloading' ? 'animate-bounce' : ''} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold leading-tight truncate">{downloadNotice.title}</p>
+            {downloadNotice.subtitle && (
+              <p className="text-[10px] text-white/50 truncate mt-0.5">{downloadNotice.subtitle}</p>
+            )}
+          </div>
         </motion.div>
       )}</AnimatePresence>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>

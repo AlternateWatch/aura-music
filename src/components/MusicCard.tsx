@@ -9,6 +9,8 @@ import {
   subscribeOfflineStore,
   getOfflineIdsSnapshot,
   getDownloadingIdsSnapshot,
+  getDiskDownloadedIdsSnapshot,
+  getDiskDownloadingIdsSnapshot,
   toggleSongOffline,
   downloadSongToDisk,
 } from '../utils/offlineDb';
@@ -58,8 +60,15 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 
   const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
   const downloadingIds = useSyncExternalStore(subscribeOfflineStore, getDownloadingIdsSnapshot, getDownloadingIdsSnapshot);
+  const diskDownloadedIds = useSyncExternalStore(subscribeOfflineStore, getDiskDownloadedIdsSnapshot, getDiskDownloadedIdsSnapshot);
+  const diskDownloadingIds = useSyncExternalStore(subscribeOfflineStore, getDiskDownloadingIdsSnapshot, getDiskDownloadingIdsSnapshot);
+
   const isOffline = offlineIds.has(String(song.id));
   const isDownloading = downloadingIds.has(String(song.id));
+  const isDiskDownloaded = diskDownloadedIds.has(String(song.id));
+  const isDiskDownloading = diskDownloadingIds.has(String(song.id));
+  const anyDownloading = isDownloading || isDiskDownloading;
+  const anyDownloaded = isOffline || isDiskDownloaded;
   const resolvedCoverUrl = useFileUrl(song.coverUrl);
 
   // FUNCIÓN UNIVERSAL PARA ABRIR ENLACES EN EL NAVEGADOR (ESCRITORIO Y WEB)
@@ -172,15 +181,28 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             }
           }}
         />
-        {(isOffline || isDownloading) && (
+        {(anyDownloaded || anyDownloading) && (
           <div
-            className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/70 backdrop-blur-md border border-white/10 flex items-center justify-center"
-            title={isDownloading ? "Descargando para modo sin conexión..." : "Disponible sin conexión"}
+            className="absolute top-2.5 right-2.5 z-10 px-2 py-1 rounded-full bg-black/75 backdrop-blur-md border border-emerald-500/30 flex items-center gap-1 shadow-lg"
+            title={
+              anyDownloading
+                ? "Descargando..."
+                : isOffline && isDiskDownloaded
+                  ? "Descargada sin conexión y en disco"
+                  : isDiskDownloaded
+                    ? "Descargada en tu dispositivo"
+                    : "Disponible sin conexión"
+            }
           >
-            {isDownloading ? (
+            {anyDownloading ? (
               <Loader2 size={12} className="text-brand-primary animate-spin" />
             ) : (
-              <Download size={12} className="text-emerald-400" />
+              <>
+                <Check size={11} className="text-emerald-400 stroke-[3]" />
+                <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">
+                  {isOffline ? 'Offline' : 'Guardada'}
+                </span>
+              </>
             )}
           </div>
         )}
@@ -194,9 +216,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         
         {/* TÍTULO Y ARTISTA */}
         <div className="min-w-0 flex-1 space-y-1 md:space-y-0.5">
-          <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
-            {song.title}
-          </h3>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
+              {song.title}
+            </h3>
+            {anyDownloaded && !anyDownloading && (
+              <Download size={12} className="text-emerald-400 shrink-0" title="Canción descargada" />
+            )}
+          </div>
           <p className="text-sm md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate" title={song.artist}>
             {song.artist}
           </p>
@@ -275,15 +302,28 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 {/* 1.6 GUARDAR ARCHIVO EN DISCO DURO */}
                 <button
                   type="button"
+                  disabled={isDiskDownloading}
                   onClick={() => {
                     hapticImpact('light');
                     void downloadSongToDisk(song);
                     setShowMenu(false);
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50"
                 >
-                  <HardDriveDownload size={15} />
-                  <span>Descargar archivo al disco</span>
+                  {isDiskDownloading ? (
+                    <Loader2 size={15} className="text-brand-primary animate-spin" />
+                  ) : isDiskDownloaded ? (
+                    <Check size={15} className="text-emerald-400" />
+                  ) : (
+                    <HardDriveDownload size={15} />
+                  )}
+                  <span className={isDiskDownloaded ? "text-emerald-400" : ""}>
+                    {isDiskDownloading
+                      ? 'Descargando al disco...'
+                      : isDiskDownloaded
+                        ? 'Descargada en disco (guardar copia)'
+                        : 'Descargar archivo al disco'}
+                  </span>
                 </button>
 
                 {/* 2. VER TABS / ACORDES (Abre Songsterr en el navegador del sistema) */}
