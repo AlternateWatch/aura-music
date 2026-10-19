@@ -2244,8 +2244,78 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
     }
 });
 
-// Auto-reparación de portadas perdidas (extrae del FLAC/MP3 o descarga de iTunes SOLO si el archivo no existe ni en disco ni en Backblaze B2)
+// Auto-reparación de portadas perdidas (extrae del FLAC/MP3 en disco o Backblaze B2, o descarga de iTunes SOLO si el archivo no existe en ningún sitio)
 const healInFlight = new Map<string, Promise<string | null>>();
+
+const streamToBuffer = async (stream: NodeJS.ReadableStream, maxBytes = 2 * 1024 * 1024): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    return new Promise((resolve, reject) => {
+        stream.on('data', (chunk: Buffer) => {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            chunks.push(buf);
+            total += buf.length;
+            if (total >= maxBytes) {
+                try { (stream as any).destroy?.(); } catch {}
+                resolve(Buffer.concat(chunks));
+            }
+        });
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', (err) => {
+            if (chunks.length > 0) resolve(Buffer.concat(chunks));
+            else reject(err);
+        });
+    });
+};
+
+const getJpegDimensions = (buf: Buffer | null): { width: number; height: number } | null => {
+    if (!buf || buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8) return null;
+    let i = 2;
+    while (i + 9 < buf.length) {
+        if (buf[i] !== 0xFF) { i++; continue; }
+        const marker = buf[i + 1];
+        if (marker === 0xFF) { i++; continue; }
+        if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+        const len = buf.readUInt16BE(i + 2);
+        if (marker >= 0xC0 && marker <= 0xC3) {
+            return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+        }
+        i += 2 + len;
+    }
+    return null;
+};
+
+const extractEmbeddedCoverFromTrackAudio = async (track: any): Promise<Buffer | null> => {
+    if (!track?.file_path) return null;
+    try {
+        const mm: any = await import('music-metadata');
+        const audioDiskPath = resolveDiskPath(track.file_path);
+        if (audioDiskPath && fs.existsSync(audioDiskPath)) {
+            const meta = await mm.parseFile(audioDiskPath, { skipCovers: false });
+            const pic = meta?.common?.picture?.[0];
+            if (pic?.data && pic.data.length > 0) {
+                return Buffer.from(pic.data);
+            }
+        }
+        if (isB2Configured()) {
+            const audioFilename = path.basename(String(track.file_path).split('?')[0]);
+            if (audioFilename && audioFilename !== '.' && audioFilename !== '..') {
+                const b2Obj = await getB2ObjectStream(audioFilename, 'bytes=0-2097151');
+                if (b2Obj?.stream) {
+                    const headerBuf = await streamToBuffer(b2Obj.stream, 2 * 1024 * 1024);
+                    const ext = path.extname(audioFilename).toLowerCase();
+                    const mimeType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
+                    const meta = await mm.parseBuffer(headerBuf, { mimeType }, { skipCovers: false });
+                    const pic = meta?.common?.picture?.[0];
+                    if (pic?.data && pic.data.length > 0) {
+                        return Buffer.from(pic.data);
+                    }
+                }
+            }
+        }
+    } catch {}
+    return null;
+};
 
 const healTrackCoverToDisk = async (track: any, knownMissingInB2 = false): Promise<string | null> => {
     const rawCover = track.cover_path ? String(track.cover_path).trim() : '';
@@ -2283,20 +2353,13 @@ const healTrackCoverToDisk = async (track: any, knownMissingInB2 = false): Promi
                 }
             }
 
-            // 1. Intentar extraer la carátula embebida del propio archivo de audio (.flac / .mp3)
-            const audioDiskPath = resolveDiskPath(track.file_path);
-            if (audioDiskPath && fs.existsSync(audioDiskPath)) {
-                try {
-                    const mm: any = await import('music-metadata');
-                    const meta = await mm.parseFile(audioDiskPath, { skipCovers: false });
-                    const pic = meta?.common?.picture?.[0];
-                    if (pic?.data && pic.data.length > 0) {
-                        fs.writeFileSync(destPath, pic.data);
-                        await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [normalizedDbPath, track.id]);
-                        console.log(`🎨 Portada restaurada desde audio embebido para "${track.title}" -> ${filename}`);
-                        return destPath;
-                    }
-                } catch {}
+            // 1. Intentar extraer la carátula embebida del propio archivo de audio (.flac / .mp3) en disco o Backblaze B2
+            const embeddedPic = await extractEmbeddedCoverFromTrackAudio(track);
+            if (embeddedPic && embeddedPic.length > 0) {
+                fs.writeFileSync(destPath, embeddedPic);
+                await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [normalizedDbPath, track.id]);
+                console.log(`🎨 Portada restaurada desde audio embebido para "${track.title}" -> ${filename}`);
+                return destPath;
             }
 
             // 2. Fallback: descargar carátula de alta resolución desde iTunes API
@@ -2360,21 +2423,102 @@ const resolveDefaultCoverDiskPath = (): string | null => {
     return null;
 };
 
+const readCurrentCoverBytes = async (coverFilename: string, diskPath: string | null): Promise<Buffer | null> => {
+    try {
+        if (diskPath && fs.existsSync(diskPath)) {
+            return fs.readFileSync(diskPath);
+        }
+        if (isB2Configured() && coverFilename) {
+            const b2Obj = await getB2ObjectStream(coverFilename);
+            if (b2Obj?.stream) {
+                return await streamToBuffer(b2Obj.stream, 5 * 1024 * 1024);
+            }
+        }
+    } catch {}
+    return null;
+};
+
 const healMissingCoversOnStartup = async () => {
     try {
         const [tracks]: any = await pool.execute('SELECT id, title, artist, album, file_path, cover_path FROM tracks');
         let healedCount = 0;
-        let restoredFromB2ShadowCount = 0;
+        let restoredEmbeddedCount = 0;
         const defaultCoverDisk = resolveDefaultCoverDiskPath();
         const defaultCoverDbPath = defaultCoverDisk ? `/uploads/${path.basename(defaultCoverDisk)}` : '/uploads/default-cover.jpg';
 
         // Consultar de una sola vez qué archivos existen en Backblaze B2
         const b2FilesSet = isB2Configured() ? new Set(await listB2Files()) : new Set<string>();
-        const sanitizeMarkerPath = path.join(uploadDir, '.b2-covers-sanitized');
-        const shouldSanitizeLocalShadows = b2FilesSet.size > 0 && !fs.existsSync(sanitizeMarkerPath);
-        const cleanedShadowFiles = new Set<string>();
 
-        for (const track of tracks || []) {
+        // 1. Restauración única de portadas que habían sido sobrescritas por el fallback de iTunes (600x600)
+        // extrayendo la portada original embebida directamente del archivo .flac/.mp3 (en disco o B2).
+        const embeddedRestoreMarker = path.join(uploadDir, '.b2-embedded-covers-restored-v1');
+        if (!fs.existsSync(embeddedRestoreMarker)) {
+            console.log('🔍 Verificando portadas sobrescritas por iTunes (600x600) para restaurar desde los archivos .flac/.mp3...');
+            const tracksByCover = new Map<string, any[]>();
+            for (const t of tracks || []) {
+                if (t.cover_path) {
+                    const list = tracksByCover.get(t.cover_path) || [];
+                    list.push(t);
+                    tracksByCover.set(t.cover_path, list);
+                }
+            }
+
+            const entries = Array.from(tracksByCover.entries());
+            const CONCURRENCY = 4;
+            for (let i = 0; i < entries.length; i += CONCURRENCY) {
+                const batch = entries.slice(i, i + CONCURRENCY);
+                await Promise.all(batch.map(async ([oldCoverPath, groupTracks]) => {
+                    const sampleTrack = groupTracks[0];
+                    try {
+                        const oldFilename = path.basename(String(oldCoverPath).split('?')[0]);
+                        if (!oldFilename || oldFilename.startsWith('emb-') || /default[-_\s]?cover/i.test(oldFilename)) return;
+
+                        const diskPath = resolveDiskPath(oldCoverPath);
+                        const currBytes = await readCurrentCoverBytes(oldFilename, diskPath);
+                        const dims = getJpegDimensions(currBytes);
+                        const isItunes600 = dims && dims.width === 600 && dims.height === 600;
+                        if (currBytes && !isItunes600) return;
+
+                        let embeddedPic: Buffer | null = null;
+                        for (const candidate of groupTracks.slice(0, 3)) {
+                            embeddedPic = await extractEmbeddedCoverFromTrackAudio(candidate);
+                            if (embeddedPic && embeddedPic.length > 0 && (!currBytes || Math.abs(embeddedPic.length - currBytes.length) > 64)) {
+                                break;
+                            }
+                        }
+                        if (!embeddedPic || embeddedPic.length === 0) return;
+                        if (currBytes && Math.abs(embeddedPic.length - currBytes.length) <= 64) return;
+
+                        const newFilename = `emb-${sampleTrack.id}-${Date.now()}.jpg`;
+                        const newDiskPath = path.join(uploadDir, newFilename);
+                        const newDbPath = `/uploads/${newFilename}`;
+
+                        fs.writeFileSync(newDiskPath, embeddedPic);
+                        if (isB2Configured()) {
+                            await uploadToB2(newFilename, embeddedPic, 'image/jpeg', embeddedPic.length);
+                            b2FilesSet.add(newFilename);
+                        }
+                        await pool.execute('UPDATE tracks SET cover_path = ? WHERE cover_path = ?', [newDbPath, oldCoverPath]);
+                        restoredEmbeddedCount++;
+                        console.log(`🎨 Restaurada portada original desde audio (${sampleTrack.album || sampleTrack.title}) -> ${newFilename}`);
+                    } catch (err: any) {
+                        console.warn(`Aviso restaurando portada embebida de "${sampleTrack?.title}":`, err?.message || err);
+                    }
+                }));
+            }
+
+            try {
+                fs.writeFileSync(embeddedRestoreMarker, new Date().toISOString());
+            } catch {}
+            if (restoredEmbeddedCount > 0) {
+                console.log(`✅ Restauración desde audio completada: ${restoredEmbeddedCount} portadas originales recuperadas.`);
+            }
+        }
+
+        // Recargar lista tras posibles actualizaciones de cover_path
+        const [freshTracks]: any = await pool.execute('SELECT id, title, artist, album, file_path, cover_path FROM tracks');
+
+        for (const track of freshTracks || []) {
             if (track.cover_path && String(track.cover_path).includes('/uploads/') && String(track.cover_path).startsWith('http')) {
                 const norm = normalizeMediaPath(track.cover_path);
                 if (norm) {
@@ -2389,39 +2533,21 @@ const healMissingCoversOnStartup = async () => {
             const existsInB2 = Boolean(coverFilename && b2FilesSet.has(coverFilename));
             const diskPath = track.cover_path ? resolveDiskPath(track.cover_path) : null;
 
-            // Si la portada ya existe en Backblaze B2, está SANA:
-            // En el primer arranque tras este fix, limpiamos del disco local cualquier portada que hubiera sido
-            // descargada por error desde iTunes (haciendo sombra a la original de B2), para que se sirva la de B2
-            // y cacheTop100Tracks vuelva a cachear la portada auténtica desde B2.
-            if (existsInB2) {
-                if (shouldSanitizeLocalShadows && coverFilename && diskPath && fs.existsSync(diskPath) && !cleanedShadowFiles.has(coverFilename)) {
-                    cleanedShadowFiles.add(coverFilename);
-                    try {
-                        fs.unlinkSync(diskPath);
-                        restoredFromB2ShadowCount++;
-                    } catch {}
-                }
+            if (existsInB2 || (diskPath && fs.existsSync(diskPath))) {
                 continue;
             }
 
-            if (!diskPath || !fs.existsSync(diskPath)) {
-                const restored = await healTrackCoverToDisk(track, true);
-                if (restored) {
-                    healedCount++;
-                } else if (defaultCoverDisk) {
-                    await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [defaultCoverDbPath, track.id]);
-                    console.log(`🖼️ Asignada portada por defecto (${defaultCoverDbPath}) a "${track.title}"`);
+            const restored = await healTrackCoverToDisk(track, true);
+            if (restored) {
+                if (isB2Configured() && fs.existsSync(restored)) {
+                    await syncFileToB2(path.basename(restored), restored, 'image/jpeg', undefined, false);
                 }
-                await new Promise((r) => setTimeout(r, 200));
+                healedCount++;
+            } else if (defaultCoverDisk) {
+                await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [defaultCoverDbPath, track.id]);
+                console.log(`🖼️ Asignada portada por defecto (${defaultCoverDbPath}) a "${track.title}"`);
             }
-        }
-        if (shouldSanitizeLocalShadows) {
-            try {
-                fs.writeFileSync(sanitizeMarkerPath, new Date().toISOString());
-            } catch {}
-        }
-        if (restoredFromB2ShadowCount > 0) {
-            console.log(`🧹 Restauradas ${restoredFromB2ShadowCount} portadas originales de Backblaze B2 (eliminadas copias locales de iTunes).`);
+            await new Promise((r) => setTimeout(r, 200));
         }
         if (healedCount > 0) {
             console.log(`✨ Auto-reparación completada: ${healedCount} portadas recuperadas en ${uploadDir}`);
