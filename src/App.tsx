@@ -2665,23 +2665,6 @@ useEffect(() => {
                               </button>
                             )}
 
-                            {/* Personalización */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsDesktopMenuOpen(false);
-                                setIsPersonalizationOpen(true);
-                              }}
-                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
-                            >
-                              <div className="p-2 rounded-lg bg-white/5 text-white/60 group-hover:text-indigo-400 group-hover:bg-indigo-400/10 transition-colors">
-                                <Palette size={16} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-xs font-semibold text-white">Personalización</div>
-                                <div className="text-[10px] text-white/40">Temas y fondo de pantalla</div>
-                              </div>
-                            </button>
 
                             {/* Ajustes de Audio */}
                             <button

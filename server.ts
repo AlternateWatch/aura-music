@@ -26,7 +26,7 @@ import axios from "axios";
 
 import config from './config.json' assert { type: 'json' };
 
-import { isB2Configured, uploadToB2, getB2ObjectStream, deleteFromB2, checkB2FileExists, downloadB2FileToDisk, listB2Files } from './b2Storage.js';
+import { isB2Configured, getMissingB2EnvVars, uploadToB2, getB2ObjectStream, deleteFromB2, checkB2FileExists, downloadB2FileToDisk, listB2Files } from './b2Storage.js';
 import { startDailyCacheScheduler, cacheTop100Tracks } from './cacheService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,22 +34,30 @@ const __dirname = path.dirname(__filename);
 // Cuando PM2 ejecuta ./dist/server.js, __dirname es /var/www/aura-music/dist.
 // Calculamos ROOT_DIR siempre en la raíz del proyecto para que las subidas NUNCA vayan a dist/public/uploads.
 const ROOT_DIR = path.basename(__dirname) === 'dist' ? path.resolve(__dirname, '..') : __dirname;
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 const syncFileToB2 = async (filename: string, localFilePath: string, mimetype?: string, size?: number, deleteLocalAfter = true) => {
-    if (!isB2Configured() || !fs.existsSync(localFilePath)) return;
+    if (!isB2Configured()) {
+        console.warn(`⚠️ [B2] Omitiendo sincronización de "${filename}": Backblaze B2 no está configurado en .env`);
+        return;
+    }
+    if (!fs.existsSync(localFilePath)) {
+        console.warn(`⚠️ [B2] Archivo local "${localFilePath}" no encontrado para sincronizar con B2.`);
+        return;
+    }
     try {
+        console.log(`☁️ [B2] Subiendo "${filename}" a Backblaze B2...`);
         await uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size);
+        console.log(`✅ [B2] "${filename}" sincronizado con Backblaze B2 correctamente.`);
         if (deleteLocalAfter) {
             try { fs.unlinkSync(localFilePath); } catch {}
         }
     } catch (err: any) {
-        console.error(`Error sincronizando ${filename} con B2:`, err.message);
+        console.error(`❌ [B2] Error sincronizando ${filename} con B2:`, err.message);
         throw err;
     }
 };
 const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
-
-dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 const app = express();
 const httpServer = createServer(app);
@@ -535,6 +543,8 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
             } else if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
                 await syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
             }
+        } else {
+            console.warn(`⚠️ [Upload] Backblaze B2 no está configurado en .env. La pista "${title}" se guardó únicamente en el disco local (${uploadDir}).`);
         }
 
         res.status(201).json({ id: result.insertId });
@@ -2770,6 +2780,71 @@ app.post('/api/admin/cache-top-tracks', authenticateToken, async (req: any, res:
     }
 });
 
+// Endpoint administrativo para verificar el estado de Backblaze B2
+app.get('/api/admin/b2-status', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+    const missing = getMissingB2EnvVars();
+    res.json({
+        configured: isB2Configured(),
+        missingVars: missing,
+        bucket: process.env.B2_BUCKET_NAME || null,
+        endpoint: process.env.B2_ENDPOINT || null,
+        region: process.env.B2_REGION || 'us-east-005',
+        keyIdConfigured: Boolean(process.env.B2_KEY_ID),
+        applicationKeyConfigured: Boolean(process.env.B2_APPLICATION_KEY)
+    });
+});
+
+// Endpoint administrativo para subir a B2 archivos locales que no estén todavía en el bucket
+app.post('/api/admin/sync-local-to-b2', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+    if (!isB2Configured()) {
+        return res.status(400).json({
+            error: "Backblaze B2 no está configurado en .env del servidor.",
+            missingVars: getMissingB2EnvVars()
+        });
+    }
+    try {
+        if (!fs.existsSync(uploadDir)) {
+            return res.json({ success: true, synced: 0, message: "El directorio uploadDir no existe." });
+        }
+        const localFiles = fs.readdirSync(uploadDir);
+        const b2List = await listB2Files();
+        const b2FilesSet = new Set(b2List);
+        let synced = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+
+        for (const file of localFiles) {
+            const fullPath = path.join(uploadDir, file);
+            try {
+                if (!fs.statSync(fullPath).isFile()) continue;
+                if (b2FilesSet.has(file)) {
+                    skipped++;
+                    continue;
+                }
+                await uploadToB2(file, fs.createReadStream(fullPath));
+                synced++;
+            } catch (err: any) {
+                errors.push(`${file}: ${err.message}`);
+            }
+        }
+        res.json({
+            success: true,
+            synced,
+            skipped,
+            totalLocalFiles: localFiles.length,
+            errors: errors.slice(0, 10)
+        });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || /\.(jpg|jpeg|png|webp|gif|mp3|flac|wav|ogg|m4a)$/i.test(req.path)) {
@@ -2781,6 +2856,12 @@ app.get('*', (req, res) => {
 
 httpServer.listen(PORT, () => {
     console.log(`🎵 Aura running on ${PORT} (uploads: ${uploadDir})`);
+    if (isB2Configured()) {
+        console.log(`☁️ Backblaze B2: ACTIVADO (Bucket: ${process.env.B2_BUCKET_NAME}, Endpoint: ${process.env.B2_ENDPOINT})`);
+    } else {
+        const missing = getMissingB2EnvVars();
+        console.warn(`⚠️ Backblaze B2: DESACTIVADO en .env (Variables faltantes: ${missing.join(', ')}). Los archivos subidos se almacenan únicamente en el disco local.`);
+    }
     healMissingCoversOnStartup();
     startDailyCacheScheduler(pool, uploadDir);
 });

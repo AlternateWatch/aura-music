@@ -42,6 +42,15 @@ export const isB2Configured = (): boolean => {
     );
 };
 
+export const getMissingB2EnvVars = (): string[] => {
+    const missing: string[] = [];
+    if (!process.env.B2_BUCKET_NAME) missing.push('B2_BUCKET_NAME');
+    if (!process.env.B2_ENDPOINT) missing.push('B2_ENDPOINT');
+    if (!process.env.B2_KEY_ID) missing.push('B2_KEY_ID');
+    if (!process.env.B2_APPLICATION_KEY) missing.push('B2_APPLICATION_KEY');
+    return missing;
+};
+
 export const getB2Client = (): S3Client => {
     if (cachedClient) return cachedClient;
 
