@@ -26,7 +26,7 @@ import axios from "axios";
 
 import config from './config.json' assert { type: 'json' };
 
-import { isB2Configured, uploadToB2, getB2ObjectStream, deleteFromB2 } from './b2Storage.js';
+import { isB2Configured, uploadToB2, getB2ObjectStream, deleteFromB2, checkB2FileExists, downloadB2FileToDisk, listB2Files } from './b2Storage.js';
 import { startDailyCacheScheduler, cacheTop100Tracks } from './cacheService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2148,6 +2148,8 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
 
     try {
         console.log(`💿 Iniciando purga y normalización inteligente de álbumes...`);
+        const b2FilesSet = isB2Configured() ? new Set(await listB2Files()) : new Set<string>();
+
         const [albums]: any = await pool.execute(`
             SELECT DISTINCT artist, album 
             FROM tracks 
@@ -2155,6 +2157,14 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
         `);
 
         albumsCount = albums.length;
+
+        const hasValidMediaAsset = (mediaPath?: string | null): boolean => {
+            if (!mediaPath || mediaPath === '') return false;
+            const diskPath = resolveDiskPath(mediaPath);
+            if (diskPath && fs.existsSync(diskPath)) return true;
+            const filename = path.basename(String(mediaPath).split('?')[0]);
+            return Boolean(filename && b2FilesSet.has(filename));
+        };
 
         for (const item of albums) {
             const { artist, album } = item;
@@ -2173,20 +2183,12 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
 
             if (tracks.length <= 1) continue;
 
-            // Elegimos como maestra la primera pista cuya portada EXISTA físicamente en el disco duro
-            const masterTrack = tracks.find((t: any) => {
-                if (!t.cover_path || t.cover_path === '') return false;
-                const diskPath = resolveDiskPath(t.cover_path);
-                return Boolean(diskPath && fs.existsSync(diskPath));
-            });
-            if (!masterTrack) continue; // Si ninguna canción del álbum tiene portada válida en disco, no destruimos nada
+            // Elegimos como maestra la primera pista cuya portada EXISTA físicamente en el disco duro o en Backblaze B2
+            const masterTrack = tracks.find((t: any) => hasValidMediaAsset(t.cover_path));
+            if (!masterTrack) continue; // Si ninguna canción del álbum tiene portada válida, no destruimos nada
 
             const masterCover = normalizeMediaPath(masterTrack.cover_path);
-            const masterAnimTrack = tracks.find((t: any) => {
-                if (!t.animated_cover_path || t.animated_cover_path === '') return false;
-                const diskPath = resolveDiskPath(t.animated_cover_path);
-                return Boolean(diskPath && fs.existsSync(diskPath));
-            });
+            const masterAnimTrack = tracks.find((t: any) => hasValidMediaAsset(t.animated_cover_path));
             const masterAnimCover = masterAnimTrack ? normalizeMediaPath(masterAnimTrack.animated_cover_path) : null;
 
             if (masterTrack.cover_path !== masterCover) {
@@ -2242,10 +2244,10 @@ app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, re
     }
 });
 
-// Auto-reparación de portadas perdidas (extrae del FLAC/MP3 o descarga de iTunes si el archivo .jpg/.webp no existe en disco)
+// Auto-reparación de portadas perdidas (extrae del FLAC/MP3 o descarga de iTunes SOLO si el archivo no existe ni en disco ni en Backblaze B2)
 const healInFlight = new Map<string, Promise<string | null>>();
 
-const healTrackCoverToDisk = async (track: any): Promise<string | null> => {
+const healTrackCoverToDisk = async (track: any, knownMissingInB2 = false): Promise<string | null> => {
     const rawCover = track.cover_path ? String(track.cover_path).trim() : '';
     const existingDisk = rawCover ? resolveDiskPath(rawCover) : null;
     if (existingDisk && fs.existsSync(existingDisk)) {
@@ -2268,6 +2270,19 @@ const healTrackCoverToDisk = async (track: any): Promise<string | null> => {
 
     const job = (async (): Promise<string | null> => {
         try {
+            // 0. Si Backblaze B2 está activo y aún no hemos comprobado si la portada existe en B2,
+            // verificar primero en B2 para NUNCA pisar una portada sana con una de iTunes.
+            if (rawCover && isB2Configured() && !knownMissingInB2) {
+                const existsInB2 = await checkB2FileExists(filename);
+                if (existsInB2) {
+                    const norm = normalizeMediaPath(rawCover);
+                    if (norm && norm !== rawCover) {
+                        await pool.execute('UPDATE tracks SET cover_path = ? WHERE id = ?', [norm, track.id]);
+                    }
+                    return normalizedDbPath;
+                }
+            }
+
             // 1. Intentar extraer la carátula embebida del propio archivo de audio (.flac / .mp3)
             const audioDiskPath = resolveDiskPath(track.file_path);
             if (audioDiskPath && fs.existsSync(audioDiskPath)) {
@@ -2349,8 +2364,15 @@ const healMissingCoversOnStartup = async () => {
     try {
         const [tracks]: any = await pool.execute('SELECT id, title, artist, album, file_path, cover_path FROM tracks');
         let healedCount = 0;
+        let restoredFromB2ShadowCount = 0;
         const defaultCoverDisk = resolveDefaultCoverDiskPath();
         const defaultCoverDbPath = defaultCoverDisk ? `/uploads/${path.basename(defaultCoverDisk)}` : '/uploads/default-cover.jpg';
+
+        // Consultar de una sola vez qué archivos existen en Backblaze B2
+        const b2FilesSet = isB2Configured() ? new Set(await listB2Files()) : new Set<string>();
+        const sanitizeMarkerPath = path.join(uploadDir, '.b2-covers-sanitized');
+        const shouldSanitizeLocalShadows = b2FilesSet.size > 0 && !fs.existsSync(sanitizeMarkerPath);
+        const cleanedShadowFiles = new Set<string>();
 
         for (const track of tracks || []) {
             if (track.cover_path && String(track.cover_path).includes('/uploads/') && String(track.cover_path).startsWith('http')) {
@@ -2360,9 +2382,30 @@ const healMissingCoversOnStartup = async () => {
                     track.cover_path = norm;
                 }
             }
+
+            const coverFilename = track.cover_path
+                ? path.basename(String(track.cover_path).split('?')[0])
+                : null;
+            const existsInB2 = Boolean(coverFilename && b2FilesSet.has(coverFilename));
             const diskPath = track.cover_path ? resolveDiskPath(track.cover_path) : null;
+
+            // Si la portada ya existe en Backblaze B2, está SANA:
+            // En el primer arranque tras este fix, limpiamos del disco local cualquier portada que hubiera sido
+            // descargada por error desde iTunes (haciendo sombra a la original de B2), para que se sirva la de B2
+            // y cacheTop100Tracks vuelva a cachear la portada auténtica desde B2.
+            if (existsInB2) {
+                if (shouldSanitizeLocalShadows && coverFilename && diskPath && fs.existsSync(diskPath) && !cleanedShadowFiles.has(coverFilename)) {
+                    cleanedShadowFiles.add(coverFilename);
+                    try {
+                        fs.unlinkSync(diskPath);
+                        restoredFromB2ShadowCount++;
+                    } catch {}
+                }
+                continue;
+            }
+
             if (!diskPath || !fs.existsSync(diskPath)) {
-                const restored = await healTrackCoverToDisk(track);
+                const restored = await healTrackCoverToDisk(track, true);
                 if (restored) {
                     healedCount++;
                 } else if (defaultCoverDisk) {
@@ -2371,6 +2414,14 @@ const healMissingCoversOnStartup = async () => {
                 }
                 await new Promise((r) => setTimeout(r, 200));
             }
+        }
+        if (shouldSanitizeLocalShadows) {
+            try {
+                fs.writeFileSync(sanitizeMarkerPath, new Date().toISOString());
+            } catch {}
+        }
+        if (restoredFromB2ShadowCount > 0) {
+            console.log(`🧹 Restauradas ${restoredFromB2ShadowCount} portadas originales de Backblaze B2 (eliminadas copias locales de iTunes).`);
         }
         if (healedCount > 0) {
             console.log(`✨ Auto-reparación completada: ${healedCount} portadas recuperadas en ${uploadDir}`);
@@ -2402,6 +2453,7 @@ app.use('/uploads', async (req, res) => {
         return res.status(404).send('Asset not found');
     }
 
+    let b2TransientError = false;
     if (isB2Configured()) {
         try {
             const b2Obj = await getB2ObjectStream(requestedFile, req.headers.range);
@@ -2426,28 +2478,31 @@ app.use('/uploads', async (req, res) => {
                 return b2Obj.stream.pipe(res);
             }
         } catch (b2Err: any) {
+            b2TransientError = true;
             console.warn(`Aviso al consultar B2 para ${requestedFile}:`, b2Err.message);
         }
     }
 
-    // Si tampoco está en B2, intentar auto-repararlo si es portada;
+    // Si tampoco está en B2 (y NO fue un error temporal de red con B2), intentar auto-repararlo si es portada;
     // y si nada funciona, devolver default-cover.jpg para que ninguna portada salga rota.
     if (/\.(jpg|jpeg|png|webp|gif)$/i.test(requestedFile)) {
-        try {
-            const [rows]: any = await pool.execute(
-                'SELECT id, title, artist, album, file_path, cover_path FROM tracks WHERE cover_path = ? OR cover_path LIKE ? LIMIT 1',
-                [`/uploads/${requestedFile}`, `%/${requestedFile}`]
-            );
-            if (rows?.[0]) {
-                const restoredPath = await healTrackCoverToDisk(rows[0]);
-                if (restoredPath && fs.existsSync(restoredPath)) {
-                    if (isB2Configured()) {
-                        syncFileToB2(requestedFile, restoredPath);
+        if (!b2TransientError) {
+            try {
+                const [rows]: any = await pool.execute(
+                    'SELECT id, title, artist, album, file_path, cover_path FROM tracks WHERE cover_path = ? OR cover_path LIKE ? LIMIT 1',
+                    [`/uploads/${requestedFile}`, `%/${requestedFile}`]
+                );
+                if (rows?.[0]) {
+                    const restoredPath = await healTrackCoverToDisk(rows[0], true);
+                    if (restoredPath && fs.existsSync(restoredPath)) {
+                        if (isB2Configured()) {
+                            syncFileToB2(requestedFile, restoredPath);
+                        }
+                        return res.sendFile(restoredPath);
                     }
-                    return res.sendFile(restoredPath);
                 }
-            }
-        } catch {}
+            } catch {}
+        }
 
         const defaultCover = resolveDefaultCoverDiskPath();
         if (defaultCover && fs.existsSync(defaultCover)) {
