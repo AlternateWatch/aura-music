@@ -24,6 +24,8 @@ Square,
 Copy,
   Sparkles,
   Moon,
+  MoreHorizontal,
+  SlidersHorizontal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -349,6 +351,7 @@ export default function App() {
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
+  const [isDesktopMenuOpen, setIsDesktopMenuOpen] = useState(false);
   const [heroImageError, setHeroImageError] = useState(false);
   const isGoingBackRef = useRef(false);
 
@@ -2546,24 +2549,6 @@ useEffect(() => {
                 {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 ${showModeration ? 'text-amber-500 border-b border-amber-500 pb-1' : ''}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
-                {token && <button onClick={() => setIsWrappedOpen(true)} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Sparkles size={12} /> Wrapped</button>}
-                <button
-                  onClick={() => setIsSleepTimerOpen(true)}
-                  title="Temporizador de apagado"
-                  className={`flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    sleepTimer.isActive
-                      ? 'text-amber-300 font-black'
-                      : 'text-white/40 hover:text-white'
-                  }`}
-                >
-                  <Moon size={12} className={sleepTimer.isActive ? 'fill-amber-300' : ''} />
-                  <span>Sleep</span>
-                  {sleepTimer.isActive && (
-                    <span className="text-[9px] font-mono font-bold text-amber-300">
-                      ({sleepTimerRemainingText})
-                    </span>
-                  )}
-                </button>
               </div>
               <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -2586,6 +2571,140 @@ useEffect(() => {
                     <Plus size={14}/>
                     <span className="hidden xs:inline">Upload</span>
                   </button>
+
+                  {/* 2. DESKTOP OPTIONS MENU */}
+                  <div className="relative hidden md:block">
+                    <button
+                      onClick={() => setIsDesktopMenuOpen(prev => !prev)}
+                      title="Más opciones"
+                      aria-label="Más opciones"
+                      className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer outline-none ${
+                        isDesktopMenuOpen
+                          ? 'bg-brand-primary text-black shadow-lg scale-105'
+                          : sleepTimer.isActive
+                            ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                            : activeTheme === 'light'
+                              ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black'
+                              : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                      }`}
+                    >
+                      <MoreHorizontal size={17} />
+                      {sleepTimer.isActive && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                      )}
+                    </button>
+
+                    <AnimatePresence>
+                      {isDesktopMenuOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setIsDesktopMenuOpen(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-[#161616]/95 backdrop-blur-2xl border border-white/10 shadow-2xl p-2 z-50 text-left select-none overflow-hidden"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="px-3 py-2 border-b border-white/5 mb-1 flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Más opciones</span>
+                              {sleepTimer.isActive && (
+                                <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-400/15 px-1.5 py-0.5 rounded border border-amber-400/30">
+                                  ⏱ {sleepTimerRemainingText}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Temporizador de apagado */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsDesktopMenuOpen(false);
+                                setIsSleepTimerOpen(true);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
+                            >
+                              <div className={`p-2 rounded-lg transition-colors ${
+                                sleepTimer.isActive
+                                  ? 'bg-amber-400/20 text-amber-300'
+                                  : 'bg-white/5 text-white/60 group-hover:text-amber-300 group-hover:bg-amber-400/10'
+                              }`}>
+                                <Moon size={16} className={sleepTimer.isActive ? 'fill-amber-300' : ''} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-white flex items-center justify-between">
+                                  <span>Temporizador de apagado</span>
+                                  {sleepTimer.isActive && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+                                </div>
+                                <div className="text-[10px] text-white/40 truncate">
+                                  {sleepTimer.isActive ? `Apagado en ${sleepTimerRemainingText}` : 'Detener música al dormir'}
+                                </div>
+                              </div>
+                            </button>
+
+                            {/* Wrapped */}
+                            {token && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsDesktopMenuOpen(false);
+                                  setIsWrappedOpen(true);
+                                }}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
+                              >
+                                <div className="p-2 rounded-lg bg-white/5 text-white/60 group-hover:text-brand-primary group-hover:bg-brand-primary/10 transition-colors">
+                                  <Sparkles size={16} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs font-semibold text-white">Aura Wrapped</div>
+                                  <div className="text-[10px] text-white/40">Tus estadísticas de escucha</div>
+                                </div>
+                              </button>
+                            )}
+
+                            {/* Personalización */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsDesktopMenuOpen(false);
+                                setIsPersonalizationOpen(true);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
+                            >
+                              <div className="p-2 rounded-lg bg-white/5 text-white/60 group-hover:text-indigo-400 group-hover:bg-indigo-400/10 transition-colors">
+                                <Palette size={16} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-white">Personalización</div>
+                                <div className="text-[10px] text-white/40">Temas y fondo de pantalla</div>
+                              </div>
+                            </button>
+
+                            {/* Ajustes de Audio */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsDesktopMenuOpen(false);
+                                setIsAudioSettingsOpen(true);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
+                            >
+                              <div className="p-2 rounded-lg bg-white/5 text-white/60 group-hover:text-emerald-400 group-hover:bg-emerald-400/10 transition-colors">
+                                <SlidersHorizontal size={16} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-white">Ajustes de Audio</div>
+                                <div className="text-[10px] text-white/40">Ecualizador y normalizador</div>
+                              </div>
+                            </button>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
                   {/* 2. LOGOUT BUTTON (Hidden on Mobile) */}
                   <button
@@ -3021,6 +3140,37 @@ transition={{
 
             <ChevronRight size={15} className="opacity-20 shrink-0" />
           </button>
+
+          {/* WRAPPED */}
+          {token && (
+            <button
+              onClick={() => {
+                setIsWrappedOpen(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
+                activeTheme === "light"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${activeTheme === "light" ? "bg-black/5" : "bg-white/5"}`}>
+                <Sparkles size={16} />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold">
+                  Aura Wrapped
+                </div>
+
+                <div className="text-[10px] opacity-40">
+                  Your listening stats
+                </div>
+              </div>
+
+              <ChevronRight size={15} className="opacity-20 shrink-0" />
+            </button>
+          )}
 
           {/* PERSONALIZATION */}
           <button
