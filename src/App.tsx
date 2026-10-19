@@ -23,6 +23,7 @@ Minus,
 Square,
 Copy,
   Sparkles,
+  Moon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -2546,6 +2547,23 @@ useEffect(() => {
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
                 {token && <button onClick={() => setIsWrappedOpen(true)} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Sparkles size={12} /> Wrapped</button>}
+                <button
+                  onClick={() => setIsSleepTimerOpen(true)}
+                  title="Temporizador de apagado"
+                  className={`flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    sleepTimer.isActive
+                      ? 'text-amber-300 font-black'
+                      : 'text-white/40 hover:text-white'
+                  }`}
+                >
+                  <Moon size={12} className={sleepTimer.isActive ? 'fill-amber-300' : ''} />
+                  <span>Sleep</span>
+                  {sleepTimer.isActive && (
+                    <span className="text-[9px] font-mono font-bold text-amber-300">
+                      ({sleepTimerRemainingText})
+                    </span>
+                  )}
+                </button>
               </div>
               <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -2965,6 +2983,44 @@ transition={{
               )}
             </button>
           )}
+
+          {/* SLEEP TIMER */}
+          <button
+            onClick={() => {
+              setIsSleepTimerOpen(true);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:scale-[0.98] duration-150 ${
+              activeTheme === "light"
+                ? "hover:bg-black/5 active:bg-black/10"
+                : "hover:bg-white/5 active:bg-white/10"
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              sleepTimer.isActive
+                ? "bg-amber-400/20 text-amber-300 border border-amber-400/30"
+                : activeTheme === "light" ? "bg-black/5 text-black/70" : "bg-white/5 text-white/70"
+            }`}>
+              <Moon size={16} className={sleepTimer.isActive ? "fill-amber-300" : ""} />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                Temporizador
+                {sleepTimer.isActive && (
+                  <span className="text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-400/15 border border-amber-400/30">
+                    {sleepTimerRemainingText}
+                  </span>
+                )}
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                {sleepTimer.isActive ? 'Temporizador activo' : 'Apagado automático para dormir'}
+              </div>
+            </div>
+
+            <ChevronRight size={15} className="opacity-20 shrink-0" />
+          </button>
 
           {/* PERSONALIZATION */}
           <button
@@ -3643,9 +3699,6 @@ transition={{
               subscribeToTime={audioObj.subscribeToTime}
               volume={volume}
               onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
-              onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
-              isSleepTimerActive={sleepTimer.isActive}
-              sleepTimerRemainingText={sleepTimerRemainingText}
               onTogglePlay={(e: any) => {
                 e.stopPropagation();
                 if (isMinigameActive) {

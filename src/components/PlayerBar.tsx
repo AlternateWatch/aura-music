@@ -11,7 +11,6 @@ import {
   Maximize2,
   MonitorPlay,
   SlidersHorizontal,
-  Moon,
 } from "lucide-react";
 import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
@@ -40,9 +39,6 @@ interface PlayerBarProps {
   onToggleLoop: (e: any) => void;
   onToggleLyrics: (e: any) => void;
   onOpenAudioSettings: () => void;
-  onOpenSleepTimer?: () => void;
-  isSleepTimerActive?: boolean;
-  sleepTimerRemainingText?: string;
   onOpenFullPlayer: () => void;
   onToggleFocusMode: () => void;
   isFocusMode: boolean;
@@ -68,9 +64,6 @@ export function PlayerBar({
   onToggleLoop,
   onToggleLyrics,
   onOpenAudioSettings,
-  onOpenSleepTimer,
-  isSleepTimerActive,
-  sleepTimerRemainingText,
   onOpenFullPlayer,
   onToggleFocusMode,
   isFocusMode,
@@ -306,26 +299,6 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           >
             <Repeat size={14} />
           </button>
-
-          {/* SLEEP TIMER INDICATOR (MÓVIL) */}
-          {onOpenSleepTimer && isSleepTimerActive && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                hapticImpact("light");
-                onOpenSleepTimer();
-              }}
-              style={{
-                WebkitTapHighlightColor: "transparent",
-                WebkitTouchCallout: "none",
-              }}
-              className="flex items-center gap-1 text-amber-300 px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/30 font-mono text-[9px] font-bold shrink-0 animate-pulse active:scale-95 transition-transform"
-            >
-              <Moon size={10} className="fill-amber-300 shrink-0" />
-              <span>{sleepTimerRemainingText}</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -471,25 +444,6 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           >
             <SlidersHorizontal size={18} />
           </button>
-
-          {onOpenSleepTimer && (
-            <button
-              title="Temporizador de apagado"
-              aria-label="Temporizador de apagado"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenSleepTimer();
-              }}
-              className={`transition-all hover:scale-110 shrink-0 outline-none flex items-center gap-1.5 cursor-pointer ${
-                isSleepTimerActive ? "text-amber-300" : "text-white/30 hover:text-amber-200"
-              }`}
-            >
-              <Moon size={18} className={isSleepTimerActive ? "fill-amber-400/20" : ""} />
-              {isSleepTimerActive && (
-                <span className="text-[10px] font-mono font-bold">{sleepTimerRemainingText}</span>
-              )}
-            </button>
-          )}
 
           <div className="hidden lg:flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/5 group shrink-0">
             <Volume2 size={14} className="text-white/30" />
