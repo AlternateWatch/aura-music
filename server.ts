@@ -2446,12 +2446,22 @@ const healMissingCoversOnStartup = async () => {
         const defaultCoverDisk = resolveDefaultCoverDiskPath();
         const defaultCoverDbPath = defaultCoverDisk ? `/uploads/${path.basename(defaultCoverDisk)}` : '/uploads/default-cover.jpg';
 
-        // Consultar de una sola vez qué archivos existen en Backblaze B2
-        const b2FilesSet = isB2Configured() ? new Set(await listB2Files()) : new Set<string>();
+        // Consultar de una sola vez qué archivos existen en Backblaze B2 (con fallback si la key no tiene permiso de listado)
+        let b2FilesSet = new Set<string>();
+        let b2ListSucceeded = false;
+        if (isB2Configured()) {
+            try {
+                b2FilesSet = new Set(await listB2Files());
+                b2ListSucceeded = true;
+            } catch (err: any) {
+                console.warn('⚠️ No se pudo listar el bucket B2 de una vez, se comprobará archivo por archivo:', err?.message || err);
+            }
+        }
 
         // 1. Restauración única de portadas que habían sido sobrescritas por el fallback de iTunes (600x600)
-        // extrayendo la portada original embebida directamente del archivo .flac/.mp3 (en disco o B2).
-        const embeddedRestoreMarker = path.join(uploadDir, '.b2-embedded-covers-restored-v1');
+        // extrayendo la portada original embebida directamente del archivo .flac/.mp3 (en disco o B2)
+        // y eliminando la portada antigua de iTunes tanto del disco como del bucket de Backblaze B2.
+        const embeddedRestoreMarker = path.join(uploadDir, '.b2-embedded-covers-restored-v2');
         if (!fs.existsSync(embeddedRestoreMarker)) {
             console.log('🔍 Verificando portadas sobrescritas por iTunes (600x600) para restaurar desde los archivos .flac/.mp3...');
             const tracksByCover = new Map<string, any[]>();
@@ -2499,8 +2509,20 @@ const healMissingCoversOnStartup = async () => {
                             b2FilesSet.add(newFilename);
                         }
                         await pool.execute('UPDATE tracks SET cover_path = ? WHERE cover_path = ?', [newDbPath, oldCoverPath]);
+
+                        // Eliminar la portada antigua de iTunes del disco local y del bucket Backblaze B2
+                        if (diskPath && fs.existsSync(diskPath)) {
+                            try {
+                                fs.unlinkSync(diskPath);
+                            } catch {}
+                        }
+                        if (isB2Configured()) {
+                            await deleteFromB2(oldFilename).catch(() => {});
+                            b2FilesSet.delete(oldFilename);
+                        }
+
                         restoredEmbeddedCount++;
-                        console.log(`🎨 Restaurada portada original desde audio (${sampleTrack.album || sampleTrack.title}) -> ${newFilename}`);
+                        console.log(`🎨 Restaurada portada original desde audio (${sampleTrack.album || sampleTrack.title}) -> ${newFilename} (borrada antigua: ${oldFilename})`);
                     } catch (err: any) {
                         console.warn(`Aviso restaurando portada embebida de "${sampleTrack?.title}":`, err?.message || err);
                     }
@@ -2511,7 +2533,7 @@ const healMissingCoversOnStartup = async () => {
                 fs.writeFileSync(embeddedRestoreMarker, new Date().toISOString());
             } catch {}
             if (restoredEmbeddedCount > 0) {
-                console.log(`✅ Restauración desde audio completada: ${restoredEmbeddedCount} portadas originales recuperadas.`);
+                console.log(`✅ Restauración desde audio completada: ${restoredEmbeddedCount} portadas originales recuperadas y portadas de iTunes eliminadas.`);
             }
         }
 
@@ -2530,10 +2552,15 @@ const healMissingCoversOnStartup = async () => {
             const coverFilename = track.cover_path
                 ? path.basename(String(track.cover_path).split('?')[0])
                 : null;
-            const existsInB2 = Boolean(coverFilename && b2FilesSet.has(coverFilename));
             const diskPath = track.cover_path ? resolveDiskPath(track.cover_path) : null;
+            const existsOnDisk = Boolean(diskPath && fs.existsSync(diskPath));
+            const existsInB2 = Boolean(
+                coverFilename &&
+                isB2Configured() &&
+                (b2ListSucceeded ? b2FilesSet.has(coverFilename) : await checkB2FileExists(coverFilename))
+            );
 
-            if (existsInB2 || (diskPath && fs.existsSync(diskPath))) {
+            if (existsInB2 || existsOnDisk) {
                 continue;
             }
 
