@@ -26,13 +26,20 @@ import axios from "axios";
 
 import config from './config.json' assert { type: 'json' };
 
-
+import { isB2Configured, uploadToB2, getB2ObjectStream, deleteFromB2 } from './b2Storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Cuando PM2 ejecuta ./dist/server.js, __dirname es /var/www/aura-music/dist.
 // Calculamos ROOT_DIR siempre en la raíz del proyecto para que las subidas NUNCA vayan a dist/public/uploads.
 const ROOT_DIR = path.basename(__dirname) === 'dist' ? path.resolve(__dirname, '..') : __dirname;
+
+const syncFileToB2 = (filename: string, localFilePath: string, mimetype?: string, size?: number) => {
+    if (!isB2Configured() || !fs.existsSync(localFilePath)) return;
+    uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size).catch(err => {
+        console.error(`Error sincronizando ${filename} con B2:`, err.message);
+    });
+};
 const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
 
 dotenv.config({ path: path.join(ROOT_DIR, '.env') });
@@ -185,9 +192,12 @@ const unlinkTrackAssetIfUnused = async (dbPath: string | null | undefined, exclu
         }
         const diskPath = resolveDiskPath(dbPath);
         if (diskPath && fs.existsSync(diskPath)) {
-            fs.unlinkSync(diskPath);
-            return true;
+            try { fs.unlinkSync(diskPath); } catch {}
         }
+        if (isB2Configured()) {
+            deleteFromB2(filename).catch(() => {});
+        }
+        return true;
     } catch (e) {
         console.error("Error checking/deleting asset:", e);
     }
@@ -507,6 +517,19 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
             'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
         );
+
+        // Sincronizar con Backblaze B2 en segundo plano
+        if (isB2Configured()) {
+            const aFile = req.files['audio'][0];
+            syncFileToB2(aFile.filename, aFile.path, aFile.mimetype, aFile.size);
+            if (req.files?.['cover']?.[0]) {
+                const cFile = req.files['cover'][0];
+                syncFileToB2(cFile.filename, cFile.path, cFile.mimetype, cFile.size);
+            } else if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
+                syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
+            }
+        }
+
         res.status(201).json({ id: result.insertId });
     } catch (e) {
         console.error("Error uploading track:", e);
@@ -592,6 +615,18 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
         }
         if (oldAnimCover && normalizeMediaPath(oldAnimCover) !== animatedCoverPath) {
             await unlinkTrackAssetIfUnused(oldAnimCover, req.params.id);
+        }
+
+        // Sincronizar nuevas portadas con Backblaze B2
+        if (isB2Configured()) {
+            if (req.files && req.files['cover']?.[0]) {
+                const c = req.files['cover'][0];
+                syncFileToB2(c.filename, c.path, c.mimetype, c.size);
+            }
+            if (req.files && req.files['animated_cover']?.[0]) {
+                const ac = req.files['animated_cover'][0];
+                syncFileToB2(ac.filename, ac.path, ac.mimetype, ac.size);
+            }
         }
 
         res.send(); 
@@ -742,31 +777,31 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
 
 
     try {
-
-        // Borramos la imagen vieja del disco si ya tenía una
-
+        // Borramos la imagen vieja del disco y de B2 si ya tenía una
         const [rows]: any = await pool.execute('SELECT image_url FROM artists WHERE name = ?', [req.params.name]);
         if (rows.length > 0 && rows[0].image_url) {
             const oldPath = resolveDiskPath(rows[0].image_url);
-            if (oldPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            if (oldPath && fs.existsSync(oldPath)) {
+                try { fs.unlinkSync(oldPath); } catch {}
+            }
+            if (isB2Configured()) {
+                const oldFilename = path.basename(rows[0].image_url.split('?')[0]);
+                deleteFromB2(oldFilename).catch(() => {});
+            }
         }
 
-
-
         // Guardamos o actualizamos la foto en la base de datos
-
         await pool.execute(
-
             'INSERT INTO artists (name, image_url) VALUES (?, ?) ON DUPLICATE KEY UPDATE image_url = VALUES(image_url)',
-
             [req.params.name, newImagePath]
-
         );
 
-
+        // Sincronizar nueva imagen a B2
+        if (isB2Configured()) {
+            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+        }
 
         res.json({ image_url: newImagePath });
-
     } catch (e) {
 
         console.error("Error subiendo foto de artista:", e);
@@ -979,15 +1014,26 @@ app.post('/api/users/profile-pic', authenticateToken, upload.single('profile_pic
 
 
 
-        // Get current profile pic so we can delete the old file from the hard drive
+        // Get current profile pic so we can delete the old file from the hard drive and B2
         const [userRows]: any = await pool.execute('SELECT profile_pic_path FROM users WHERE id = ?', [req.user.userId]);
         if (userRows[0]?.profile_pic_path) {
             const oldPath = resolveDiskPath(userRows[0].profile_pic_path);
-            if (oldPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath); // Free up storage space
+            if (oldPath && fs.existsSync(oldPath)) {
+                try { fs.unlinkSync(oldPath); } catch {}
+            }
+            if (isB2Configured()) {
+                const oldFilename = path.basename(userRows[0].profile_pic_path.split('?')[0]);
+                deleteFromB2(oldFilename).catch(() => {});
+            }
         }
 
         // Update the database with the new image path
         await pool.execute('UPDATE users SET profile_pic_path = ? WHERE id = ?', [newPicPath, req.user.userId]);
+
+        // Sync new picture to B2
+        if (isB2Configured()) {
+            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+        }
         
         res.json({ profile_pic_path: newPicPath });
     } catch (error) {
@@ -1010,27 +1056,28 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
             [req.user.userId]
         );
 
-        // Eliminar el wallpaper anterior del disco
+        // Eliminar el wallpaper anterior del disco y de B2
         if (userRows[0]?.custom_bg_path) {
             const oldPath = resolveDiskPath(userRows[0].custom_bg_path);
             if (oldPath && fs.existsSync(oldPath)) {
-                fs.unlinkSync(oldPath);
+                try { fs.unlinkSync(oldPath); } catch {}
+            }
+            if (isB2Configured()) {
+                const oldFilename = path.basename(userRows[0].custom_bg_path.split('?')[0]);
+                deleteFromB2(oldFilename).catch(() => {});
             }
         }
 
-
-
         // Guardar el nuevo wallpaper en la base de datos
-
         await pool.execute(
-
             'UPDATE users SET custom_bg_path = ? WHERE id = ?',
-
             [newBgPath, req.user.userId]
-
         );
 
-
+        // Sincronizar nuevo wallpaper a B2
+        if (isB2Configured()) {
+            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+        }
 
         res.json({
 
@@ -2340,11 +2387,45 @@ app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
 app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
-// Si un archivo en /uploads no existe en disco, intentar auto-repararlo al vuelo si es portada;
-// y si nada funciona, devolver default-cover.jpg para que ninguna portada salga rota.
+// Si un archivo en /uploads no existe en disco local, servir desde Backblaze B2 con soporte de Range (streaming)
 app.use('/uploads', async (req, res) => {
     const requestedFile = path.basename(decodeURIComponent(req.path.split('?')[0]));
-    if (requestedFile && /\.(jpg|jpeg|png|webp|gif)$/i.test(requestedFile)) {
+    if (!requestedFile || requestedFile === '.' || requestedFile === '..') {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        return res.status(404).send('Asset not found');
+    }
+
+    if (isB2Configured()) {
+        try {
+            const b2Obj = await getB2ObjectStream(requestedFile, req.headers.range);
+            if (b2Obj) {
+                res.status(b2Obj.statusCode);
+                res.setHeader('Content-Type', b2Obj.contentType);
+                res.setHeader('Accept-Ranges', b2Obj.acceptRanges);
+                if (b2Obj.contentLength !== undefined) {
+                    res.setHeader('Content-Length', b2Obj.contentLength);
+                }
+                if (b2Obj.contentRange) {
+                    res.setHeader('Content-Range', b2Obj.contentRange);
+                }
+                if (b2Obj.etag) {
+                    res.setHeader('ETag', b2Obj.etag);
+                }
+                res.setHeader('Cache-Control', 'public, max-age=86400');
+                b2Obj.stream.on('error', (streamErr) => {
+                    console.error(`Error streaming B2 asset ${requestedFile}:`, streamErr);
+                    if (!res.headersSent) res.status(500).end();
+                });
+                return b2Obj.stream.pipe(res);
+            }
+        } catch (b2Err: any) {
+            console.warn(`Aviso al consultar B2 para ${requestedFile}:`, b2Err.message);
+        }
+    }
+
+    // Si tampoco está en B2, intentar auto-repararlo si es portada;
+    // y si nada funciona, devolver default-cover.jpg para que ninguna portada salga rota.
+    if (/\.(jpg|jpeg|png|webp|gif)$/i.test(requestedFile)) {
         try {
             const [rows]: any = await pool.execute(
                 'SELECT id, title, artist, album, file_path, cover_path FROM tracks WHERE cover_path = ? OR cover_path LIKE ? LIMIT 1',
@@ -2353,6 +2434,9 @@ app.use('/uploads', async (req, res) => {
             if (rows?.[0]) {
                 const restoredPath = await healTrackCoverToDisk(rows[0]);
                 if (restoredPath && fs.existsSync(restoredPath)) {
+                    if (isB2Configured()) {
+                        syncFileToB2(requestedFile, restoredPath);
+                    }
                     return res.sendFile(restoredPath);
                 }
             }
@@ -2364,6 +2448,7 @@ app.use('/uploads', async (req, res) => {
             return res.sendFile(defaultCover);
         }
     }
+
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.status(404).send('Asset not found');
 });
