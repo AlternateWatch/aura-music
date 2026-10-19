@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useSyncExternalStore, FormEvent, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, FormEvent, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
