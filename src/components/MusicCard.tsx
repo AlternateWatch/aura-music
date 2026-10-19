@@ -156,6 +156,8 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         onDrop?.();
       }}
       className={`group relative p-5 md:p-4 rounded-[32px] md:rounded-3xl transition-all duration-300 flex flex-col justify-between ${
+        showMenu ? 'z-30' : 'z-0'
+      } ${
         isDragging
           ? 'opacity-30 scale-95'
           : isActive

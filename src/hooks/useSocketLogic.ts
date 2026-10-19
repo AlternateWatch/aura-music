@@ -32,6 +32,7 @@ export function useSocketLogic(
   const userRef = useRef<any>(user);
   const sessionRef = useRef<string | null>(null);
   const settersRef = useRef({ setIsPlaying, setActiveQueue });
+  const isShuffleRef = useRef(isShuffle);
   // "Líder" = el último que tocó un control (play, seek, siguiente...). Solo el
   // líder envía el latido de sincronización; si lo enviaran todos, se estarían
   // corrigiendo entre ellos y la música saltaría constantemente.
@@ -39,6 +40,7 @@ export function useSocketLogic(
 
   userRef.current = user;
   settersRef.current = { setIsPlaying, setActiveQueue };
+  isShuffleRef.current = isShuffle;
 
   const setCurrentSession = useCallback((code: string | null) => {
     sessionRef.current = code;
@@ -96,7 +98,14 @@ export function useSocketLogic(
       if (command !== "sync-time") isLeaderRef.current = false;
 
       if (command === "update-queue") {
-        if (Array.isArray(data.queue)) settersRef.current.setActiveQueue(data.queue);
+        if (Array.isArray(data.queue)) {
+          settersRef.current.setActiveQueue(data.queue);
+          if (Array.isArray(data.shuffledQueue)) {
+            setShuffledQueue(data.shuffledQueue);
+          } else if (isShuffleRef.current) {
+            setShuffledQueue(data.queue);
+          }
+        }
       }
 
       if (command === "play-track") {

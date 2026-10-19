@@ -319,6 +319,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState<string>('first');
   const [searchQuery, setSearchQuery] = useState(""); 
   const [activeQueue, setActiveQueue] = useState<Song[]>([]);
+  const [manualQueueIds, setManualQueueIds] = useState<string[]>([]);
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('aura_theme') || 'dark');
   const [customBg, setCustomBg] = useState(user?.custom_bg_path || null);
   const [isSocialOpen, setIsSocialOpen] = useState(false);
@@ -1335,9 +1336,10 @@ useEffect(() => {
           finalQueue = [...albumTracks, ...libraryTracks];
         }
         setActiveQueue(finalQueue);
+        setManualQueueIds([]);
 
-      // 2. DESDE UNA PLAYLIST
-      } else if (activePlaylistId !== 'all') {
+      // 2. DESDE UNA PLAYLIST PERSONALIZADA
+      } else if (activePlaylistId !== 'all' && activePlaylistId !== 'liked' && activePlaylistId !== 'offline') {
         setPlaybackContext('playlist');
         setContextAlbumName(null);
 
@@ -1351,8 +1353,9 @@ useEffect(() => {
           finalQueue = playlistSongs;
         }
         setActiveQueue(finalQueue);
+        setManualQueueIds([]);
 
-      // 3. DESDE LA BIBLIOTECA GENERAL
+      // 3. DESDE LA BIBLIOTECA GENERAL O PESTAÑAS GENERALES (FAVORITES / OFFLINE)
       } else {
         setPlaybackContext('library');
         setContextAlbumName(null);
@@ -1367,7 +1370,11 @@ useEffect(() => {
           finalQueue = allSongs;
         }
         setActiveQueue(finalQueue);
+        setManualQueueIds([]);
       }
+    } else if (preserveQueue) {
+      // Si avanzamos a una canción que estaba en la cola manual, la removemos de la lista de pendientes
+      setManualQueueIds(prev => prev.filter(id => id !== song.id));
     }
 
     try {
@@ -1633,24 +1640,107 @@ useEffect(() => {
   };
 
   // Cola: cualquier miembro de la sesión puede tocarla (añadir, "siguiente",
-  // reordenar) sin ser el anfitrión. Solo cambiar la canción que suena ahora
-  // o el transporte (play/pause/seek/shuffle/loop) sigue siendo cosa suya.
+  // reordenar) sin ser el anfitrión.
   const handlePlayNext = (song: Song) => {
-    const pool = activeQueue.length > 0 ? [...activeQueue] : [...getFlattenedSongs()];
-    const filtered = pool.filter(s => s.id !== song.id);
-    const curIdx = filtered.findIndex(s => s.id === currentSong?.id);
-    const insertIdx = curIdx !== -1 ? curIdx + 1 : 0;
+    // Si no hay canción sonando, la ponemos directamente
+    if (!currentSong) {
+      handlePlaySong(song);
+      return;
+    }
+
+    const isShuff = socketObj.isShuffle;
+    const currentPool = isShuff
+      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...songs]))
+      : (activeQueue.length > 0 ? [...activeQueue] : [...songs]);
+
+    // Aseguramos que currentSong esté en la cola
+    let curIdx = currentPool.findIndex(s => s.id === currentSong.id);
+    if (curIdx === -1) {
+      currentPool.unshift(currentSong);
+      curIdx = 0;
+    }
+
+    // Quitamos song si ya existía en otra posición que no sea la actual sonando
+    const filtered = currentPool.filter((s, idx) => idx === curIdx || s.id !== song.id);
+    curIdx = filtered.findIndex(s => s.id === currentSong.id);
+
+    // Reproducir siguiente se inserta EXACTAMENTE en curIdx + 1 (la siguiente pista)
+    const insertIdx = curIdx + 1;
     filtered.splice(insertIdx, 0, song);
+
+    // Registramos la canción como parte de la cola manual de prioridad al frente
+    setManualQueueIds(prev => [song.id, ...prev.filter(id => id !== song.id)]);
+
     setActiveQueue(filtered);
+    if (isShuff) {
+      socketObj.setShuffledQueue(filtered);
+    }
     socketObj.emitCommand('update-queue', { queue: filtered });
   };
 
   const handleAddToQueue = (song: Song) => {
-    const pool = activeQueue.length > 0 ? [...activeQueue] : [...getFlattenedSongs()];
-    const filtered = pool.filter(s => s.id !== song.id);
-    const newQueue = [...filtered, song];
-    setActiveQueue(newQueue);
-    socketObj.emitCommand('update-queue', { queue: newQueue });
+    if (!currentSong) {
+      handlePlaySong(song);
+      return;
+    }
+
+    const isShuff = socketObj.isShuffle;
+    const currentPool = isShuff
+      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...songs]))
+      : (activeQueue.length > 0 ? [...activeQueue] : [...songs]);
+
+    let curIdx = currentPool.findIndex(s => s.id === currentSong.id);
+    if (curIdx === -1) {
+      currentPool.unshift(currentSong);
+      curIdx = 0;
+    }
+
+    const filtered = currentPool.filter((s, idx) => idx === curIdx || s.id !== song.id);
+    curIdx = filtered.findIndex(s => s.id === currentSong.id);
+
+    // Determinamos si estamos en pestañas generales o búsqueda:
+    // General Library ('all'), Liked Tracks ('liked'), Offline Tracks ('offline'),
+    // perfil de artista o búsqueda activa. NO en playlists personalizadas ni álbumes cerrados.
+    const isCustomPlaylist = activePlaylistId !== 'all' && activePlaylistId !== 'liked' && activePlaylistId !== 'offline' && !selectedAlbumName && !selectedArtistName;
+    const isAlbum = Boolean(selectedAlbumName);
+    const isSearching = Boolean(searchQuery.trim());
+    const isGeneralTabOrSearch = isSearching || (!isCustomPlaylist && !isAlbum);
+
+    let insertIdx: number;
+
+    if (isGeneralTabOrSearch) {
+      // En pestañas generales / búsqueda: no se va al final de los cientos de canciones
+      // de la biblioteca, sino justo después del bloque de cola manual previa (o de reproducir siguiente).
+      const manualSet = new Set(manualQueueIds);
+      let target = curIdx + 1;
+      while (target < filtered.length && manualSet.has(filtered[target].id)) {
+        target++;
+      }
+      insertIdx = target;
+      setManualQueueIds(prev => [...prev.filter(id => id !== song.id), song.id]);
+    } else {
+      // En playlists personalizadas o álbumes cerrados: al final de la lista correspondiente
+      if (playbackContext === 'album' && contextAlbumName) {
+        // Justo después del final del álbum (antes de las libraryTracks de relleno)
+        let lastAlbumTrackIdx = -1;
+        for (let i = curIdx; i < filtered.length; i++) {
+          if (filtered[i].album === contextAlbumName) {
+            lastAlbumTrackIdx = i;
+          }
+        }
+        insertIdx = lastAlbumTrackIdx !== -1 ? lastAlbumTrackIdx + 1 : filtered.length;
+      } else {
+        insertIdx = filtered.length;
+      }
+    }
+
+    filtered.splice(insertIdx, 0, song);
+
+    setActiveQueue(filtered);
+    if (isShuff) {
+      socketObj.setShuffledQueue(filtered);
+    }
+    socketObj.emitCommand('update-queue', { queue: filtered });
   };
 
   const handleReorderQueue = (newQueue: Song[]) => {
@@ -3595,7 +3685,7 @@ getCurrentTime={audioObj.getCurrentTime}
         onClose={() => setIsQueueOpen(false)}
         queue={getCurrentPlayPool()}
         currentSong={currentSong}
-        onPlayFromQueue={handlePlaySong}
+        onPlayFromQueue={(song) => handlePlaySong(song, false, 0, true)}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
         activeTheme={activeTheme}
