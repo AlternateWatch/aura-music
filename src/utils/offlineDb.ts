@@ -12,6 +12,14 @@ export interface OfflineTrackRecord {
   sizeBytes: number;
 }
 
+export interface OfflinePlaylistRecord {
+  id: string;
+  name: string;
+  color?: string;
+  songIds: string[];
+  syncedAt: number;
+}
+
 export interface DownloadNotice {
   uid: number;
   status: 'downloading' | 'completed' | 'removed' | 'error';
@@ -21,11 +29,16 @@ export interface DownloadNotice {
 
 class AuraOfflineDB extends Dexie {
   tracks!: Table<OfflineTrackRecord, string>;
+  playlists!: Table<OfflinePlaylistRecord, string>;
 
   constructor() {
     super('AuraOfflineDB');
     this.version(1).stores({
       tracks: 'id, audioUrl, coverUrl, downloadedAt',
+    });
+    this.version(2).stores({
+      tracks: 'id, audioUrl, coverUrl, downloadedAt',
+      playlists: 'id, name, syncedAt',
     });
   }
 }
@@ -57,6 +70,8 @@ let offlineIdsSnapshot = new Set<string>();
 let downloadingIdsSnapshot = new Set<string>();
 let diskDownloadedIdsSnapshot = loadDiskIds();
 let diskDownloadingIdsSnapshot = new Set<string>();
+let offlinePlaylistIdsSnapshot = new Set<string>();
+let playlistSyncProgressSnapshot = new Map<string, { current: number; total: number }>();
 let downloadNoticeSnapshot: DownloadNotice | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -69,6 +84,8 @@ function notify() {
   downloadingIdsSnapshot = new Set(downloadingIdsSnapshot);
   diskDownloadedIdsSnapshot = new Set(diskDownloadedIdsSnapshot);
   diskDownloadingIdsSnapshot = new Set(diskDownloadingIdsSnapshot);
+  offlinePlaylistIdsSnapshot = new Set(offlinePlaylistIdsSnapshot);
+  playlistSyncProgressSnapshot = new Map(playlistSyncProgressSnapshot);
   listeners.forEach((l) => l());
 }
 
@@ -96,15 +113,18 @@ export function initOfflineStore(): Promise<void> {
     return initPromise;
   }
 
-  initPromise = offlineDb.tracks
-    .toArray()
-    .then((rows) => {
-      offlineIdsSnapshot = new Set(rows.map((r) => String(r.id)));
-      for (const r of rows) {
+  initPromise = Promise.all([
+    offlineDb.tracks.toArray(),
+    offlineDb.playlists.toArray().catch(() => [] as OfflinePlaylistRecord[]),
+  ])
+    .then(([trackRows, playlistRows]) => {
+      offlineIdsSnapshot = new Set(trackRows.map((r) => String(r.id)));
+      for (const r of trackRows) {
         if (r.coverUrl && r.coverBlob) {
           cacheBlobForUrls(r.coverUrl, r.coverBlob);
         }
       }
+      offlinePlaylistIdsSnapshot = new Set(playlistRows.map((r) => String(r.id)));
       notify();
     })
     .catch((err) => {
@@ -127,6 +147,24 @@ export function subscribeOfflineStore(listener: () => void): () => void {
 
 export function getOfflineIdsSnapshot(): Set<string> {
   return offlineIdsSnapshot;
+}
+
+export function getOfflinePlaylistIdsSnapshot(): Set<string> {
+  return offlinePlaylistIdsSnapshot;
+}
+
+export function getPlaylistSyncProgressSnapshot(): Map<string, { current: number; total: number }> {
+  return playlistSyncProgressSnapshot;
+}
+
+export function isPlaylistOffline(playlistId: string | number | undefined | null): boolean {
+  if (!playlistId) return false;
+  return offlinePlaylistIdsSnapshot.has(String(playlistId));
+}
+
+export function isPlaylistSyncing(playlistId: string | number | undefined | null): boolean {
+  if (!playlistId) return false;
+  return playlistSyncProgressSnapshot.has(String(playlistId));
 }
 
 export function getDownloadingIdsSnapshot(): Set<string> {
@@ -222,22 +260,27 @@ export async function getOfflineBlobUrl(originalUrl: string): Promise<string | n
 /**
  * Descarga una canción (audio + portada) y la guarda en IndexedDB para reproducción sin conexión.
  */
-export async function downloadSongOffline(song: Song): Promise<boolean> {
+export async function downloadSongOffline(song: Song, silent = false): Promise<boolean> {
   const id = String(song.id);
   if (downloadingIdsSnapshot.has(id)) return false;
 
   downloadingIdsSnapshot.add(id);
-  setNotice(
-    {
-      status: 'downloading',
-      title: `Guardando sin conexión...`,
-      subtitle: `${song.artist} — ${song.title}`,
-    },
-    0
-  );
+  if (!silent) {
+    setNotice(
+      {
+        status: 'downloading',
+        title: `Guardando sin conexión...`,
+        subtitle: `${song.artist} — ${song.title}`,
+      },
+      0
+    );
+  }
 
   try {
-    const audioRes = await fetch(song.audioUrl);
+    const rawAudioUrl = song.audioUrl.startsWith('/uploads/')
+      ? `https://aura.basildo.me${song.audioUrl}`
+      : song.audioUrl;
+    const audioRes = await fetch(rawAudioUrl);
     if (!audioRes.ok) {
       throw new Error(`HTTP ${audioRes.status} descargando audio`);
     }
@@ -246,7 +289,10 @@ export async function downloadSongOffline(song: Song): Promise<boolean> {
     let coverBlob: Blob | null = null;
     if (song.coverUrl) {
       try {
-        const coverRes = await fetch(song.coverUrl);
+        const rawCoverUrl = song.coverUrl.startsWith('/uploads/')
+          ? `https://aura.basildo.me${song.coverUrl}`
+          : song.coverUrl;
+        const coverRes = await fetch(rawCoverUrl);
         if (coverRes.ok) {
           coverBlob = await coverRes.blob();
         }
@@ -270,19 +316,23 @@ export async function downloadSongOffline(song: Song): Promise<boolean> {
     if (song.coverUrl && coverBlob) cacheBlobForUrls(song.coverUrl, coverBlob);
 
     offlineIdsSnapshot.add(id);
-    setNotice({
-      status: 'completed',
-      title: 'Disponible sin conexión',
-      subtitle: `${song.artist} — ${song.title}`,
-    });
+    if (!silent) {
+      setNotice({
+        status: 'completed',
+        title: 'Disponible sin conexión',
+        subtitle: `${song.artist} — ${song.title}`,
+      });
+    }
     return true;
   } catch (err) {
     console.error(`[OfflineDB] Error descargando "${song.title}":`, err);
-    setNotice({
-      status: 'error',
-      title: 'Error al descargar',
-      subtitle: `${song.title}`,
-    });
+    if (!silent) {
+      setNotice({
+        status: 'error',
+        title: 'Error al descargar',
+        subtitle: `${song.title}`,
+      });
+    }
     return false;
   } finally {
     downloadingIdsSnapshot.delete(id);
@@ -327,6 +377,194 @@ export async function toggleSongOffline(song: Song): Promise<boolean> {
     return false;
   } else {
     return await downloadSongOffline(song);
+  }
+}
+
+export async function getAllOfflinePlaylists(): Promise<OfflinePlaylistRecord[]> {
+  try {
+    return await offlineDb.playlists.toArray();
+  } catch {
+    return [];
+  }
+}
+
+export async function getOfflinePlaylistTracks(playlistId: string): Promise<Song[]> {
+  try {
+    const pl = await offlineDb.playlists.get(String(playlistId));
+    if (!pl || !pl.songIds || pl.songIds.length === 0) return [];
+
+    const tracks: Song[] = [];
+    for (const songId of pl.songIds) {
+      const record = await offlineDb.tracks.get(String(songId));
+      if (record && record.song) {
+        if (record.audioUrl && record.audioBlob) {
+          cacheBlobForUrls(record.audioUrl, record.audioBlob);
+        }
+        if (record.coverUrl && record.coverBlob) {
+          cacheBlobForUrls(record.coverUrl, record.coverBlob);
+        }
+        tracks.push(record.song);
+      }
+    }
+    return tracks;
+  } catch (err) {
+    console.warn('[OfflineDB] Error obteniendo pistas de playlist offline:', err);
+    return [];
+  }
+}
+
+export async function syncPlaylistOffline(
+  playlist: { id: string | number; name: string; color?: string },
+  songs: Song[]
+): Promise<boolean> {
+  const pId = String(playlist.id);
+  if (playlistSyncProgressSnapshot.has(pId)) return false;
+
+  const total = songs.length;
+  if (total === 0) return false;
+
+  playlistSyncProgressSnapshot.set(pId, { current: 0, total });
+  notify();
+
+  setNotice(
+    {
+      status: 'downloading',
+      title: `Descargando playlist...`,
+      subtitle: `${playlist.name} (0/${total})`,
+    },
+    0
+  );
+
+  let current = 0;
+  try {
+    for (const song of songs) {
+      const songId = String(song.id);
+      if (!offlineIdsSnapshot.has(songId)) {
+        await downloadSongOffline(song, true);
+      }
+      current++;
+      playlistSyncProgressSnapshot.set(pId, { current, total });
+      setNotice(
+        {
+          status: 'downloading',
+          title: `Sincronizando ${playlist.name}...`,
+          subtitle: `${current}/${total} canciones descargadas`,
+        },
+        0
+      );
+      notify();
+    }
+
+    await offlineDb.playlists.put({
+      id: pId,
+      name: playlist.name,
+      color: playlist.color,
+      songIds: songs.map((s) => String(s.id)),
+      syncedAt: Date.now(),
+    });
+
+    offlinePlaylistIdsSnapshot.add(pId);
+    setNotice({
+      status: 'completed',
+      title: '¡Playlist disponible sin conexión!',
+      subtitle: `${playlist.name} (${total} canciones)`,
+    });
+    return true;
+  } catch (err) {
+    console.error(`[OfflineDB] Error sincronizando playlist ${playlist.name}:`, err);
+    setNotice({
+      status: 'error',
+      title: 'Error al sincronizar playlist',
+      subtitle: playlist.name,
+    });
+    return false;
+  } finally {
+    playlistSyncProgressSnapshot.delete(pId);
+    notify();
+  }
+}
+
+export async function removePlaylistOffline(
+  playlistId: string | number,
+  deleteSongs = false
+): Promise<void> {
+  const pId = String(playlistId);
+  try {
+    const pl = await offlineDb.playlists.get(pId);
+    await offlineDb.playlists.delete(pId);
+    offlinePlaylistIdsSnapshot.delete(pId);
+
+    if (deleteSongs && pl?.songIds) {
+      const allOtherPlaylists = await offlineDb.playlists.toArray();
+      const otherSongIds = new Set(allOtherPlaylists.flatMap((p) => p.songIds));
+
+      for (const songId of pl.songIds) {
+        if (!otherSongIds.has(songId)) {
+          await removeSongOffline(songId);
+        }
+      }
+    }
+
+    setNotice({
+      status: 'removed',
+      title: 'Playlist quitada de sin conexión',
+      subtitle: pl?.name || '',
+    });
+  } catch (err) {
+    console.error('[OfflineDB] Error eliminando playlist offline:', err);
+  } finally {
+    notify();
+  }
+}
+
+export async function syncAlbumOffline(
+  albumName: string,
+  songs: Song[]
+): Promise<boolean> {
+  const total = songs.length;
+  if (total === 0) return false;
+
+  setNotice(
+    {
+      status: 'downloading',
+      title: `Descargando álbum...`,
+      subtitle: `${albumName} (0/${total})`,
+    },
+    0
+  );
+
+  let current = 0;
+  try {
+    for (const song of songs) {
+      const songId = String(song.id);
+      if (!offlineIdsSnapshot.has(songId)) {
+        await downloadSongOffline(song, true);
+      }
+      current++;
+      setNotice(
+        {
+          status: 'downloading',
+          title: `Descargando ${albumName}...`,
+          subtitle: `${current}/${total} canciones`,
+        },
+        0
+      );
+    }
+
+    setNotice({
+      status: 'completed',
+      title: '¡Álbum disponible sin conexión!',
+      subtitle: `${albumName} (${total} canciones)`,
+    });
+    return true;
+  } catch (err) {
+    console.error(`[OfflineDB] Error descargando álbum ${albumName}:`, err);
+    setNotice({
+      status: 'error',
+      title: 'Error al descargar álbum',
+      subtitle: albumName,
+    });
+    return false;
   }
 }
 

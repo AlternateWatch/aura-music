@@ -26,6 +26,8 @@ Copy,
   Moon,
   MoreHorizontal,
   SlidersHorizontal,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -64,7 +66,23 @@ import { AuthForm } from "./hooks/AuthSection";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useWindowsThumbbar } from "./hooks/useWindowsThumbbar";
 import { prefetchAudio } from "./utils/audioCache";
-import { getAllOfflineSongs, getCachedOfflineBlobUrl, subscribeOfflineStore, getOfflineIdsSnapshot, getDownloadNoticeSnapshot } from "./utils/offlineDb";
+import {
+  getAllOfflineSongs,
+  getCachedOfflineBlobUrl,
+  subscribeOfflineStore,
+  getOfflineIdsSnapshot,
+  getDownloadNoticeSnapshot,
+  getOfflinePlaylistIdsSnapshot,
+  getPlaylistSyncProgressSnapshot,
+  isPlaylistOffline,
+  isPlaylistSyncing,
+  getAllOfflinePlaylists,
+  getOfflinePlaylistTracks,
+  syncPlaylistOffline,
+  removePlaylistOffline,
+  syncAlbumOffline,
+  downloadSongOffline,
+} from "./utils/offlineDb";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -1020,6 +1038,8 @@ useEffect(() => {
 
   const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
   const downloadNotice = useSyncExternalStore(subscribeOfflineStore, getDownloadNoticeSnapshot, getDownloadNoticeSnapshot);
+  const offlinePlaylistIds = useSyncExternalStore(subscribeOfflineStore, getOfflinePlaylistIdsSnapshot, getOfflinePlaylistIdsSnapshot);
+  const playlistSyncProgress = useSyncExternalStore(subscribeOfflineStore, getPlaylistSyncProgressSnapshot, getPlaylistSyncProgressSnapshot);
 
   const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 4500) => {
     const controller = new AbortController();
@@ -1032,6 +1052,19 @@ useEffect(() => {
   };
 
   const applyOfflineFallback = async () => {
+    // Si estamos en una playlist específica y está guardada offline, cargamos sus canciones
+    if (activePlaylistId !== 'all' && activePlaylistId !== 'liked' && activePlaylistId !== 'offline') {
+      const playlistTracks = await getOfflinePlaylistTracks(activePlaylistId);
+      if (playlistTracks.length > 0) {
+        setSongs(playlistTracks);
+        if (!currentSong || !playlistTracks.some(s => String(s.id) === String(currentSong.id))) {
+          setCurrentSong(playlistTracks[0]);
+          setHeroImageError(false);
+        }
+        return;
+      }
+    }
+
     const offlineTracks = await getAllOfflineSongs();
     setSongs(offlineTracks);
     if (offlineTracks.length > 0 && (!currentSong || !offlineTracks.some(s => String(s.id) === String(currentSong.id)))) {
@@ -1099,13 +1132,53 @@ useEffect(() => {
 
   const loadPlaylists = async () => {
     const activeToken = token || localStorage.getItem('aura_token');
-    if (!activeToken || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (!activeToken || isBrowserOffline) {
+      const offlinePlaylists = await getAllOfflinePlaylists();
+      if (offlinePlaylists.length > 0) {
+        setPlaylists(offlinePlaylists.map(p => ({
+          id: p.id,
+          name: p.name,
+          songIds: p.songIds,
+          color: p.color || '#a855f7',
+          ownerId: '',
+          createdAt: new Date(p.syncedAt).toISOString()
+        })));
+      }
+      return;
+    }
     try {
       const res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 4500);
-      if (!res.ok) return;
+      if (!res.ok) {
+        const offlinePlaylists = await getAllOfflinePlaylists();
+        if (offlinePlaylists.length > 0) {
+          setPlaylists(offlinePlaylists.map(p => ({
+            id: p.id,
+            name: p.name,
+            songIds: p.songIds,
+            color: p.color || '#a855f7',
+            ownerId: '',
+            createdAt: new Date(p.syncedAt).toISOString()
+          })));
+        }
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) setPlaylists(data);
-    } catch (e) { console.error("Playlists failed"); }
+    } catch (e) {
+      console.error("Playlists failed, loading offline playlists:", e);
+      const offlinePlaylists = await getAllOfflinePlaylists();
+      if (offlinePlaylists.length > 0) {
+        setPlaylists(offlinePlaylists.map(p => ({
+          id: p.id,
+          name: p.name,
+          songIds: p.songIds,
+          color: p.color || '#a855f7',
+          ownerId: '',
+          createdAt: new Date(p.syncedAt).toISOString()
+        })));
+      }
+    }
   };
 
   const loadLastTrack = async () => {
@@ -2038,6 +2111,12 @@ useEffect(() => {
   const handleAddToPlaylist = async (songId: string, playlistId: string) => {
     const activeToken = token || localStorage.getItem('aura_token');
     await fetch(`${API_BASE}/api/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` }, body: JSON.stringify({ trackId: songId }) });
+    if (isPlaylistOffline(playlistId)) {
+      const songObj = songs.find(s => String(s.id) === String(songId));
+      if (songObj) {
+        void downloadSongOffline(songObj);
+      }
+    }
   };
 
   // --- MEMORIZACIÓN DE LA BIBLIOTECA (ORDENADA POR PISTA) ---
@@ -3051,6 +3130,9 @@ transition={{
                         <span className="truncate">
                           {p.name}
                         </span>
+                        {offlinePlaylistIds.has(p.id.toString()) && (
+                          <Download size={11} className="text-emerald-400 shrink-0 ml-auto" title="Disponible sin conexión" />
+                        )}
                       </div>
                     </button>
 
@@ -3408,8 +3490,13 @@ transition={{
                         </li>
                         {playlists.map(p => (
                             <li key={p.id} className="group flex items-center justify-between cursor-pointer">
-                                <span onClick={() => { setActivePlaylistId(p.id.toString()); setShowModeration(false); setSelectedAlbumName(null); }} className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary" : "text-white/50 hover:text-white"}`}>{p.name}</span>
-                                <Trash2 size={12} className="opacity-0 group-hover:opacity-40 hover:!opacity-100 text-red-500 transition-all" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }} />
+                                <div className="flex items-center gap-2 min-w-0" onClick={() => { setActivePlaylistId(p.id.toString()); setShowModeration(false); setSelectedAlbumName(null); }}>
+                                  <span className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary" : "text-white/50 hover:text-white"}`}>{p.name}</span>
+                                  {offlinePlaylistIds.has(p.id.toString()) && (
+                                    <Download size={11} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
+                                  )}
+                                </div>
+                                <Trash2 size={12} className="opacity-0 group-hover:opacity-40 hover:!opacity-100 text-red-500 transition-all shrink-0 ml-2" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }} />
                             </li>
                         ))}
                       </ul>
@@ -3639,55 +3726,164 @@ transition={{
                 <section>
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-white/5 pb-4 text-white gap-4">
                         <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 w-full">
-                            <h2 className="text-[10px] md:text-[11px] uppercase tracking-[0.3em] md:tracking-[0.4em] font-bold text-white/40">{isMinigameActive ? "RECON MINIGAME - CLICK TO GUESS" : (selectedAlbumName ? `ALBUM: ${selectedAlbumName.toUpperCase()}` : (showModeration ? "PENDING QUEUE" : (activePlaylistId === 'all' ? "Global Top Tracks" : (activePlaylistId === 'liked' ? "Favorite Tracks" : "Playlist Stream"))))}</h2>
-                            {!selectedAlbumName && !isMinigameActive && (
-                                <div className="flex flex-wrap items-center gap-3">
-                                    {showModeration && userRole === 'admin' && (
-                                      <div className="flex flex-col gap-3 w-full max-w-[200px]">
-                                        <button
-                                          onClick={handlePurgeCovers}
-                                          disabled={isPurging}
-                                          className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
-                                            isPurging
-                                              ? 'bg-white/20 text-white/40 cursor-not-allowed'
-                                              : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
-                                          }`}
-                                        >
-                                          {isPurging ? (
-                                            <>
-                                              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                              Purging...
-                                            </>
-                                          ) : (
-                                            <>
-                                              <AlertTriangle size={10}/> Purge Album Covers
-                                            </>
+                            {(() => {
+                              const currentPlaylist = playlists.find(p => p.id.toString() === activePlaylistId);
+                              return (
+                                <>
+                                  <h2 className="text-[10px] md:text-[11px] uppercase tracking-[0.3em] md:tracking-[0.4em] font-bold text-white/40">
+                                    {isMinigameActive
+                                      ? "RECON MINIGAME - CLICK TO GUESS"
+                                      : selectedAlbumName
+                                      ? `ALBUM: ${selectedAlbumName.toUpperCase()}`
+                                      : showModeration
+                                      ? "PENDING QUEUE"
+                                      : activePlaylistId === 'all'
+                                      ? "Global Top Tracks"
+                                      : activePlaylistId === 'liked'
+                                      ? "Favorite Tracks"
+                                      : activePlaylistId === 'offline'
+                                      ? "Offline Tracks"
+                                      : currentPlaylist
+                                      ? `Playlist: ${currentPlaylist.name.toUpperCase()}`
+                                      : "Playlist Stream"}
+                                  </h2>
+                                  {!selectedAlbumName && !isMinigameActive && (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                      {currentPlaylist && !showModeration && (
+                                        (() => {
+                                          const plDownloaded = songs.filter(s => offlineIds.has(String(s.id))).length;
+                                          const isPlSyncing = isPlaylistSyncing(activePlaylistId);
+                                          const isPlOffline = isPlaylistOffline(activePlaylistId);
+                                          const syncProgress = playlistSyncProgress.get(activePlaylistId);
+                                          const allDownloaded = songs.length > 0 && plDownloaded === songs.length;
+
+                                          return (
+                                            <button
+                                              onClick={() => {
+                                                if (isPlSyncing) return;
+                                                if (isPlOffline && allDownloaded) {
+                                                  if (confirm(`¿Quitar "${currentPlaylist.name}" del modo sin conexión?`)) {
+                                                    void removePlaylistOffline(currentPlaylist.id);
+                                                  }
+                                                } else {
+                                                  void syncPlaylistOffline(currentPlaylist, songs);
+                                                }
+                                              }}
+                                              disabled={isPlSyncing || songs.length === 0}
+                                              title={allDownloaded ? "Playlist sincronizada sin conexión. Clic para quitar." : "Descargar playlist completa"}
+                                              className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                                                isPlSyncing
+                                                  ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/40'
+                                                  : isPlOffline && allDownloaded
+                                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                                                  : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/15 hover:text-white'
+                                              }`}
+                                            >
+                                              {isPlSyncing ? (
+                                                <>
+                                                  <Loader2 size={11} className="animate-spin text-brand-primary" />
+                                                  <span>Sincronizando ({syncProgress?.current || 0}/{syncProgress?.total || songs.length})</span>
+                                                </>
+                                              ) : isPlOffline && allDownloaded ? (
+                                                <>
+                                                  <CheckCircle2 size={11} className="text-emerald-400" />
+                                                  <span>Descargada ({songs.length})</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Download size={11} />
+                                                  <span>Descargar playlist ({plDownloaded}/{songs.length})</span>
+                                                </>
+                                              )}
+                                            </button>
+                                          );
+                                        })()
+                                      )}
+                                      {showModeration && userRole === 'admin' && (
+                                        <div className="flex flex-col gap-3 w-full max-w-[200px]">
+                                          <button
+                                            onClick={handlePurgeCovers}
+                                            disabled={isPurging}
+                                            className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
+                                              isPurging
+                                                ? 'bg-white/20 text-white/40 cursor-not-allowed'
+                                                : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
+                                            }`}
+                                          >
+                                            {isPurging ? (
+                                              <>
+                                                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                Purging...
+                                              </>
+                                            ) : (
+                                              <>
+                                                <AlertTriangle size={10}/> Purge Album Covers
+                                              </>
+                                            )}
+                                          </button>
+                                          {purgeStats && !isPurging && (
+                                            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
+                                              <p>Albums: {purgeStats.albums}</p>
+                                              <p>Tracks: {purgeStats.tracks}</p>
+                                              <p>Files: {purgeStats.files}</p>
+                                            </div>
                                           )}
-                                        </button>
-                                        {purgeStats && !isPurging && (
-                                          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
-                                            <p>Albums: {purgeStats.albums}</p>
-                                            <p>Tracks: {purgeStats.tracks}</p>
-                                            <p>Files: {purgeStats.files}</p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                    {!showModeration && (
-                                      <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
-                                        {(['all', 'mp3', 'flac'] as const).map(f => (<button key={f} onClick={() => setFormatFilter(f)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${formatFilter === f ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white'}`}>{f}</button>))}
-                                      </div>
-                                    )}
-                                    {!showModeration && (
-                                      <div className={`flex items-center gap-2 p-1 rounded-full border border-white/5 bg-white/5`}>
-                                        <div className="px-2 text-white/20"><ArrowUpDown size={12}/></div>
-                                        {(['first', 'name', 'album', 'artist'] as const).map(s => (<button key={s} onClick={() => setSortBy(s)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${sortBy === s ? 'bg-white text-black' : 'text-white/30 hover:text-white'}`}>{s}</button>))}
-                                      </div>
-                                    )}
-                                </div>
-                            )}
+                                        </div>
+                                      )}
+                                      {!showModeration && (
+                                        <div className={`flex p-1 rounded-full border border-white/5 bg-white/5`}>
+                                          {(['all', 'mp3', 'flac'] as const).map(f => (<button key={f} onClick={() => setFormatFilter(f)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${formatFilter === f ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white'}`}>{f}</button>))}
+                                        </div>
+                                      )}
+                                      {!showModeration && (
+                                        <div className={`flex items-center gap-2 p-1 rounded-full border border-white/5 bg-white/5`}>
+                                          <div className="px-2 text-white/20"><ArrowUpDown size={12}/></div>
+                                          {(['first', 'name', 'album', 'artist'] as const).map(s => (<button key={s} onClick={() => setSortBy(s)} className={`px-3 md:px-4 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all cursor-pointer ${sortBy === s ? 'bg-white text-black' : 'text-white/30 hover:text-white'}`}>{s}</button>))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                         </div>
-                        {selectedAlbumName && <button onClick={() => setSelectedAlbumName(null)} className="cursor-pointer text-[10px] font-bold text-brand-primary uppercase tracking-widest">Back</button>}
+                        {selectedAlbumName && (
+                          <div className="flex items-center gap-3">
+                            {(() => {
+                              const albumSongs = songs.filter(s => s.album === selectedAlbumName);
+                              const albumDownloaded = albumSongs.filter(s => offlineIds.has(String(s.id))).length;
+                              const isAlbumAll = albumSongs.length > 0 && albumDownloaded === albumSongs.length;
+                              return (
+                                <button
+                                  onClick={() => {
+                                    if (!isAlbumAll && albumSongs.length > 0) {
+                                      void syncAlbumOffline(selectedAlbumName, albumSongs);
+                                    }
+                                  }}
+                                  disabled={albumSongs.length === 0}
+                                  className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                                    isAlbumAll
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/15 hover:text-white'
+                                  }`}
+                                >
+                                  {isAlbumAll ? (
+                                    <>
+                                      <CheckCircle2 size={11} className="text-emerald-400" />
+                                      <span>Álbum offline ({albumSongs.length})</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download size={11} />
+                                      <span>Descargar álbum ({albumDownloaded}/{albumSongs.length})</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
+                            <button onClick={() => setSelectedAlbumName(null)} className="cursor-pointer text-[10px] font-bold text-brand-primary uppercase tracking-widest">Back</button>
+                          </div>
+                        )}
                     </div>
 
                     {/* RESPONSIVE GRID */}
