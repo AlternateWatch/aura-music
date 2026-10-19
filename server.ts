@@ -27,6 +27,7 @@ import axios from "axios";
 import config from './config.json' assert { type: 'json' };
 
 import { isB2Configured, uploadToB2, getB2ObjectStream, deleteFromB2 } from './b2Storage.js';
+import { startDailyCacheScheduler, cacheTop100Tracks } from './cacheService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2459,6 +2460,19 @@ app.use('/uploads', async (req, res) => {
     res.status(404).send('Asset not found');
 });
 
+// Endpoint administrativo para forzar la sincronización del caché del Top 100
+app.post('/api/admin/cache-top-tracks', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+    try {
+        const stats = await cacheTop100Tracks(pool, uploadDir);
+        res.json({ success: true, stats });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || /\.(jpg|jpeg|png|webp|gif|mp3|flac|wav|ogg|m4a)$/i.test(req.path)) {
@@ -2471,6 +2485,7 @@ app.get('*', (req, res) => {
 httpServer.listen(PORT, () => {
     console.log(`🎵 Aura running on ${PORT} (uploads: ${uploadDir})`);
     healMissingCoversOnStartup();
+    startDailyCacheScheduler(pool, uploadDir);
 });
 
 

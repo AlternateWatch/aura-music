@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import path from 'path';
+import fs from 'fs';
 
 // Determina el tipo MIME según la extensión para asegurar reproducción correcta
 export const getMimeType = (filename: string): string => {
@@ -126,6 +127,44 @@ export const getB2ObjectStream = async (
             return null;
         }
         throw err;
+    }
+};
+
+/**
+ * Descarga un archivo desde Backblaze B2 y lo guarda en disco local (usado para caché)
+ */
+export const downloadB2FileToDisk = async (key: string, destinationPath: string): Promise<boolean> => {
+    if (!isB2Configured()) return false;
+    const client = getB2Client();
+    try {
+        const command = new GetObjectCommand({
+            Bucket: getBucketName(),
+            Key: key
+        });
+        const response = await client.send(command);
+        if (!response.Body) return false;
+
+        const dir = path.dirname(destinationPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+
+        const tempPath = `${destinationPath}.tmp_${Date.now()}`;
+        const writeStream = fs.createWriteStream(tempPath);
+        const readable = response.Body as Readable;
+
+        await new Promise<void>((resolve, reject) => {
+            readable.pipe(writeStream);
+            writeStream.on('finish', () => resolve());
+            writeStream.on('error', (err) => reject(err));
+            readable.on('error', (err) => reject(err));
+        });
+
+        fs.renameSync(tempPath, destinationPath);
+        return true;
+    } catch (err: any) {
+        console.warn(`Error al descargar ${key} de B2 a disco local:`, err.message);
+        return false;
     }
 };
 
