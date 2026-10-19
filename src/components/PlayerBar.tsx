@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Play,
   Pause,
@@ -79,6 +79,67 @@ const [localProgress, setLocalProgress] = useState(currentTime);
 const [isDragging, setIsDragging] = useState(false);
 const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+
+  const handleMobileTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+  };
+
+  const handleMobileTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    // Solo desplazamos visualmente si el gesto es claramente horizontal
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) < 120) {
+      setSwipeOffset(deltaX * 0.4);
+    }
+  };
+
+  const handleMobileTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const deltaTime = Date.now() - touchStartRef.current.time;
+    touchStartRef.current = null;
+    setSwipeOffset(0);
+
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    // 1. Gesto vertical hacia arriba: abrir Full Player
+    if (deltaY < -40 && absY > absX * 1.1 && deltaTime < 600) {
+      hapticImpact("light");
+      onOpenFullPlayer();
+      return;
+    }
+
+    // 2. Gesto horizontal: cambiar canción
+    if (absX > 45 && absX > absY * 1.1 && deltaTime < 600) {
+      if (deltaX < 0) {
+        // Swipe hacia la izquierda -> Siguiente
+        hapticImpact("medium");
+        onNext();
+      } else {
+        // Swipe hacia la derecha -> Anterior
+        hapticImpact("medium");
+        onPrevious();
+      }
+      return;
+    }
+
+    // 3. Toque simple (tap sin desplazamiento): abrir Full Player
+    if (absX < 12 && absY < 12) {
+      onOpenFullPlayer();
+    }
+  };
 
   const formatTime = (time: number) => {
     if (!Number.isFinite(time) || time < 0) return "0:00";
@@ -138,6 +199,9 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           ========================================================= */}
       <div
         onClick={onOpenFullPlayer}
+        onTouchStart={handleMobileTouchStart}
+        onTouchMove={handleMobileTouchMove}
+        onTouchEnd={handleMobileTouchEnd}
         style={{
           WebkitTapHighlightColor: "transparent",
           WebkitTouchCallout: "none",
@@ -146,7 +210,13 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
       >
         {/* ROW 1: Art, Info, and Controls */}
         <div className="flex items-center justify-between w-full min-w-0 gap-3 pointer-events-auto">
-          <div className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none">
+          <div
+            style={{
+              transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : undefined,
+              transition: swipeOffset === 0 ? "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)" : "none",
+            }}
+            className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none will-change-transform"
+          >
             <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-lg">
               <img
                 src={resolvedCoverUrl || currentSong.coverUrl}

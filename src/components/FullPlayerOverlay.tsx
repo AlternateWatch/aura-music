@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { 
   X, Play, Pause, SkipBack, SkipForward, 
@@ -95,6 +95,75 @@ const liveCurrentTime = useAudioPlaybackTime(
 );
 const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
+  const coverTouchRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const [coverSwipeOffset, setCoverSwipeOffset] = useState(0);
+
+  const handleCoverTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    coverTouchRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+  };
+
+  const handleCoverTouchMove = (e: React.TouchEvent) => {
+    if (!coverTouchRef.current) return;
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - coverTouchRef.current.x;
+    const deltaY = touch.clientY - coverTouchRef.current.y;
+    // Si es predominantemente horizontal, desplazamos la portada sutilmente
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) < 140) {
+      setCoverSwipeOffset(deltaX * 0.45);
+    }
+  };
+
+  const handleCoverTouchEnd = (e: React.TouchEvent) => {
+    if (!coverTouchRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - coverTouchRef.current.x;
+    const deltaY = touch.clientY - coverTouchRef.current.y;
+    const deltaTime = Date.now() - coverTouchRef.current.time;
+    coverTouchRef.current = null;
+    setCoverSwipeOffset(0);
+
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    // Gesto hacia abajo: cerrar reproductor a pantalla completa
+    if (deltaY > 60 && absY > absX * 1.1 && deltaTime < 600) {
+      hapticImpact("light");
+      onClose();
+      return;
+    }
+
+    // Gesto horizontal: cambiar canción
+    if (absX > 50 && absX > absY * 1.1 && deltaTime < 600) {
+      if (deltaX < 0) {
+        hapticImpact("medium");
+        onNext();
+      } else {
+        hapticImpact("medium");
+        onPrevious();
+      }
+    }
+  };
+
+  const headerTouchRef = useRef<{ y: number; time: number } | null>(null);
+  const handleHeaderTouchStart = (e: React.TouchEvent) => {
+    headerTouchRef.current = { y: e.touches[0].clientY, time: Date.now() };
+  };
+  const handleHeaderTouchEnd = (e: React.TouchEvent) => {
+    if (!headerTouchRef.current) return;
+    const deltaY = e.changedTouches[0].clientY - headerTouchRef.current.y;
+    const deltaTime = Date.now() - headerTouchRef.current.time;
+    headerTouchRef.current = null;
+    if (deltaY > 40 && deltaTime < 600) {
+      hapticImpact("light");
+      onClose();
+    }
+  };
+
   if (!isOpen || !currentSong) return null;
 
   const progress = (liveCurrentTime / (duration || 1)) * 100;
@@ -138,7 +207,12 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
       <div className="flex flex-col min-h-full w-full relative z-10">
         
         {/* Header Area */}
-        <div className="h-20 md:h-24 flex items-center justify-between px-6 md:px-10 shrink-0 mt-4 md:mt-0">
+        {/* Header Area (deslizar hacia abajo para cerrar) */}
+        <div 
+          onTouchStart={handleHeaderTouchStart}
+          onTouchEnd={handleHeaderTouchEnd}
+          className="h-20 md:h-24 flex items-center justify-between px-6 md:px-10 shrink-0 mt-4 md:mt-0 select-none cursor-pointer"
+        >
           <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-full transition-all text-white/40 hover:text-white cursor-pointer active:scale-90 outline-none">
             <ChevronDown size={32} className="md:w-9 md:h-9" />
           </button>
@@ -162,20 +236,27 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
         <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-10 w-full py-6 md:py-10">
           <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-8 md:gap-16">
             
-            {/* Big Cover Art (SOPORTE PARA VÍDEO EN BUCLE / PORTADA ANIMADA) */}
+            {/* Big Cover Art (SOPORTE PARA SWIPE HORIZONTAL SIGUIENTE/ANTERIOR Y SWIPE DOWN CERRAR) */}
             <motion.div
-  initial={{ opacity: 0 }}
-  animate={{
-    opacity: 1,
-    scale: isPlaying ? 1 : 0.94,
-    rotate: isPlaying ? 0 : -1,
-  }}
-  transition={{
-    opacity: { duration: 0.12 },
-    scale: { duration: 0.8, ease: "easeInOut" },
-    rotate: { duration: 0.8, ease: "easeInOut" },
-  }}
-              className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0 bg-black"
+              onTouchStart={handleCoverTouchStart}
+              onTouchMove={handleCoverTouchMove}
+              onTouchEnd={handleCoverTouchEnd}
+              style={{
+                transform: coverSwipeOffset !== 0 ? `translateX(${coverSwipeOffset}px)` : undefined,
+                transition: coverSwipeOffset === 0 ? "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)" : "none",
+              }}
+              initial={{ opacity: 0 }}
+              animate={{
+                opacity: 1,
+                scale: isPlaying ? 1 : 0.94,
+                rotate: isPlaying ? 0 : -1,
+              }}
+              transition={{
+                opacity: { duration: 0.12 },
+                scale: { duration: 0.8, ease: "easeInOut" },
+                rotate: { duration: 0.8, ease: "easeInOut" },
+              }}
+              className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0 bg-black cursor-grab active:cursor-grabbing will-change-transform"
             >
               {animUrl ? (
                 isVideo ? (
