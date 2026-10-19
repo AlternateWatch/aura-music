@@ -325,6 +325,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState(""); 
   const [activeQueue, setActiveQueue] = useState<Song[]>([]);
   const [manualQueueIds, setManualQueueIds] = useState<string[]>([]);
+  const [radioQueueIds, setRadioQueueIds] = useState<Set<string>>(new Set());
   const [activeTheme, setActiveTheme] = useState(localStorage.getItem('aura_theme') || 'dark');
   const [customBg, setCustomBg] = useState(user?.custom_bg_path || null);
   const [isSocialOpen, setIsSocialOpen] = useState(false);
@@ -1409,10 +1410,17 @@ useEffect(() => {
         }
         setActiveQueue(finalQueue);
         setManualQueueIds([]);
+        setRadioQueueIds(new Set());
       }
     } else if (preserveQueue) {
-      // Si avanzamos a una canción que estaba en la cola manual, la removemos de la lista de pendientes
+      // Si avanzamos a una canción que estaba en la cola manual o radio, la removemos de la lista de pendientes
       setManualQueueIds(prev => prev.filter(id => id !== song.id));
+      setRadioQueueIds(prev => {
+        if (!prev.has(song.id)) return prev;
+        const next = new Set(prev);
+        next.delete(song.id);
+        return next;
+      });
     }
 
     try {
@@ -1456,6 +1464,61 @@ useEffect(() => {
     }
   };
 
+  // --- MOTOR DE RECOMENDACIÓN: RADIO INFINITA / AUTOPLAY ---
+  const generateRadioTracks = useCallback((seedSong: Song, currentPool: Song[]): Song[] => {
+    if (!songs || songs.length === 0) return [];
+
+    const existingIds = new Set([
+      seedSong.id,
+      ...currentPool.map(s => s.id),
+      ...recentlyPlayed.slice(0, 5).map(s => s.id)
+    ]);
+
+    const candidates = songs.filter(s => !existingIds.has(s.id));
+    if (candidates.length === 0) {
+      const fallback = songs.filter(s => s.id !== seedSong.id);
+      return fallback.sort(() => Math.random() - 0.5).slice(0, 8);
+    }
+
+    const seedArtistLower = (seedSong.artist || '').toLowerCase().trim();
+    const seedAlbumLower = (seedSong.album || '').toLowerCase().trim();
+    const likedSet = new Set(likedIds);
+
+    const scored = candidates.map(track => {
+      let score = 0;
+      const trackArtistLower = (track.artist || '').toLowerCase().trim();
+      const trackAlbumLower = (track.album || '').toLowerCase().trim();
+
+      // Mismo artista
+      if (trackArtistLower === seedArtistLower && seedArtistLower !== '') {
+        score += 15;
+      } else if (
+        seedArtistLower.includes(trackArtistLower) ||
+        trackArtistLower.includes(seedArtistLower)
+      ) {
+        score += 8;
+      }
+
+      // Mismo álbum
+      if (trackAlbumLower === seedAlbumLower && seedAlbumLower !== '') {
+        score += 6;
+      }
+
+      // Favoritos del usuario
+      if (likedSet.has(track.id)) {
+        score += 5;
+      }
+
+      // Toque aleatorio sutil para variedad en cada radio
+      score += Math.random() * 4;
+
+      return { track, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 10).map(s => s.track);
+  }, [songs, recentlyPlayed, likedIds]);
+
   const handleNext = async () => {
     if (blockIfGuest()) return;
     const pool = socketObj.isShuffle
@@ -1483,8 +1546,26 @@ useEffect(() => {
     }
 
     const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
+    const isAutoplay = audioSettings.autoplay?.enabled ?? true;
+    const isAtEnd = currentIndex >= pool.length - 1;
 
-    if (playbackContext === 'playlist' && currentIndex >= pool.length - 1) {
+    // Si llegamos al final de la cola y Autoplay / Radio Infinita está activo
+    if (isAtEnd && !socketObj.isLoop && currentSong && isAutoplay) {
+      const radioTracks = generateRadioTracks(currentSong, pool);
+      if (radioTracks.length > 0) {
+        const updatedQueue = [...pool, ...radioTracks];
+        setActiveQueue(updatedQueue);
+        if (socketObj.isShuffle) {
+          socketObj.setShuffledQueue(updatedQueue);
+        }
+        setRadioQueueIds(prev => new Set([...prev, ...radioTracks.map(t => t.id)]));
+        socketObj.emitCommand('update-queue', { queue: updatedQueue });
+        handlePlaySong(radioTracks[0], false, 0, true);
+        return;
+      }
+    }
+
+    if (playbackContext === 'playlist' && isAtEnd) {
       if (!socketObj.isLoop) {
         setIsPlaying(false);
         setCurrentSong(null);
@@ -1670,7 +1751,25 @@ useEffect(() => {
     if (pool.length < 2 || !currentSong) return;
 
     const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
-    if (playbackContext === 'playlist' && currentIndex >= pool.length - 1) return;
+    const isAutoplay = audioSettings.autoplay?.enabled ?? true;
+    const isAtEnd = currentIndex >= pool.length - 1;
+
+    if (isAtEnd) {
+      if (isAutoplay && !socketObj.isLoop) {
+        const radioTracks = generateRadioTracks(currentSong, pool);
+        if (radioTracks.length > 0) {
+          const updatedQueue = [...pool, ...radioTracks];
+          setActiveQueue(updatedQueue);
+          if (socketObj.isShuffle) socketObj.setShuffledQueue(updatedQueue);
+          setRadioQueueIds(prev => new Set([...prev, ...radioTracks.map(t => t.id)]));
+          socketObj.emitCommand('update-queue', { queue: updatedQueue });
+          commitCrossfade();
+          handlePlaySong(radioTracks[0], false, 0, true);
+          return;
+        }
+      }
+      if (playbackContext === 'playlist') return;
+    }
 
     const nextSong = currentIndex === -1 ? pool[0] : pool[(currentIndex + 1) % pool.length];
     if (!nextSong || nextSong.id === currentSong.id) return;
@@ -3911,6 +4010,7 @@ getCurrentTime={audioObj.getCurrentTime}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
         activeTheme={activeTheme}
+        radioQueueIds={radioQueueIds}
       />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isSleepTimerOpen && <LazySleepTimerOverlay
         isOpen={isSleepTimerOpen}

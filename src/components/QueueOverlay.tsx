@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, Reorder, useDragControls } from 'motion/react';
-import { X, ListMusic, Play, Disc, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, ListMusic, Play, Disc, GripVertical, ChevronUp, ChevronDown, Radio } from 'lucide-react';
 import { type Song } from '../constants';
 
 interface QueueOverlayProps {
@@ -12,18 +12,20 @@ interface QueueOverlayProps {
   onReorderQueue: (queue: Song[]) => void;
   isShuffle: boolean;
   activeTheme: string;
+  radioQueueIds?: Set<string>;
 }
 
 interface QueueItemProps {
   song: Song;
   idx: number;
   total: number;
+  isRadio?: boolean;
   onPlay: () => void;
   onMove: (index: number, direction: 'up' | 'down') => void;
 }
 
 // Componente individual con soporte de arrastre por puntero (invulnerable a bloqueos de Tauri)
-const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, onPlay, onMove }) => {
+const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, isRadio, onPlay, onMove }) => {
   const dragControls = useDragControls();
 
   return (
@@ -99,9 +101,16 @@ const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, onPlay, onMove 
         onClick={onPlay} 
         className="overflow-hidden flex-1 cursor-pointer"
       >
-        <p className="text-sm font-bold text-white truncate group-hover:text-brand-primary transition-colors">
-          {song.title}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-bold text-white truncate group-hover:text-brand-primary transition-colors">
+            {song.title}
+          </p>
+          {isRadio && (
+            <span className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider text-brand-primary bg-brand-primary/10 border border-brand-primary/20 px-1.5 py-0.5 rounded-full shrink-0">
+              <Radio size={9} /> Radio
+            </span>
+          )}
+        </div>
         <p className="text-[10px] font-bold uppercase text-white/30 tracking-wider truncate">
           {song.artist}
         </p>
@@ -123,7 +132,8 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
   onPlayFromQueue,
   onReorderQueue,
   isShuffle,
-  activeTheme
+  activeTheme,
+  radioQueueIds,
 }) => {
   if (!isOpen) return null;
 
@@ -226,16 +236,35 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
               onReorder={handleReorderUpcoming}
               className="space-y-2"
             >
-              {upcoming.map((song, idx) => (
-                <QueueItem
-                  key={song.id}
-                  song={song}
-                  idx={idx}
-                  total={upcoming.length}
-                  onPlay={() => onPlayFromQueue(song)}
-                  onMove={handleMove}
-                />
-              ))}
+              {upcoming.map((song, idx) => {
+                const isRadio = Boolean(radioQueueIds?.has(song.id));
+                const prevWasRadio = idx > 0 && Boolean(radioQueueIds?.has(upcoming[idx - 1].id));
+                const showRadioHeader = isRadio && !prevWasRadio;
+
+                return (
+                  <React.Fragment key={song.id}>
+                    {showRadioHeader && (
+                      <div className="pt-5 pb-2 px-2 flex items-center justify-between border-t border-white/5 mt-3 mb-1">
+                        <div className="flex items-center gap-2">
+                          <Radio size={13} className="text-brand-primary animate-pulse" />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-brand-primary">
+                            Radio Infinita · Autoplay
+                          </span>
+                        </div>
+                        <span className="text-[9px] text-white/30 font-medium tracking-wider">Recomendadas</span>
+                      </div>
+                    )}
+                    <QueueItem
+                      song={song}
+                      idx={idx}
+                      total={upcoming.length}
+                      isRadio={isRadio}
+                      onPlay={() => onPlayFromQueue(song)}
+                      onMove={handleMove}
+                    />
+                  </React.Fragment>
+                );
+              })}
             </Reorder.Group>
           ) : (
             <div className="py-12 flex flex-col items-center justify-center opacity-20 grayscale">

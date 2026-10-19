@@ -32,6 +32,9 @@ export interface AudioSettings {
   visualizer: {
     enabled: boolean;
   };
+  autoplay?: {
+    enabled: boolean;
+  };
 }
 
 export const NORMALIZER_TARGETS = [
@@ -51,6 +54,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   },
   crossfade: { enabled: false, duration: 5 },
   visualizer: { enabled: true },
+  autoplay: { enabled: true },
 };
 
 const KEY = "aura_audio_v2";
@@ -89,6 +93,9 @@ export function loadAudioSettings(): AudioSettings {
     }
     if (p?.visualizer) {
       base.visualizer.enabled = !!p.visualizer.enabled;
+    }
+    if (p?.autoplay !== undefined) {
+      base.autoplay = { enabled: p.autoplay.enabled !== false };
     }
   } catch {
     /* ajustes corruptos: valores por defecto */

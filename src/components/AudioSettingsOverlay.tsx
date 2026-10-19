@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
-import { X, SlidersHorizontal, Activity, RotateCcw } from "lucide-react";
+import { X, SlidersHorizontal, Activity, RotateCcw, Radio } from "lucide-react";
 import {
   AudioSettings,
   NORMALIZER_TARGETS,
@@ -403,6 +403,25 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                   on={settings.visualizer.enabled}
                   onClick={() => onChange({ ...settings, visualizer: { ...settings.visualizer, enabled: !settings.visualizer.enabled } })}
                   label="Visualizer"
+                />
+              </div>
+
+              {/* AUTOPLAY / RADIO INFINITA */}
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Radio className="text-brand-primary" size={18} />
+                  <div>
+                    <p className="text-sm font-bold text-white leading-none">Autoplay / Radio Infinita</p>
+                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Canciones similares sin parar al terminar la cola</p>
+                  </div>
+                </div>
+                <Toggle
+                  on={settings.autoplay?.enabled ?? true}
+                  onClick={() => onChange({
+                    ...settings,
+                    autoplay: { enabled: !(settings.autoplay?.enabled ?? true) }
+                  })}
+                  label="Autoplay"
                 />
               </div>
             </div>
