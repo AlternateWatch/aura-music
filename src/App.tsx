@@ -50,9 +50,11 @@ const LazyLyricsOverlay = lazy(() => import("./components/LyricsOverlay").then(m
 const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => ({ default: m.MusicUpload })));
 const LazySocialSidebar = lazy(() => import("./hooks/SocialSidebar").then(m => ({ default: m.SocialSidebar })));
 const LazyWrappedOverlay = lazy(() => import("./components/WrappedOverlay").then(m => ({ default: m.WrappedOverlay })));
+const LazySleepTimerOverlay = lazy(() => import("./components/SleepTimerOverlay").then(m => ({ default: m.SleepTimerOverlay })));
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
+import { useSleepTimer } from "./hooks/useSleepTimer";
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from "./audio/audioSettings";
 import { useSocketLogic } from "./hooks/useSocketLogic";
 import { AuthForm } from "./hooks/AuthSection";
@@ -345,6 +347,7 @@ export default function App() {
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
+  const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
   const [heroImageError, setHeroImageError] = useState(false);
   const isGoingBackRef = useRef(false);
 
@@ -430,6 +433,37 @@ useEffect(() => {
   const visualizerActive = audioSettings.visualizer.enabled && (isFocusMode || isSessionOpen);
   const audioObj = useAudioEngine(currentSong, isPlaying, volume, audioSettings, setIsPlaying, resolvedAudioUrl, visualizerActive);
   const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue);
+
+  const handlePauseForSleepTimer = useCallback(() => {
+    if (audioObj.audioRef.current) {
+      audioObj.audioRef.current.pause();
+    }
+    setIsPlaying(false);
+    socketObj.emitCommand('toggle-play', { isPlaying: false });
+  }, [audioObj.audioRef, setIsPlaying, socketObj]);
+
+  const sleepTimer = useSleepTimer({
+    isPlaying,
+    onPause: handlePauseForSleepTimer,
+    currentSong,
+    getCurrentTime: audioObj.getCurrentTime,
+    duration: audioObj.duration,
+    volume,
+    setVolume,
+  });
+
+  const sleepTimerRemainingText = useMemo(() => {
+    const secs = sleepTimer.remainingSeconds;
+    if (secs <= 0) return '0m';
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    if (m >= 60) {
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }, [sleepTimer.remainingSeconds]);
+
   const mainRef = useRef<HTMLElement | null>(null);
   
   useEffect(() => { handlePlaySongRef.current = handlePlaySong; });
@@ -3609,6 +3643,9 @@ transition={{
               subscribeToTime={audioObj.subscribeToTime}
               volume={volume}
               onOpenAudioSettings={() => setIsAudioSettingsOpen(true)}
+              onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+              isSleepTimerActive={sleepTimer.isActive}
+              sleepTimerRemainingText={sleepTimerRemainingText}
               onTogglePlay={(e: any) => {
                 e.stopPropagation();
                 if (isMinigameActive) {
@@ -3679,7 +3716,7 @@ transition={{
 getCurrentTime={audioObj.getCurrentTime}
  onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
           if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
-      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} onOpenSleepTimer={() => setIsSleepTimerOpen(true)} isSleepTimerActive={sleepTimer.isActive} sleepTimerRemainingText={sleepTimerRemainingText} activeTheme={activeTheme} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
@@ -3689,6 +3726,20 @@ getCurrentTime={audioObj.getCurrentTime}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
         activeTheme={activeTheme}
+      />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSleepTimerOpen && <LazySleepTimerOverlay
+        isOpen={isSleepTimerOpen}
+        onClose={() => setIsSleepTimerOpen(false)}
+        isActive={sleepTimer.isActive}
+        mode={sleepTimer.mode}
+        remainingSeconds={sleepTimer.remainingSeconds}
+        enableFadeOut={sleepTimer.enableFadeOut}
+        setEnableFadeOut={sleepTimer.setEnableFadeOut}
+        startTimer={sleepTimer.startTimer}
+        startEndOfSongTimer={sleepTimer.startEndOfSongTimer}
+        cancelTimer={sleepTimer.cancelTimer}
+        extendTimer={sleepTimer.extendTimer}
+        currentSong={currentSong}
       />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isSocialOpen && <LazySocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{hostOnlyNotice && (
