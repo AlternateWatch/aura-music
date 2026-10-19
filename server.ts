@@ -34,11 +34,17 @@ const __dirname = path.dirname(__filename);
 // Calculamos ROOT_DIR siempre en la raíz del proyecto para que las subidas NUNCA vayan a dist/public/uploads.
 const ROOT_DIR = path.basename(__dirname) === 'dist' ? path.resolve(__dirname, '..') : __dirname;
 
-const syncFileToB2 = (filename: string, localFilePath: string, mimetype?: string, size?: number) => {
+const syncFileToB2 = async (filename: string, localFilePath: string, mimetype?: string, size?: number, deleteLocalAfter = true) => {
     if (!isB2Configured() || !fs.existsSync(localFilePath)) return;
-    uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size).catch(err => {
+    try {
+        await uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size);
+        if (deleteLocalAfter) {
+            try { fs.unlinkSync(localFilePath); } catch {}
+        }
+    } catch (err: any) {
         console.error(`Error sincronizando ${filename} con B2:`, err.message);
-    });
+        throw err;
+    }
 };
 const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
 
@@ -518,15 +524,15 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
             [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
         );
 
-        // Sincronizar con Backblaze B2 en segundo plano
+        // Subir directamente a Backblaze B2 y limpiar el archivo temporal local
         if (isB2Configured()) {
             const aFile = req.files['audio'][0];
-            syncFileToB2(aFile.filename, aFile.path, aFile.mimetype, aFile.size);
+            await syncFileToB2(aFile.filename, aFile.path, aFile.mimetype, aFile.size);
             if (req.files?.['cover']?.[0]) {
                 const cFile = req.files['cover'][0];
-                syncFileToB2(cFile.filename, cFile.path, cFile.mimetype, cFile.size);
+                await syncFileToB2(cFile.filename, cFile.path, cFile.mimetype, cFile.size);
             } else if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
-                syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
+                await syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
             }
         }
 
@@ -617,15 +623,15 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
             await unlinkTrackAssetIfUnused(oldAnimCover, req.params.id);
         }
 
-        // Sincronizar nuevas portadas con Backblaze B2
+        // Sincronizar nuevas portadas con Backblaze B2 y limpiar archivo local
         if (isB2Configured()) {
             if (req.files && req.files['cover']?.[0]) {
                 const c = req.files['cover'][0];
-                syncFileToB2(c.filename, c.path, c.mimetype, c.size);
+                await syncFileToB2(c.filename, c.path, c.mimetype, c.size);
             }
             if (req.files && req.files['animated_cover']?.[0]) {
                 const ac = req.files['animated_cover'][0];
-                syncFileToB2(ac.filename, ac.path, ac.mimetype, ac.size);
+                await syncFileToB2(ac.filename, ac.path, ac.mimetype, ac.size);
             }
         }
 
@@ -796,9 +802,9 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
             [req.params.name, newImagePath]
         );
 
-        // Sincronizar nueva imagen a B2
+        // Sincronizar nueva imagen a B2 y limpiar archivo local
         if (isB2Configured()) {
-            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+            await syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
         }
 
         res.json({ image_url: newImagePath });
@@ -1030,9 +1036,9 @@ app.post('/api/users/profile-pic', authenticateToken, upload.single('profile_pic
         // Update the database with the new image path
         await pool.execute('UPDATE users SET profile_pic_path = ? WHERE id = ?', [newPicPath, req.user.userId]);
 
-        // Sync new picture to B2
+        // Sync new picture to B2 and clean local file
         if (isB2Configured()) {
-            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+            await syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
         }
         
         res.json({ profile_pic_path: newPicPath });
@@ -1074,9 +1080,9 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
             [newBgPath, req.user.userId]
         );
 
-        // Sincronizar nuevo wallpaper a B2
+        // Sincronizar nuevo wallpaper a B2 y limpiar archivo local
         if (isB2Configured()) {
-            syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+            await syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
         }
 
         res.json({
