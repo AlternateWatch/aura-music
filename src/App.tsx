@@ -1512,12 +1512,15 @@ useEffect(() => {
     if (!nextSong || nextSong.id === currentSong.id) return;
 
     let cancelled = false;
-    resolveFileUrl(nextSong.audioUrl).then((url) => {
-      if (!cancelled) prefetchAudio(url);
-    });
+    const timer = setTimeout(() => {
+      resolveFileUrl(nextSong.audioUrl).then((url) => {
+        if (!cancelled) prefetchAudio(url);
+      });
+    }, 15000);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [currentSong?.id, activeQueue, socketObj.isShuffle, socketObj.shuffledQueue]);
 
@@ -3461,7 +3464,7 @@ transition={{
 
      <audio
   ref={audioObj.audioRef}
-  src={resolvedAudioUrl || undefined}
+  preload="auto"
   onTimeUpdate={(e) => {
     audioObj.handleTimeUpdate(
       e.currentTarget.currentTime

@@ -2598,6 +2598,28 @@ app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
 app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
+// Cola ligera para cachear en el disco local del VPS las canciones que se reproducen desde B2
+// (evita que futuros Range requests a mitad de canción tengan que ir a B2 y sufran micro-cortes)
+const hotCacheInFlight = new Set<string>();
+const warmAudioToLocalDisk = (filename: string) => {
+    if (!isB2Configured() || !/\.(mp3|flac|m4a|wav|ogg|aac)$/i.test(filename)) return;
+    if (hotCacheInFlight.has(filename)) return;
+    const destPath = path.join(uploadDir, filename);
+    if (fs.existsSync(destPath)) return;
+
+    hotCacheInFlight.add(filename);
+    // Damos 3 segundos de ventaja al stream inicial del reproductor para no competir en el arranque
+    setTimeout(async () => {
+        try {
+            if (!fs.existsSync(destPath)) {
+                await downloadB2FileToDisk(filename, destPath);
+            }
+        } catch {} finally {
+            hotCacheInFlight.delete(filename);
+        }
+    }, 3000);
+};
+
 // Si un archivo en /uploads no existe en disco local, servir desde Backblaze B2 con soporte de Range (streaming)
 app.use('/uploads', async (req, res) => {
     const requestedFile = path.basename(decodeURIComponent(req.path.split('?')[0]));
@@ -2624,10 +2646,26 @@ app.use('/uploads', async (req, res) => {
                     res.setHeader('ETag', b2Obj.etag);
                 }
                 res.setHeader('Cache-Control', 'public, max-age=86400');
-                b2Obj.stream.on('error', (streamErr) => {
-                    console.error(`Error streaming B2 asset ${requestedFile}:`, streamErr);
-                    if (!res.headersSent) res.status(500).end();
+
+                // Si el navegador cancela o cierra el Range request, abortar inmediatamente el stream S3
+                // para no dejar descargas huérfanas saturando el ancho de banda del servidor.
+                res.on('close', () => {
+                    if (!res.writableEnded) {
+                        try { b2Obj.stream.destroy(); } catch {}
+                    }
                 });
+
+                b2Obj.stream.on('error', (streamErr: any) => {
+                    if (streamErr?.name !== 'AbortError' && streamErr?.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+                        console.error(`Error streaming B2 asset ${requestedFile}:`, streamErr);
+                    }
+                    if (!res.headersSent) res.status(500).end();
+                    else { try { res.end(); } catch {} }
+                });
+
+                // Cachear en disco local en segundo plano para que los siguientes Range requests vayan a 0ms
+                warmAudioToLocalDisk(requestedFile);
+
                 return b2Obj.stream.pipe(res);
             }
         } catch (b2Err: any) {

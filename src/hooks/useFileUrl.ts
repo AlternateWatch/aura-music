@@ -32,9 +32,17 @@ export async function resolveFileUrl(url: string): Promise<string | undefined> {
   return url;
 }
 
+function resolveSyncFallbackUrl(url: string | undefined | null): string | undefined {
+  if (!url) return undefined;
+  const cachedBlob = getCachedOfflineBlobUrl(url);
+  if (cachedBlob) return cachedBlob;
+  if (url.startsWith("/uploads/")) return `${API_ORIGIN}${url}`;
+  return url;
+}
+
 export function useFileUrl(url: string | undefined | null): string | undefined {
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(() =>
-    getCachedOfflineBlobUrl(url) || (url ?? undefined)
+    resolveSyncFallbackUrl(url)
   );
 
   useEffect(() => {
@@ -43,11 +51,19 @@ export function useFileUrl(url: string | undefined | null): string | undefined {
       return;
     }
 
+    // Actualizar inmediatamente al valor síncrono si cambió la canción
+    setResolvedUrl((prev) => {
+      const syncVal = resolveSyncFallbackUrl(url);
+      return prev === syncVal ? prev : syncVal;
+    });
+
     let isMounted = true;
 
     const update = () => {
       resolveFileUrl(url).then((resolved) => {
-        if (isMounted) setResolvedUrl(resolved);
+        if (isMounted && resolved) {
+          setResolvedUrl((prev) => (prev === resolved ? prev : resolved));
+        }
       });
     };
 

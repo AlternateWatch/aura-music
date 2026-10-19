@@ -5,6 +5,7 @@ import {
     DeleteObjectCommand,
     HeadObjectCommand,
     ListObjectsV2Command
+// @ts-ignore
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import path from 'path';

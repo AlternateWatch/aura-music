@@ -164,7 +164,7 @@ export class AudioGraph {
     // Segundo reproductor para el solapamiento (cola saliente del crossfade)
     this.tailAudio = new Audio();
     this.tailAudio.crossOrigin = "anonymous";
-    this.tailAudio.preload = "auto";
+    this.tailAudio.preload = "metadata";
     this.tailAudio.volume = 1;
     this.tailSource = ctx.createMediaElementSource(this.tailAudio);
     this.tailGain = ctx.createGain();

@@ -87,6 +87,8 @@ export function useAudioEngine(
     return graph;
   }, [notifyStatus]);
 
+  const loadedSongIdRef = useRef<string | null>(null);
+
   const handleTimeUpdate = useCallback((time: number) => {
     currentTimeRef.current = time;
 
@@ -111,8 +113,13 @@ export function useAudioEngine(
       dur > cf.duration * 2
     ) {
       const remaining = dur - time;
+      const outgoingSrc = audio.currentSrc || audio.src;
+      // Preparamos el reproductor de cola solo cuando faltan pocos segundos para el crossfade,
+      // nunca en el segundo 0 para no competir por el ancho de banda al arrancar la canción.
+      if (outgoingSrc && remaining <= cf.duration + 12 && remaining > cf.duration) {
+        graphRef.current?.prepareTail(outgoingSrc);
+      }
       if (remaining > 0.2 && remaining <= cf.duration) {
-        const outgoingSrc = audio.currentSrc || audio.src;
         if (outgoingSrc && onCrossfadeNextRef.current) {
           crossfadeTriggeredForSongRef.current = songId;
           onCrossfadeNextRef.current(() => {
@@ -183,9 +190,6 @@ export function useAudioEngine(
         } catch (e) {
           console.error("Error resuming AudioContext:", e);
         }
-        if (settingsRef.current.crossfade.enabled && (audio.currentSrc || audio.src)) {
-          graph.prepareTail(audio.currentSrc || audio.src);
-        }
       }
 
       if (isPlaying) {
@@ -209,7 +213,13 @@ export function useAudioEngine(
       window.location.origin
     ).href;
 
-    if (audio.src !== targetUrl) {
+    const isSameSongAlreadyLoaded =
+      loadedSongIdRef.current === currentSong.id &&
+      Boolean(audio.src) &&
+      audio.currentTime > 0.2;
+
+    if (audio.src !== targetUrl && !isSameSongAlreadyLoaded) {
+      loadedSongIdRef.current = currentSong.id;
       audio.pause();
       currentTimeRef.current = 0;
 
@@ -230,6 +240,7 @@ export function useAudioEngine(
 
       audio.addEventListener("canplay", canPlayHandler);
     } else {
+      loadedSongIdRef.current = currentSong.id;
       if (isPlaying) {
         startPlayback();
       } else {

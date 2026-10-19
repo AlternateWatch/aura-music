@@ -156,15 +156,41 @@ function cacheFullTrack(cache, request) {
   return job;
 }
 
+// Memoria temporal del último ArrayBuffer de audio servido para no releer
+// un FLAC de 40 MB desde disco en cada petición Range consecutiva.
+let hotAudioUrl = null;
+let hotAudioBuffer = null;
+let hotAudioType = "audio/mpeg";
+
 // Cache API no soporta Range de forma nativa: si tenemos el fichero
 // completo cacheado, troceamos el body nosotros mismos y devolvemos un 206.
-async function servePartial(cachedResponse, rangeHeader) {
-  const buffer = await cachedResponse.arrayBuffer();
+async function servePartial(cachedResponse, rangeHeader, url) {
+  let buffer;
+  let contentType;
+
+  if (url && hotAudioUrl === url && hotAudioBuffer) {
+    buffer = hotAudioBuffer;
+    contentType = hotAudioType;
+  } else {
+    buffer = await cachedResponse.arrayBuffer();
+    contentType = cachedResponse.headers.get("Content-Type") || "audio/mpeg";
+    if (url) {
+      hotAudioUrl = url;
+      hotAudioBuffer = buffer;
+      hotAudioType = contentType;
+    }
+  }
+
   const total = buffer.byteLength;
+  const MAX_CHUNK_BYTES = 4 * 1024 * 1024; // 4 MB por bloque para no clonar 40 MB de golpe en RAM
 
   const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader || "");
   let start = match && match[1] ? parseInt(match[1], 10) : 0;
-  let end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+  const hasExplicitEnd = Boolean(match && match[2]);
+  let end = hasExplicitEnd
+    ? parseInt(match[2], 10)
+    : Math.min(total - 1, start + MAX_CHUNK_BYTES - 1);
+
   if (Number.isNaN(start)) start = 0;
   if (Number.isNaN(end) || end >= total) end = total - 1;
 
@@ -177,12 +203,24 @@ async function servePartial(cachedResponse, rangeHeader) {
     status: 206,
     statusText: "Partial Content",
     headers: {
-      "Content-Type": cachedResponse.headers.get("Content-Type") || "audio/mpeg",
+      "Content-Type": contentType,
       "Content-Range": `bytes ${start}-${end}/${total}`,
       "Content-Length": String(slice.byteLength),
       "Accept-Ranges": "bytes",
     },
   });
+}
+
+const delayedCacheTimers = new Map();
+function scheduleDelayedCacheFullTrack(cache, request, delayMs = 20000) {
+  const url = request.url;
+  if (inFlight.has(url) || delayedCacheTimers.has(url)) return;
+  const accept = request.headers.get("Accept");
+  const timer = setTimeout(() => {
+    delayedCacheTimers.delete(url);
+    cacheFullTrack(cache, new Request(url, { headers: accept ? { Accept: accept } : {} })).catch(() => {});
+  }, delayMs);
+  delayedCacheTimers.set(url, timer);
 }
 
 self.addEventListener("install", (event) => {
@@ -217,7 +255,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 1. Peticiones de audio: Cache-First con soporte de Range requests
+  // 1. Peticiones de audio: Cache-First con soporte de Range requests sin bloqueo
   if (looksLikeAudio(url)) {
     event.respondWith(
       (async () => {
@@ -226,18 +264,18 @@ self.addEventListener("fetch", (event) => {
         const rangeHeader = request.headers.get("Range");
 
         if (cached) {
-          await touchAndEvict(cache, request.url);
+          // Actualizar LRU en segundo plano SIN bloquear la entrega de bytes al <audio>
+          event.waitUntil(touchAndEvict(cache, request.url).catch(() => {}));
           if (rangeHeader) {
-            return servePartial(cached.clone(), rangeHeader);
+            return servePartial(cached.clone(), rangeHeader, request.url);
           }
           return cached.clone();
         }
 
-        // No está en caché todavía: la petición va a red normal (para no
-        // penalizar el arranque ni el seek) y en segundo plano se encola UNA
-        // descarga completa (deduplicada) para futuras veces / para aguantar
-        // un corte de conexión más adelante en esta misma canción.
-        event.waitUntil(cacheFullTrack(cache, request).catch(() => {}));
+        // No está en caché todavía: dejamos que la petición Range vaya directa a red con el 100%
+        // del ancho de banda disponible, y retrasamos 20s la copia en segundo plano para no competir
+        // con el buffer de reproducción en directo desde Backblaze B2.
+        scheduleDelayedCacheFullTrack(cache, request, 20000);
         return fetch(request);
       })()
     );
