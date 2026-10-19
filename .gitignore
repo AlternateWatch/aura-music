@@ -6,10 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
-# Solo lo que sube el servidor Express (server.ts guarda en public/uploads,
-# que comparte carpeta física con el "public/" estático de Vite). No
-# ignoramos "public/" entero para poder versionar sw.js, iconos, etc.
-public/uploads/
+# Ignorar uploads y temporales locales
+public/uploads
+uploads_local/
+uploads/
 
 # Android Studio
 .idea/
