@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
-  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check 
+  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { hapticImpact } from '../utils/haptics';
+import {
+  subscribeOfflineStore,
+  getOfflineIdsSnapshot,
+  getDownloadingIdsSnapshot,
+  toggleSongOffline,
+} from '../utils/offlineDb';
+import { useFileUrl } from '../hooks/useFileUrl';
 
 interface MusicCardProps {
   song: Song;
@@ -47,6 +54,12 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   // tanto, así que esto no cambia el aspecto final, solo cómo se presenta
   // la carátula mientras carga.
   const [coverLoaded, setCoverLoaded] = useState(false);
+
+  const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
+  const downloadingIds = useSyncExternalStore(subscribeOfflineStore, getDownloadingIdsSnapshot, getDownloadingIdsSnapshot);
+  const isOffline = offlineIds.has(String(song.id));
+  const isDownloading = downloadingIds.has(String(song.id));
+  const resolvedCoverUrl = useFileUrl(song.coverUrl);
 
   // FUNCIÓN UNIVERSAL PARA ABRIR ENLACES EN EL NAVEGADOR (ESCRITORIO Y WEB)
   const openExternalLink = async (url: string | undefined | null) => {
@@ -145,7 +158,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
         <img
-          src={song.coverUrl || '/uploads/default-cover.jpg'}
+          src={resolvedCoverUrl || song.coverUrl || '/uploads/default-cover.jpg'}
           className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'} ${coverLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
           alt={song.title}
           draggable={false}
@@ -158,6 +171,18 @@ export const MusicCard: React.FC<MusicCardProps> = ({
             }
           }}
         />
+        {(isOffline || isDownloading) && (
+          <div
+            className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-full bg-black/70 backdrop-blur-md border border-white/10 flex items-center justify-center"
+            title={isDownloading ? "Descargando para modo sin conexión..." : "Disponible sin conexión"}
+          >
+            {isDownloading ? (
+              <Loader2 size={12} className="text-brand-primary animate-spin" />
+            ) : (
+              <Download size={12} className="text-emerald-400" />
+            )}
+          </div>
+        )}
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
           {isPlaying && isActive ? <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white" /> : <Play size={48} fill="white" className="ml-1.5 md:w-8 md:h-8 md:ml-1 text-white" />}
         </div>
@@ -219,6 +244,31 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                 >
                   <Heart size={15} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
                   <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+                </button>
+
+                {/* 1.5 DESCARGAR MODO SIN CONEXIÓN */}
+                <button
+                  type="button"
+                  disabled={isDownloading}
+                  onClick={() => {
+                    hapticImpact('light');
+                    void toggleSongOffline(song);
+                    setShowMenu(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50"
+                >
+                  {isDownloading ? (
+                    <Loader2 size={15} className="text-brand-primary animate-spin" />
+                  ) : (
+                    <Download size={15} className={isOffline ? "text-emerald-400" : ""} />
+                  )}
+                  <span>
+                    {isDownloading
+                      ? 'Descargando...'
+                      : isOffline
+                        ? 'Quitar descarga offline'
+                        : 'Descargar sin conexión'}
+                  </span>
                 </button>
 
                 {/* 2. VER TABS / ACORDES (Abre Songsterr en el navegador del sistema) */}

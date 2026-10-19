@@ -85,8 +85,12 @@ export class AudioGraph {
   private master: GainNode;
   private meterNode: AudioWorkletNode | null = null;
   private meterState: AudioStatus["meter"] = "loading";
-  private crossfadeNode: GainNode | null = null;
-  private crossfadeSource: MediaElementAudioSourceNode | null = null;
+  private fadeGain: GainNode;
+  private tailAudio: HTMLAudioElement;
+  private tailSource: MediaElementAudioSourceNode;
+  private tailGain: GainNode;
+  private tailTimer: ReturnType<typeof setTimeout> | null = null;
+  private nextPreparedSrc: string | null = null;
 
 
   private settings: AudioSettings = JSON.parse(JSON.stringify(DEFAULT_AUDIO_SETTINGS));
@@ -143,6 +147,9 @@ export class AudioGraph {
     this.limiter.attack.value = 0.001;
     this.limiter.release.value = 0.1;
 
+    this.fadeGain = ctx.createGain();
+    this.fadeGain.gain.value = 1;
+
     this.master = ctx.createGain();
     this.master.gain.value = this.volume * this.limiterComp;
 
@@ -150,9 +157,20 @@ export class AudioGraph {
     this.analyser.fftSize = 64;
 
     let node: AudioNode = this.source;
-    const chain: AudioNode[] = [this.norm, this.preamp, ...this.filters, this.limiter, this.master, this.analyser];
+    const chain: AudioNode[] = [this.norm, this.preamp, ...this.filters, this.limiter, this.fadeGain, this.master, this.analyser];
     for (const next of chain) { node.connect(next); node = next; }
     node.connect(ctx.destination);
+
+    // Segundo reproductor para el solapamiento (cola saliente del crossfade)
+    this.tailAudio = new Audio();
+    this.tailAudio.crossOrigin = "anonymous";
+    this.tailAudio.preload = "auto";
+    this.tailAudio.volume = 1;
+    this.tailSource = ctx.createMediaElementSource(this.tailAudio);
+    this.tailGain = ctx.createGain();
+    this.tailGain.gain.value = 0;
+    this.tailSource.connect(this.tailGain);
+    this.tailGain.connect(this.preamp);
 
     // El volumen pasa a ser un GainNode; el elemento va siempre a tope para
     // que el medidor vea la señal real de la canción.
@@ -189,32 +207,87 @@ export class AudioGraph {
     const preDb = eqOn ? s.eq.preamp + (s.eq.autoPreamp ? autoPreampDb(s.eq.bands) : 0) : 0;
     this.preamp.gain.setTargetAtTime(dbToLin(preDb), now, 0.03);
 
+    if (!s.crossfade.enabled) {
+      this.stopCrossfade();
+    }
+
     this.evaluate({ tc: 0.15 });
     this.publish(true);
   }
 
-  /** Nueva canción: se reinicia el análisis y se fija la ganancia inicial sin rampa. */
-  beginTrack(id: string | null) {
-    // --- Manejo de Crossfade ---
-    if (this.settings.crossfade.enabled && this.crossfadeSource) {
-      const now = this.ctx.currentTime;
-      const duration = this.settings.crossfade.duration;
+  /** Prepara la URL de la pista actual en el reproductor secundario para que el crossfade saliente sea instantáneo. */
+  prepareTail(src: string) {
+    if (!src) return;
+    this.nextPreparedSrc = src;
+    if (this.tailAudio.paused && this.tailAudio.src !== src) {
+      this.tailAudio.src = src;
+      this.tailAudio.load();
+    }
+  }
 
-      // Desvanecer la fuente antigua
-      if (this.crossfadeNode) {
-        this.crossfadeNode.gain.setTargetAtTime(0, now, duration / 4);
-        // Limpiar después de que el fade termine
-        setTimeout(() => {
-          if (this.crossfadeSource) {
-            this.crossfadeSource.disconnect();
-            this.crossfadeNode?.disconnect();
-            this.crossfadeSource = null;
-            this.crossfadeNode = null;
-          }
-        }, duration * 1000 + 100);
-      }
+  /** Inicia la transición solapada: la canción saliente suena en tailAudio desvaneciéndose mientras la entrante sube en fadeGain. */
+  startCrossfade(outgoingSrc: string, outgoingTime: number, durationSec: number) {
+    if (!outgoingSrc || durationSec <= 0) return;
+
+    if (this.tailTimer) {
+      clearTimeout(this.tailTimer);
+      this.tailTimer = null;
     }
 
+    this.finalizeTrack();
+
+    const now = this.ctx.currentTime;
+    const startGain = dbToLin(this.appliedDb);
+
+    if (this.tailAudio.src !== outgoingSrc) {
+      this.tailAudio.src = outgoingSrc;
+    }
+    try {
+      this.tailAudio.currentTime = outgoingTime;
+    } catch {}
+
+    this.tailGain.gain.cancelScheduledValues(now);
+    this.tailGain.gain.setValueAtTime(startGain, now);
+    this.tailGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+    void this.tailAudio.play().catch(() => {});
+
+    this.fadeGain.gain.cancelScheduledValues(now);
+    this.fadeGain.gain.setValueAtTime(0.0001, now);
+    this.fadeGain.gain.linearRampToValueAtTime(1, now + durationSec);
+
+    this.tailTimer = setTimeout(() => {
+      this.tailTimer = null;
+      this.tailAudio.pause();
+      const endNow = this.ctx.currentTime;
+      this.tailGain.gain.cancelScheduledValues(endNow);
+      this.tailGain.gain.setValueAtTime(0, endNow);
+      this.fadeGain.gain.cancelScheduledValues(endNow);
+      this.fadeGain.gain.setValueAtTime(1, endNow);
+      if (this.nextPreparedSrc && this.tailAudio.src !== this.nextPreparedSrc) {
+        this.tailAudio.src = this.nextPreparedSrc;
+        this.tailAudio.load();
+      }
+    }, durationSec * 1000 + 150);
+  }
+
+  stopCrossfade() {
+    if (this.tailTimer) {
+      clearTimeout(this.tailTimer);
+      this.tailTimer = null;
+    }
+    if (!this.tailAudio.paused) {
+      this.tailAudio.pause();
+    }
+    const now = this.ctx.currentTime;
+    this.tailGain.gain.cancelScheduledValues(now);
+    this.tailGain.gain.setValueAtTime(0, now);
+    this.fadeGain.gain.cancelScheduledValues(now);
+    this.fadeGain.gain.setValueAtTime(1, now);
+  }
+
+  /** Nueva canción: se reinicia el análisis y se fija la ganancia inicial sin rampa. */
+  beginTrack(id: string | null) {
     this.trackId = id;
     this.analysis.reset();
     this.live = { lufs: null, gatedSeconds: 0 };

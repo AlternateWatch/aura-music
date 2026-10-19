@@ -39,42 +39,31 @@ export function useAudioEngine(
   volumeRef.current = volume;
   settingsRef.current = settings;
 
-  const needsGraph = settings.normalizer.enabled || settings.eq.enabled || settings.visualizer.enabled;
+  const needsGraph = settings.normalizer.enabled || settings.eq.enabled || settings.visualizer.enabled || settings.crossfade.enabled;
 
   const currentTimeRef = useRef(0);
   // Posición (s) a aplicar cuando termine de cargar la próxima canción.
   // Fijar audio.currentTime antes de cambiar el src no sirve: load() lo resetea a 0.
   const pendingSeekRef = useRef<number | null>(null);
   const timeListenersRef = useRef(new Set<() => void>());
+  const crossfadeTriggeredForSongRef = useRef<string | null>(null);
+  const onCrossfadeNextRef = useRef<((commitCrossfade: () => void) => void) | null>(null);
+  const durationRef = useRef(0);
 
   const [duration, setDurationState] = useState(0);
 
   const setDuration = useCallback((d: number) => {
+    durationRef.current = d;
     setDurationState(d);
     graphRef.current?.setDuration(d);
-  }, []);
-
-
-  const handleTimeUpdate = useCallback((time: number) => {
-  currentTimeRef.current = time;
-
-  timeListenersRef.current.forEach((listener) => {
-    listener();
-  });
-}, []);
-
-  const getCurrentTime = useCallback(() => {
-    return audioRef.current?.currentTime ?? currentTimeRef.current;
   }, []);
 
   const notifyStatus = useCallback(() => {
     statusListenersRef.current.forEach((l) => l());
   }, []);
 
-  // El grafo (normalizador + ecualizador) solo se crea cuando alguna de las
-  // dos funciones está activa: una vez que el <audio> pasa por Web Audio, un
-  // origen sin cabeceras CORS sonaría en silencio, así que quien no usa
-  // ninguna no asume ese riesgo. Una vez creado se queda (solo puede crearse
+  // El grafo (normalizador + ecualizador + crossfade) solo se crea cuando alguna
+  // de las funciones está activa. Una vez creado se queda (solo puede crearse
   // una vez por elemento) y "desactivado" significa pasar la señal sin tocarla.
   const ensureGraph = useCallback((): AudioGraph | null => {
     const audio = audioRef.current;
@@ -97,6 +86,47 @@ export function useAudioEngine(
     notifyStatus();
     return graph;
   }, [notifyStatus]);
+
+  const handleTimeUpdate = useCallback((time: number) => {
+    currentTimeRef.current = time;
+
+    timeListenersRef.current.forEach((listener) => {
+      listener();
+    });
+
+    const cf = settingsRef.current.crossfade;
+    const songId = songIdRef.current;
+    const dur = durationRef.current;
+    const audio = audioRef.current;
+
+    if (
+      cf.enabled &&
+      cf.duration > 0 &&
+      songId &&
+      crossfadeTriggeredForSongRef.current !== songId &&
+      audio &&
+      !audio.paused &&
+      !audio.seeking &&
+      Number.isFinite(dur) &&
+      dur > cf.duration * 2
+    ) {
+      const remaining = dur - time;
+      if (remaining > 0.2 && remaining <= cf.duration) {
+        const outgoingSrc = audio.currentSrc || audio.src;
+        if (outgoingSrc && onCrossfadeNextRef.current) {
+          crossfadeTriggeredForSongRef.current = songId;
+          onCrossfadeNextRef.current(() => {
+            const g = ensureGraph();
+            g?.startCrossfade(outgoingSrc, time, cf.duration);
+          });
+        }
+      }
+    }
+  }, [ensureGraph]);
+
+  const getCurrentTime = useCallback(() => {
+    return audioRef.current?.currentTime ?? currentTimeRef.current;
+  }, []);
 
   useEffect(() => {
     if (needsGraph) ensureGraph();
@@ -123,6 +153,7 @@ export function useAudioEngine(
   useEffect(() => {
     const id = currentSong?.id ?? null;
     songIdRef.current = id;
+    crossfadeTriggeredForSongRef.current = null;
     const graph = graphRef.current;
     if (!graph) return;
     graph.beginTrack(id);
@@ -151,6 +182,9 @@ export function useAudioEngine(
           await graph.resume();
         } catch (e) {
           console.error("Error resuming AudioContext:", e);
+        }
+        if (settingsRef.current.crossfade.enabled && (audio.currentSrc || audio.src)) {
+          graph.prepareTail(audio.currentSrc || audio.src);
         }
       }
 
@@ -196,16 +230,15 @@ export function useAudioEngine(
 
       audio.addEventListener("canplay", canPlayHandler);
     } else {
-     
       if (isPlaying) {
         startPlayback();
       } else {
         audio.pause();
+        graphRef.current?.stopCrossfade();
       }
     }
 
     return () => {
-    
       if (canPlayHandler) {
         audio.removeEventListener("canplay", canPlayHandler);
       }
@@ -219,12 +252,12 @@ export function useAudioEngine(
   ]);
 
   const subscribeToTime = useCallback((listener: () => void) => {
-  timeListenersRef.current.add(listener);
+    timeListenersRef.current.add(listener);
 
-  return () => {
-    timeListenersRef.current.delete(listener);
-  };
-}, []);
+    return () => {
+      timeListenersRef.current.delete(listener);
+    };
+  }, []);
 
   const subscribeStatus = useCallback((listener: () => void) => {
     statusListenersRef.current.add(listener);
@@ -242,13 +275,14 @@ export function useAudioEngine(
   return {
     audioRef,
     analyser: graphRef.current?.analyser ?? null,
+    analyserRef,
     pendingSeekRef,
+    onCrossfadeNextRef,
 
     subscribeStatus,
     getStatus,
     clearLoudnessCache,
 
-    
     currentTimeRef,
     getCurrentTime,
     subscribeToTime,

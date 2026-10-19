@@ -340,19 +340,55 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
           {/* AJUSTES DE REPRODUCCIÓN */}
           <section className="p-6 bg-white/[0.02] border border-white/5 rounded-[24px]">
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Activity className="text-brand-primary" size={18} />
-                  <div>
-                    <p className="text-sm font-bold text-white leading-none">Crossfade</p>
-                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Smooth transition between tracks</p>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Activity className="text-brand-primary" size={18} />
+                    <div>
+                      <p className="text-sm font-bold text-white leading-none">Crossfade</p>
+                      <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Smooth transition between tracks</p>
+                    </div>
                   </div>
+                  <Toggle
+                    on={settings.crossfade.enabled}
+                    onClick={() => onChange({ ...settings, crossfade: { ...settings.crossfade, enabled: !settings.crossfade.enabled } })}
+                    label="Crossfade"
+                  />
                 </div>
-                <Toggle
-                  on={settings.crossfade.enabled}
-                  onClick={() => onChange({ ...settings, crossfade: { ...settings.crossfade, enabled: !settings.crossfade.enabled } })}
-                  label="Crossfade"
-                />
+
+                {settings.crossfade.enabled && (
+                  <div className="pt-1 pb-2 pl-7">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Duration</span>
+                      <span className="text-[11px] font-mono font-bold text-brand-primary tabular-nums">
+                        {settings.crossfade.duration} s
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={12}
+                      step={1}
+                      value={settings.crossfade.duration}
+                      onChange={(e) =>
+                        onChange({
+                          ...settings,
+                          crossfade: {
+                            ...settings.crossfade,
+                            duration: parseInt(e.target.value, 10) || 5,
+                          },
+                        })
+                      }
+                      aria-label="Crossfade duration"
+                      className="w-full mt-2 accent-[#F27D26] cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[9px] font-mono text-white/25 mt-1">
+                      <span>1s</span>
+                      <span>6s</span>
+                      <span>12s</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between gap-4">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, FormEvent, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useMemo, useSyncExternalStore, FormEvent, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
@@ -11,7 +11,8 @@ import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import {
  Plus, Trash2, LogOut, ShieldCheck, Search, AlertTriangle, Edit2, Palette, Users,
   MinusCircle, ListPlus, SquarePlay, DoorOpen, ArrowUpDown, Filter, Clock, Image as ImageIcon,
-  ChevronLeft, ChevronRight, Menu, Heart, Play, Trophy, Disc, FileText, Film,Library,
+  ChevronLeft, ChevronRight, Menu, Heart, Play, Trophy, Disc, FileText, Film, Library,
+  Download,
 Upload as UploadIcon,
 Music2,
 MessageCircle,
@@ -25,7 +26,7 @@ Copy,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
-import { Capacitor, SystemBars, SystemBarsLStyle } from "@capacitor/core";
+import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import AuraMedia from './plugins/auraMedia';
 import { PlaylistImportOverlay } from "./components/PlaylistImportOverlay";
@@ -58,6 +59,7 @@ import { AuthForm } from "./hooks/AuthSection";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useWindowsThumbbar } from "./hooks/useWindowsThumbbar";
 import { prefetchAudio } from "./utils/audioCache";
+import { getAllOfflineSongs, subscribeOfflineStore, getOfflineIdsSnapshot } from "./utils/offlineDb";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -975,9 +977,17 @@ useEffect(() => {
     }
   };
 
+  const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
+
   const loadContent = async () => {
     setIsLoading(true);
     try {
+      if (activePlaylistId === 'offline') {
+        const offlineTracks = await getAllOfflineSongs();
+        setSongs(offlineTracks);
+        setIsLoading(false);
+        return;
+      }
       const activeToken = token || localStorage.getItem('aura_token');
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
       const res = await fetch(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } });
@@ -1017,7 +1027,11 @@ useEffect(() => {
         });
       }
     } catch (e) {
-      console.error("Load failed");
+      console.warn("Load failed, falling back to offline tracks:", e);
+      const offlineTracks = await getAllOfflineSongs();
+      if (offlineTracks.length > 0) {
+        setSongs(offlineTracks);
+      }
     }
     setIsLoading(false);
   };
@@ -1557,6 +1571,25 @@ useEffect(() => {
     }, 3000);
   };
 
+  audioObj.onCrossfadeNextRef.current = (commitCrossfade: () => void) => {
+    if (isMinigameActive || socketObj.isLoop) return;
+    if (socketObj.currentSession && !socketObj.isLeader()) return;
+
+    const pool = socketObj.isShuffle
+      ? socketObj.shuffledQueue
+      : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
+    if (pool.length < 2 || !currentSong) return;
+
+    const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
+    if (playbackContext === 'playlist' && currentIndex >= pool.length - 1) return;
+
+    const nextSong = currentIndex === -1 ? pool[0] : pool[(currentIndex + 1) % pool.length];
+    if (!nextSong || nextSong.id === currentSong.id) return;
+
+    commitCrossfade();
+    handlePlaySong(nextSong, false, 0, true);
+  };
+
   // Cola: cualquier miembro de la sesión puede tocarla (añadir, "siguiente",
   // reordenar) sin ser el anfitrión. Solo cambiar la canción que suena ahora
   // o el transporte (play/pause/seek/shuffle/loop) sigue siendo cosa suya.
@@ -1712,7 +1745,7 @@ useEffect(() => {
   };
 
   const handleReorderPlaylist = async (newOrder: Song[]) => {
-    if (activePlaylistId === 'all' || activePlaylistId === 'liked') return;
+    if (activePlaylistId === 'all' || activePlaylistId === 'liked' || activePlaylistId === 'offline') return;
     const activeToken = token || localStorage.getItem('aura_token');
     try {
         await fetch(
@@ -1761,7 +1794,7 @@ useEffect(() => {
         });
     }
 
-    if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') {
+    if (activePlaylistId !== 'all' && activePlaylistId !== 'liked' && activePlaylistId !== 'offline') {
       return songs.filter(s => formatFilter === 'all' || s.format === formatFilter);
     }
 
@@ -1781,6 +1814,8 @@ useEffect(() => {
 
     if (activePlaylistId === 'liked') {
       list = list.filter(s => likedIds.includes(s.id));
+    } else if (activePlaylistId === 'offline') {
+      list = list.filter(s => offlineIds.has(String(s.id)));
     }
 
     const sorted = [...list].sort((a, b) => {
@@ -1799,7 +1834,7 @@ useEffect(() => {
     });
 
     return sorted;
-  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, selectedAlbumName, selectedArtistName, sortBy]);
+  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, offlineIds, selectedAlbumName, selectedArtistName, sortBy]);
 
   // ELEMENTOS PARA LA CUADRÍCULA
   const displayItems = useMemo(() => {
@@ -1918,6 +1953,7 @@ useEffect(() => {
   const canReorderPlaylist =
       activePlaylistId !== 'all' &&
       activePlaylistId !== 'liked' &&
+      activePlaylistId !== 'offline' &&
       !showModeration &&
       !isMinigameActive &&
       sortBy === 'first' &&
@@ -2504,6 +2540,44 @@ transition={{
             <ChevronRight size={15} className="opacity-20 shrink-0" />
           </button>
 
+          {/* OFFLINE TRACKS */}
+          <button
+            onClick={() => {
+              setShowModeration(false);
+              setActivePlaylistId("offline");
+              setSelectedAlbumName(null);
+              setSelectedArtistName(null);
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors active:scale-[0.98] duration-150 ${
+              activePlaylistId === "offline" && !showModeration
+                ? "text-emerald-400 bg-emerald-500/10"
+                : activeTheme === "light"
+                  ? "hover:bg-black/5 active:bg-black/10"
+                  : "hover:bg-white/5 active:bg-white/10"
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              activePlaylistId === "offline" && !showModeration
+                ? "bg-emerald-500/15 text-emerald-400"
+                : activeTheme === "light" ? "bg-black/5" : "bg-white/5"
+            }`}>
+              <Download size={16} />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold">
+                Offline Tracks ({offlineIds.size})
+              </div>
+
+              <div className="text-[10px] opacity-40">
+                Available without internet
+              </div>
+            </div>
+
+            <ChevronRight size={15} className="opacity-20 shrink-0" />
+          </button>
+
           {/* PLAYLISTS */}
           <div
             className={`px-4 pt-4 pb-2 ${
@@ -2859,6 +2933,9 @@ transition={{
                         <li key="stream-all" className={`cursor-pointer transition-all ${activePlaylistId === "all" ? "text-brand-primary" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("all"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>Global Stream</li>
                         <li key="liked-songs" className={`flex items-center gap-2 cursor-pointer transition-all ${activePlaylistId === "liked" ? "text-red-500 font-bold" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("liked"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>
                             <Heart size={14} fill={activePlaylistId === "liked" ? "currentColor" : "none"} /> Liked Tracks
+                        </li>
+                        <li key="offline-songs" className={`flex items-center gap-2 cursor-pointer transition-all ${activePlaylistId === "offline" ? "text-emerald-400 font-bold" : "text-white/50 hover:text-white"}`} onClick={() => { setActivePlaylistId("offline"); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>
+                            <Download size={14} /> Offline Tracks ({offlineIds.size})
                         </li>
                         {playlists.map(p => (
                             <li key={p.id} className="group flex items-center justify-between cursor-pointer">

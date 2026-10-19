@@ -1,26 +1,30 @@
 import { useState, useEffect } from "react";
-
-const urlCache = new Map<string, string>();
+import { getOfflineBlobUrl, subscribeOfflineStore } from "../utils/offlineDb";
 
 const API_ORIGIN = "https://aura.basildo.me";
 
 // Misma lógica de resolución que usa el hook, expuesta como función suelta
-// para poder precargar (con new Image()) una URL fuera de un componente
-// React — por ejemplo, antes de aplicar la carátula del hero banner.
+// para poder precargar (con new Image() o prefetchAudio) una URL fuera de
+// un componente React. Prioriza el almacenamiento offline en IndexedDB (Dexie).
 export async function resolveFileUrl(url: string): Promise<string | undefined> {
   if (!url) return undefined;
 
-  // Fast path: if it's already a full URL, return it immediately
-  if (
-    url.startsWith("http://") ||
-    url.startsWith("https://") ||
-    url.startsWith("blob:") ||
-    url.startsWith("data:")
-  ) {
+  if (url.startsWith("blob:") || url.startsWith("data:")) {
     return url;
   }
 
-  // Standard path: handle relative uploads
+  // 1. Comprobar primero si está descargada en IndexedDB para reproducción offline instantánea
+  const offlineBlobUrl = await getOfflineBlobUrl(url);
+  if (offlineBlobUrl) {
+    return offlineBlobUrl;
+  }
+
+  // 2. Si ya es una URL absoluta
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  // 3. Compatibilidad con rutas antiguas /uploads/
   if (url.startsWith("/uploads/")) {
     return `${API_ORIGIN}${url}`;
   }
@@ -28,7 +32,7 @@ export async function resolveFileUrl(url: string): Promise<string | undefined> {
   return url;
 }
 
-export function useFileUrl(url: string | undefined): string | undefined {
+export function useFileUrl(url: string | undefined | null): string | undefined {
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -39,12 +43,18 @@ export function useFileUrl(url: string | undefined): string | undefined {
 
     let isMounted = true;
 
-    resolveFileUrl(url).then((resolved) => {
-      if (isMounted) setResolvedUrl(resolved);
-    });
+    const update = () => {
+      resolveFileUrl(url).then((resolved) => {
+        if (isMounted) setResolvedUrl(resolved);
+      });
+    };
+
+    update();
+    const unsubscribe = subscribeOfflineStore(update);
 
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [url]);
 
