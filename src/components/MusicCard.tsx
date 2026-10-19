@@ -1,7 +1,7 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
-  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2
+  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2, HardDriveDownload
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { hapticImpact } from '../utils/haptics';
@@ -10,6 +10,7 @@ import {
   getOfflineIdsSnapshot,
   getDownloadingIdsSnapshot,
   toggleSongOffline,
+  downloadSongToDisk,
 } from '../utils/offlineDb';
 import { useFileUrl } from '../hooks/useFileUrl';
 
@@ -269,6 +270,20 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                         ? 'Quitar descarga offline'
                         : 'Descargar sin conexión'}
                   </span>
+                </button>
+
+                {/* 1.6 GUARDAR ARCHIVO EN DISCO DURO */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticImpact('light');
+                    void downloadSongToDisk(song);
+                    setShowMenu(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                >
+                  <HardDriveDownload size={15} />
+                  <span>Descargar archivo al disco</span>
                 </button>
 
                 {/* 2. VER TABS / ACORDES (Abre Songsterr en el navegador del sistema) */}

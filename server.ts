@@ -2460,6 +2460,57 @@ app.use('/uploads', async (req, res) => {
     res.status(404).send('Asset not found');
 });
 
+// Descarga directa de una canción al disco duro del usuario con nombre limpio "Artista - Título.ext"
+app.get('/api/tracks/:id/download', async (req: Request, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT title, artist, file_path, format FROM tracks WHERE id = ? LIMIT 1',
+            [req.params.id]
+        );
+        if (!rows?.[0]?.file_path) {
+            return res.status(404).json({ error: 'Track not found' });
+        }
+
+        const track = rows[0];
+        const rawFile = path.basename(decodeURIComponent(String(track.file_path).split('?')[0]));
+        const ext = (path.extname(rawFile) || (track.format ? `.${track.format}` : '.mp3')).toLowerCase();
+        const safeArtist = String(track.artist || 'Aura').replace(/[<>:"/\\|?*\x00-\x1F]/g, '').trim();
+        const safeTitle = String(track.title || 'Track').replace(/[<>:"/\\|?*\x00-\x1F]/g, '').trim();
+        const downloadName = `${safeArtist} - ${safeTitle}${ext}`;
+        const asciiFallback = downloadName.replace(/[^\x20-\x7E]/g, '_') || `track${ext}`;
+
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`
+        );
+
+        const localPath = resolveDiskPath(track.file_path);
+        if (localPath && fs.existsSync(localPath)) {
+            return res.sendFile(localPath);
+        }
+
+        if (isB2Configured() && rawFile) {
+            const b2Obj = await getB2ObjectStream(rawFile);
+            if (b2Obj) {
+                res.setHeader('Content-Type', b2Obj.contentType || 'application/octet-stream');
+                if (b2Obj.contentLength !== undefined) {
+                    res.setHeader('Content-Length', b2Obj.contentLength);
+                }
+                b2Obj.stream.on('error', (err) => {
+                    console.error(`Error downloading B2 asset ${rawFile}:`, err);
+                    if (!res.headersSent) res.status(500).end();
+                });
+                return b2Obj.stream.pipe(res);
+            }
+        }
+
+        return res.status(404).json({ error: 'Audio file not found' });
+    } catch (e: any) {
+        console.error('Error in /api/tracks/:id/download:', e);
+        return res.status(500).json({ error: 'Failed to download track' });
+    }
+});
+
 // Endpoint administrativo para forzar la sincronización del caché del Top 100
 app.post('/api/admin/cache-top-tracks', authenticateToken, async (req: any, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {

@@ -221,3 +221,47 @@ export async function getAllOfflineSongs(): Promise<Song[]> {
     return [];
   }
 }
+
+/**
+ * Descarga el archivo de audio directamente al disco duro del usuario ("Artista - Título.ext").
+ * Si ya está guardada en IndexedDB (modo offline), la guarda al instante desde memoria local.
+ */
+export async function downloadSongToDisk(song: Song): Promise<void> {
+  const extMatch = song.audioUrl?.split('?')[0].match(/\.(mp3|flac|wav|ogg|m4a)$/i);
+  const ext = extMatch ? extMatch[0].toLowerCase() : song.format ? `.${song.format.toLowerCase()}` : '.mp3';
+  const safeArtist = (song.artist || 'Aura').replace(/[<>:"/\\|?*\x00-\x1F]/g, '').trim();
+  const safeTitle = (song.title || 'Track').replace(/[<>:"/\\|?*\x00-\x1F]/g, '').trim();
+  const fileName = `${safeArtist} - ${safeTitle}${ext}`;
+
+  try {
+    const record = await offlineDb.tracks.get(String(song.id));
+    if (record?.audioBlob) {
+      const tempUrl = URL.createObjectURL(record.audioBlob);
+      const a = document.createElement('a');
+      a.href = tempUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(tempUrl), 15000);
+      return;
+    }
+  } catch {}
+
+  const isRemoteHost =
+    typeof window !== 'undefined' &&
+    (window.location.protocol === 'capacitor:' ||
+      window.location.protocol === 'tauri:' ||
+      window.location.hostname === 'tauri.localhost' ||
+      (window.location.hostname === 'localhost' && window.location.port === ''));
+
+  const base = isRemoteHost ? 'https://aura.basildo.me' : '';
+  const downloadUrl = `${base}/api/tracks/${encodeURIComponent(song.id)}/download`;
+
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
