@@ -2727,6 +2727,8 @@ useEffect(() => {
   };
 }, []);
 
+const lastNativeTrackSentRef = useRef<{ id: string; durationMs: number } | null>(null);
+
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) {
     return;
@@ -2736,14 +2738,27 @@ useEffect(() => {
     return;
   }
 
+  const effectiveDur = (Number.isFinite(audioObj.duration) && audioObj.duration > 0)
+    ? audioObj.duration
+    : (currentSong.duration || 0);
+
   const durationMs = Math.max(
     0,
-    Math.round((audioObj.duration || 0) * 1000)
+    Math.round(effectiveDur * 1000)
   );
+
+  const songIdStr = String(currentSong.id);
+  if (
+    lastNativeTrackSentRef.current?.id === songIdStr &&
+    Math.abs(lastNativeTrackSentRef.current.durationMs - durationMs) < 1000
+  ) {
+    return;
+  }
+  lastNativeTrackSentRef.current = { id: songIdStr, durationMs };
 
   const artworkUrl = currentSong.coverUrl || undefined;
   AuraMedia.setTrack({
-    id: String(currentSong.id),
+    id: songIdStr,
     title: currentSong.title || 'Aura Music',
     artist: currentSong.artist || '',
     album: currentSong.album || '',
@@ -2760,6 +2775,7 @@ useEffect(() => {
   currentSong?.title,
   currentSong?.artist,
   currentSong?.album,
+  currentSong?.duration,
   audioObj.duration
 ]);
 
@@ -3014,7 +3030,7 @@ useEffect(() => {
                   {/* AURA DJ BUTTON */}
                   <button
                     onClick={() => setIsAuraDjOpen(true)}
-                    className="bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-orange-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                    className="relative overflow-hidden bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-orange-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-inset ring-white/25 [background-clip:border-box] [background-origin:border-box]"
                     title="Aura DJ con Gemini AI"
                   >
                     <Sparkles size={13} className="fill-white" />
@@ -3064,7 +3080,7 @@ useEffect(() => {
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: -6 }}
                             transition={{ duration: 0.15, ease: "easeOut" }}
-                            className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-[#161616]/95 backdrop-blur-2xl border border-white/10 shadow-2xl p-2 z-50 text-left select-none overflow-hidden"
+                            className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-[#161616]/95 backdrop-blur-2xl border border-white/10 shadow-2xl p-2 z-50 text-left select-none overflow-y-auto max-h-[calc(100vh-5rem)]"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="px-3 py-2 border-b border-white/5 mb-1 flex items-center justify-between">

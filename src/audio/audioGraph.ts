@@ -306,6 +306,9 @@ export class AudioGraph {
     fromAudio.currentTime = 0;
 
     this.activePlayer = to;
+    if (Number.isFinite(toAudio.duration) && toAudio.duration > 0) {
+      this.duration = toAudio.duration;
+    }
     return to;
   }
 
@@ -351,6 +354,9 @@ export class AudioGraph {
     }, durationSec * 1000 + 100);
 
     this.activePlayer = to;
+    if (Number.isFinite(toAudio.duration) && toAudio.duration > 0) {
+      this.duration = toAudio.duration;
+    }
     return to;
   }
 

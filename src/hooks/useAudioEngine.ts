@@ -115,10 +115,20 @@ export function useAudioEngine(
     currentTimeRef.current = time;
     timeListenersRef.current.forEach((listener) => listener());
 
-    const dur = durationRef.current;
+    const audio = audioRef.current;
+    // La duración real del elemento de audio activo tiene máxima autoridad
+    const realAudioDur = audio && Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : 0;
+
+    let dur = realAudioDur || durationRef.current;
+    if (realAudioDur > 0 && Math.abs(realAudioDur - durationRef.current) > 0.5) {
+      setDuration(realAudioDur);
+      dur = realAudioDur;
+    }
+
     const remaining = dur - time;
     const songId = songIdRef.current;
-    const audio = audioRef.current;
     const cf = settingsRef.current.crossfade;
     const gapless = settingsRef.current.gapless?.enabled ?? true;
 
@@ -131,9 +141,12 @@ export function useAudioEngine(
       dur > 4
     ) {
       // 1. LOOKAHEAD: Pre-cargar silenciosamente en el reproductor standby
-      // cuando falten 10 segundos para el final de la pista.
+      // cuando falten 10 segundos para el final de la pista (o 40% en pistas muy cortas).
+      // Guardia de seguridad: la pista debe llevar al menos 5 segundos reproduciéndose o haber superado el 40%.
       const prebufferThreshold = Math.min(10, Math.max(3, dur * 0.4));
-      if (remaining <= prebufferThreshold && standbyPreloadedForSongRef.current !== songId) {
+      const canPrebuffer = time > 5 && time >= dur * 0.4 && remaining <= prebufferThreshold;
+
+      if (canPrebuffer && standbyPreloadedForSongRef.current !== songId) {
         standbyPreloadedForSongRef.current = songId;
         const nextInfo = getNextTrackRef.current?.();
         if (nextInfo && nextInfo.song && nextInfo.song.id !== songId) {
@@ -149,39 +162,51 @@ export function useAudioEngine(
 
       // 2. DISPARO DE TRANSICIÓN: Crossfade (si está activo) o Gapless 0 ms
       if (cf.enabled && cf.duration > 0 && dur > cf.duration * 2) {
-        if (remaining > 0.1 && remaining <= cf.duration && transitionTriggeredForSongRef.current !== songId) {
+        const isCrossfadePoint = time > 5 && time >= dur * 0.6 && remaining > 0.05 && remaining <= cf.duration;
+        if (isCrossfadePoint && transitionTriggeredForSongRef.current !== songId) {
           const nextSong = nextTrackCandidateRef.current;
-          if (nextSong && onGaplessNextRef.current) {
+          const g = ensureGraph();
+          const standbyAudio = g?.getStandbyAudio();
+          // Solo si el siguiente track está realmente buferizado en standby
+          if (nextSong && onGaplessNextRef.current && standbyAudio && standbyAudio.readyState >= 2) {
             transitionTriggeredForSongRef.current = songId;
             loadedSongIdRef.current = nextSong.id;
-            const g = ensureGraph();
-            g?.triggerCrossfadeTransition(cf.duration);
-            if (g) {
-              activePlayerRef.current = g.getActivePlayer();
-              audioRef.current = g.getActiveAudio();
-            }
+            g.triggerCrossfadeTransition(cf.duration);
+            activePlayerRef.current = g.getActivePlayer();
+            const newAudio = g.getActiveAudio();
+            audioRef.current = newAudio;
+            const newDur = (Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+              ? newAudio.duration
+              : (nextSong.duration || 0);
+            setDuration(newDur);
             onGaplessNextRef.current(nextSong);
           }
         }
       } else if (gapless) {
         // Gapless 0 ms: disparar cuando resten menos de 45 ms para sample exacto sin gap
-        if (remaining <= 0.045 && transitionTriggeredForSongRef.current !== songId) {
+        const isGaplessPoint = time > 5 && time >= dur * 0.7 && remaining <= 0.045 && remaining >= -0.5;
+        if (isGaplessPoint && transitionTriggeredForSongRef.current !== songId) {
           const nextSong = nextTrackCandidateRef.current;
-          if (nextSong && onGaplessNextRef.current) {
+          const g = ensureGraph();
+          const standbyAudio = g?.getStandbyAudio();
+          // Solo si el siguiente track está listo para reproducir
+          if (nextSong && onGaplessNextRef.current && standbyAudio && standbyAudio.readyState >= 2) {
             transitionTriggeredForSongRef.current = songId;
             loadedSongIdRef.current = nextSong.id;
-            const g = ensureGraph();
-            g?.triggerGaplessTransition();
-            if (g) {
-              activePlayerRef.current = g.getActivePlayer();
-              audioRef.current = g.getActiveAudio();
-            }
+            g.triggerGaplessTransition();
+            activePlayerRef.current = g.getActivePlayer();
+            const newAudio = g.getActiveAudio();
+            audioRef.current = newAudio;
+            const newDur = (Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+              ? newAudio.duration
+              : (nextSong.duration || 0);
+            setDuration(newDur);
             onGaplessNextRef.current(nextSong);
           }
         }
       }
     }
-  }, [ensureGraph]);
+  }, [ensureGraph, setDuration]);
 
   const handleLoadedMetadata = useCallback((d: number) => {
     if (Number.isFinite(d)) {
@@ -200,25 +225,31 @@ export function useAudioEngine(
     const gapless = settingsRef.current.gapless?.enabled ?? true;
 
     if (nextTrackCandidateRef.current && onGaplessNextRef.current && (gapless || (cf.enabled && cf.duration > 0))) {
-      transitionTriggeredForSongRef.current = songId;
       const nextSong = nextTrackCandidateRef.current;
-      loadedSongIdRef.current = nextSong.id;
       const g = ensureGraph();
-      if (cf.enabled && cf.duration > 0) {
-        g?.triggerCrossfadeTransition(cf.duration);
-      } else {
-        g?.triggerGaplessTransition();
-      }
-      if (g) {
+      const standbyAudio = g?.getStandbyAudio();
+      if (standbyAudio && standbyAudio.readyState >= 2) {
+        transitionTriggeredForSongRef.current = songId;
+        loadedSongIdRef.current = nextSong.id;
+        if (cf.enabled && cf.duration > 0) {
+          g.triggerCrossfadeTransition(cf.duration);
+        } else {
+          g.triggerGaplessTransition();
+        }
         activePlayerRef.current = g.getActivePlayer();
-        audioRef.current = g.getActiveAudio();
+        const newAudio = g.getActiveAudio();
+        audioRef.current = newAudio;
+        const newDur = (Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+          ? newAudio.duration
+          : (nextSong.duration || 0);
+        setDuration(newDur);
+        onGaplessNextRef.current(nextSong);
+        return;
       }
-      onGaplessNextRef.current(nextSong);
-      return;
     }
 
     onSongEndedRef.current?.();
-  }, [ensureGraph]);
+  }, [ensureGraph, setDuration]);
 
   // Enlazar los eventos nativos de ambos elementos de audio
   useEffect(() => {
@@ -287,15 +318,20 @@ export function useAudioEngine(
       standbyPreloadedForSongRef.current = null;
       transitionTriggeredForSongRef.current = null;
       nextTrackCandidateRef.current = null;
+      const initialDur = (currentSong && Number.isFinite(currentSong.duration) && currentSong.duration > 0)
+        ? currentSong.duration
+        : 0;
+      setDuration(initialDur);
+      currentTimeRef.current = 0;
     }
     const graph = graphRef.current;
     if (!graph) return;
     graph.beginTrack(id);
     const audio = audioRef.current;
-    if (audio && audio.readyState >= 1 && Number.isFinite(audio.duration)) {
+    if (audio && audio.readyState >= 1 && Number.isFinite(audio.duration) && loadedSongIdRef.current === id) {
       graph.setDuration(audio.duration);
     }
-  }, [currentSong?.id]);
+  }, [currentSong?.id, currentSong?.duration, setDuration]);
 
   // Carga y reproducción controlada
   useEffect(() => {
@@ -343,6 +379,11 @@ export function useAudioEngine(
       standbyPreloadedForSongRef.current = null;
       transitionTriggeredForSongRef.current = null;
       nextTrackCandidateRef.current = null;
+
+      const songDur = (Number.isFinite(currentSong.duration) && currentSong.duration > 0)
+        ? currentSong.duration
+        : 0;
+      setDuration(songDur);
 
       audio.pause();
       currentTimeRef.current = 0;

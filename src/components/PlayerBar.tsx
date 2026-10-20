@@ -200,15 +200,11 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           ========================================================= */}
       <div className="flex md:hidden w-full px-3 pt-1 pb-[calc(0.6rem+env(safe-area-inset-bottom))] box-border">
         <div
-          onClick={onOpenFullPlayer}
-          onTouchStart={handleMobileTouchStart}
-          onTouchMove={handleMobileTouchMove}
-          onTouchEnd={handleMobileTouchEnd}
           style={{
             WebkitTapHighlightColor: "transparent",
             WebkitTouchCallout: "none",
           }}
-          className="relative flex items-center justify-between w-full h-[62px] px-3 rounded-2xl bg-[#141416]/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_36px_rgba(0,0,0,0.7)] overflow-hidden cursor-pointer select-none"
+          className="relative flex items-center justify-between w-full h-[62px] px-3 rounded-2xl bg-[#141416]/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_36px_rgba(0,0,0,0.7)] overflow-hidden select-none"
         >
           {/* Hairline Progress Bar along the top edge */}
           <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-white/10 overflow-hidden pointer-events-none">
@@ -218,15 +214,19 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             />
           </div>
 
-          {/* Left: Cover Art & Song Info */}
+          {/* Left: Cover Art & Song Info (TAP O SWIPE PARA ABRIR FULL PLAYER O CAMBIAR PISTA) */}
           <div
+            onClick={onOpenFullPlayer}
+            onTouchStart={handleMobileTouchStart}
+            onTouchMove={handleMobileTouchMove}
+            onTouchEnd={handleMobileTouchEnd}
             style={{
               transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : undefined,
               transition: swipeOffset === 0 ? "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)" : "none",
             }}
-            className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none will-change-transform pr-2"
+            className="flex items-center gap-3 flex-1 h-full min-w-0 will-change-transform pr-2 cursor-pointer"
           >
-            <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 shadow-md bg-white/5">
+            <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 shadow-md bg-white/5 pointer-events-none">
               <img
                 src={resolvedCoverUrl || currentSong.coverUrl || DEFAULT_COVER}
                 srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
@@ -242,7 +242,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 }}
               />
             </div>
-            <div className="flex flex-col min-w-0 flex-1 justify-center">
+            <div className="flex flex-col min-w-0 flex-1 justify-center pointer-events-none">
               <h4 className="font-bold text-sm truncate text-white leading-tight">
                 {currentSong.title}
               </h4>
@@ -252,8 +252,14 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             </div>
           </div>
 
-          {/* Right: Controls (Previous, Warm Glow Play/Pause, Next) */}
-          <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
+          {/* Right: Controls (Previous, Play/Pause, Next) */}
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            className="flex items-center gap-1.5 shrink-0 pointer-events-auto z-10"
+          >
             <button
               type="button"
               onClick={(e) => {
@@ -281,13 +287,13 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 WebkitTapHighlightColor: "transparent",
                 WebkitTouchCallout: "none",
               }}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] text-black shrink-0 active:scale-95 transition-transform shadow-[0_4px_16px_rgba(242,125,38,0.4)] cursor-pointer outline-none focus:outline-none"
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black shrink-0 active:scale-95 transition-transform shadow-xl cursor-pointer outline-none focus:outline-none"
               title={isPlaying ? "Pausar" : "Reproducir"}
             >
               {isPlaying ? (
-                <Pause size={18} className="text-black" fill="black" />
+                <Pause size={18} fill="currentColor" />
               ) : (
-                <Play size={18} className="ml-0.5 text-black" fill="black" />
+                <Play size={18} className="ml-0.5" fill="currentColor" />
               )}
             </button>
             <button

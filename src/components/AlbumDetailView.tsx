@@ -1,4 +1,6 @@
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useState, useSyncExternalStore, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, Shuffle, Download, CheckCircle2, Loader2, 
   ChevronLeft, Disc, Heart, MoreVertical, ListPlus, ListMusic, 
@@ -61,6 +63,102 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
 }) => {
   const [activeMenuSongId, setActiveMenuSongId] = useState<string | null>(null);
   const [playlistSubmenuSongId, setPlaylistSubmenuSongId] = useState<string | null>(null);
+  const [menuPlacement, setMenuPlacement] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    maxHeight: number;
+    isMobile: boolean;
+  } | null>(null);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleTrackMenu = (e: React.MouseEvent, track: Song) => {
+    e.stopPropagation();
+    if (activeMenuSongId === track.id) {
+      setActiveMenuSongId(null);
+      setPlaylistSubmenuSongId(null);
+      setMenuPlacement(null);
+      return;
+    }
+
+    const isMobile = window.innerWidth < 640;
+    if (isMobile) {
+      setMenuPlacement({
+        left: 0,
+        maxHeight: window.innerHeight * 0.82,
+        isMobile: true,
+      });
+      setActiveMenuSongId(track.id);
+      setPlaylistSubmenuSongId(null);
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const MENU_WIDTH = 240;
+    const PADDING = 12;
+
+    let left = rect.right - MENU_WIDTH;
+    if (left < PADDING) {
+      left = Math.max(PADDING, rect.left);
+    }
+    if (left + MENU_WIDTH > vw - PADDING) {
+      left = Math.max(PADDING, vw - MENU_WIDTH - PADDING);
+    }
+
+    const spaceBelow = vh - rect.bottom - PADDING;
+    const spaceAbove = rect.top - PADDING;
+    const prefersDown = spaceBelow >= 300 || spaceBelow >= spaceAbove;
+
+    let top: number | undefined;
+    let bottom: number | undefined;
+    let maxHeight: number;
+
+    if (prefersDown) {
+      top = rect.bottom + 6;
+      maxHeight = Math.min(spaceBelow, 440);
+    } else {
+      bottom = vh - rect.top + 6;
+      maxHeight = Math.min(spaceAbove, 440);
+    }
+
+    setMenuPlacement({
+      top,
+      bottom,
+      left,
+      maxHeight,
+      isMobile: false,
+    });
+    setActiveMenuSongId(track.id);
+    setPlaylistSubmenuSongId(null);
+  };
+
+  useEffect(() => {
+    if (!activeMenuSongId) return;
+
+    const handleScroll = (e: Event) => {
+      if (menuContainerRef.current && e.target instanceof Node && menuContainerRef.current.contains(e.target)) {
+        return;
+      }
+      setActiveMenuSongId(null);
+      setPlaylistSubmenuSongId(null);
+      setMenuPlacement(null);
+    };
+
+    const handleResize = () => {
+      setActiveMenuSongId(null);
+      setPlaylistSubmenuSongId(null);
+      setMenuPlacement(null);
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [activeMenuSongId]);
   const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
 
   const offlineIds = useSyncExternalStore(subscribeOfflineStore, getOfflineIdsSnapshot, getOfflineIdsSnapshot);
@@ -372,130 +470,14 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   <div className="relative">
                     <button
                       type="button"
-                      onClick={() => {
-                        setActiveMenuSongId(isMenuOpen ? null : track.id);
-                        setPlaylistSubmenuSongId(null);
-                      }}
-                      className="p-2 rounded-full text-white/30 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                      onClick={(e) => handleToggleTrackMenu(e, track)}
+                      className={`p-2 rounded-full transition-colors cursor-pointer outline-none ${
+                        activeMenuSongId === track.id ? 'bg-brand-primary text-black' : 'text-white/30 hover:text-white hover:bg-white/10'
+                      }`}
                       title="Más opciones"
                     >
                       <MoreVertical size={16} />
                     </button>
-
-                    {/* Menú Dropdown flotante */}
-                    {isMenuOpen && (
-                      <div className="absolute right-0 bottom-full mb-2 w-56 rounded-2xl bg-[#141416] border border-white/10 p-2 shadow-2xl z-50 text-white animate-in fade-in zoom-in-95 duration-150">
-                        {/* Reproducir siguiente */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onPlayNext(track);
-                            handleTrackActionFeedback('next', track.id);
-                            setActiveMenuSongId(null);
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                        >
-                          {copiedNotification === track.id ? <Check size={14} className="text-emerald-400" /> : <ListMusic size={14} />}
-                          <span>Reproducir siguiente</span>
-                        </button>
-
-                        {/* Añadir a la cola */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onAddToQueue(track);
-                            handleTrackActionFeedback('queue', track.id);
-                            setActiveMenuSongId(null);
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                        >
-                          <ListPlus size={14} />
-                          <span>Añadir a la cola</span>
-                        </button>
-
-                        {/* Ver Tabs / Acordes */}
-                        {track.tabs_url && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onOpenTabs(track);
-                              setActiveMenuSongId(null);
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors cursor-pointer text-left"
-                          >
-                            <Guitar size={14} />
-                            <span>Ver Acordes / Tabs</span>
-                          </button>
-                        )}
-
-                        {/* Añadir a Playlist */}
-                        <div>
-                          <button
-                            type="button"
-                            onClick={() => setPlaylistSubmenuSongId(isSubmenuOpen ? null : track.id)}
-                            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                          >
-                            <div className="flex items-center gap-3">
-                              <ListPlus size={14} />
-                              <span>Añadir a Playlist</span>
-                            </div>
-                            <span className="text-[10px] text-white/40">{isSubmenuOpen ? '▲' : '▼'}</span>
-                          </button>
-
-                          {isSubmenuOpen && (
-                            <div className="max-h-32 overflow-y-auto pl-6 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5">
-                              {playlists.length > 0 ? (
-                                playlists.map(p => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => {
-                                      onAddToPlaylist(track.id, p.id.toString());
-                                      setActiveMenuSongId(null);
-                                      setPlaylistSubmenuSongId(null);
-                                    }}
-                                    className="w-full text-left py-1.5 px-2 text-[11px] font-medium text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer truncate"
-                                  >
-                                    {p.name}
-                                  </button>
-                                ))
-                              ) : (
-                                <p className="py-2 text-[10px] text-white/30 text-center">No hay playlists</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Opciones de Moderación / Edición */}
-                        {(userRole === 'admin' || userRole === 'moderator') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onEditSong(track);
-                                setActiveMenuSongId(null);
-                              }}
-                              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1"
-                            >
-                              <Edit2 size={14} />
-                              <span>Editar metadatos</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onDeleteSong(track.id);
-                                setActiveMenuSongId(null);
-                              }}
-                              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer text-left"
-                            >
-                              <Trash2 size={14} />
-                              <span>Eliminar pista</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -503,6 +485,95 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
           })}
         </div>
       </div>
+
+      {/* PORTAL DEL MENÚ DESPLEGABLE (EVITA CLIPPING POR OVERFLOW-HIDDEN O BORDES) */}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {activeMenuSongId && menuPlacement && (() => {
+            const activeTrack = sortedTracks.find(t => t.id === activeMenuSongId);
+            if (!activeTrack) return null;
+            const isSubmenuOpen = playlistSubmenuSongId === activeTrack.id;
+
+            return menuPlacement.isMobile ? (
+              <div className="fixed inset-0 z-[600] flex flex-col justify-end">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveMenuSongId(null);
+                    setPlaylistSubmenuSongId(null);
+                    setMenuPlacement(null);
+                  }}
+                />
+                <motion.div 
+                  ref={menuContainerRef}
+                  initial={{ y: "100%", opacity: 0.5 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: "100%", opacity: 0 }}
+                  transition={{ type: "spring", damping: 28, stiffness: 320 }}
+                  className="relative z-[601] w-full max-h-[82vh] bg-[#161616] border-t border-white/10 rounded-t-3xl shadow-2xl flex flex-col overflow-hidden pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="w-10 h-1 bg-white/20 rounded-full mx-auto my-3 shrink-0" />
+                  <div className="px-5 pb-3 flex items-center gap-3 border-b border-white/5 shrink-0">
+                    <img
+                      src={resolvedCover || DEFAULT_COVER}
+                      alt={activeTrack.title}
+                      className="w-11 h-11 rounded-xl object-cover bg-white/5 border border-white/10 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-sm font-bold text-white truncate">{activeTrack.title}</h4>
+                      <p className="text-xs text-white/50 truncate font-medium mt-0.5">{activeTrack.artist || primaryArtist}</p>
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto px-3 py-2 space-y-1 overscroll-contain">
+                    {renderTrackActions(true)}
+                  </div>
+                </motion.div>
+              </div>
+            ) : (
+              <div className="fixed inset-0 z-[550]">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveMenuSongId(null);
+                    setPlaylistSubmenuSongId(null);
+                    setMenuPlacement(null);
+                  }}
+                />
+                <motion.div 
+                  ref={menuContainerRef}
+                  initial={{ opacity: 0, scale: 0.94, y: menuPlacement.top !== undefined ? -8 : 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.94, y: menuPlacement.top !== undefined ? -8 : 8 }}
+                  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                  style={{
+                    position: 'fixed',
+                    left: `${menuPlacement.left}px`,
+                    top: menuPlacement.top !== undefined ? `${menuPlacement.top}px` : undefined,
+                    bottom: menuPlacement.bottom !== undefined ? `${menuPlacement.bottom}px` : undefined,
+                    maxHeight: `${menuPlacement.maxHeight}px`,
+                    width: '240px',
+                  }}
+                  className="bg-[#141416]/95 backdrop-blur-2xl border border-white/10 rounded-2xl overflow-y-auto z-[551] shadow-2xl p-1.5 text-xs text-white select-none"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {renderTrackActions(false)}
+                </motion.div>
+              </div>
+            );
+          })()}
+        </AnimatePresence>,
+        document.body
+      )}
     </section>
   );
 };

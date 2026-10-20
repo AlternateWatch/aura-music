@@ -1,4 +1,6 @@
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useState, useSyncExternalStore, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
   Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2, HardDriveDownload,
@@ -51,6 +53,110 @@ export const MusicCard: React.FC<MusicCardProps> = ({
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState(false);
+
+  const [menuPlacement, setMenuPlacement] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    maxHeight: number;
+    isMobile: boolean;
+  } | null>(null);
+
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = () => {
+    setShowMenu(false);
+    setShowPlaylistSubmenu(false);
+    setMenuPlacement(null);
+  };
+
+  const handleToggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (showMenu) {
+      closeMenu();
+      return;
+    }
+
+    const isMobile = window.innerWidth < 640;
+    if (isMobile) {
+      setMenuPlacement({
+        left: 0,
+        maxHeight: window.innerHeight * 0.82,
+        isMobile: true,
+      });
+      setShowMenu(true);
+      setShowPlaylistSubmenu(false);
+      return;
+    }
+
+    if (menuButtonRef.current) {
+      const rect = menuButtonRef.current.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const MENU_WIDTH = 260;
+      const PADDING = 12;
+
+      // Horizontal: alinear a la derecha del botón por defecto, protegiendo contra corte izquierdo y derecho
+      let left = rect.right - MENU_WIDTH;
+      if (left < PADDING) {
+        left = Math.max(PADDING, rect.left);
+      }
+      if (left + MENU_WIDTH > vw - PADDING) {
+        left = Math.max(PADDING, vw - MENU_WIDTH - PADDING);
+      }
+
+      // Vertical: calcular espacio disponible arriba y abajo
+      const spaceBelow = vh - rect.bottom - PADDING;
+      const spaceAbove = rect.top - PADDING;
+      const prefersDown = spaceBelow >= 340 || spaceBelow >= spaceAbove;
+
+      let top: number | undefined;
+      let bottom: number | undefined;
+      let maxHeight: number;
+
+      if (prefersDown) {
+        top = rect.bottom + 6;
+        maxHeight = Math.min(spaceBelow, 480);
+      } else {
+        bottom = vh - rect.top + 6;
+        maxHeight = Math.min(spaceAbove, 480);
+      }
+
+      setMenuPlacement({
+        top,
+        bottom,
+        left,
+        maxHeight,
+        isMobile: false,
+      });
+      setShowMenu(true);
+      setShowPlaylistSubmenu(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const handleScroll = (e: Event) => {
+      if (menuContainerRef.current && e.target instanceof Node && menuContainerRef.current.contains(e.target)) {
+        return;
+      }
+      closeMenu();
+    };
+
+    const handleResize = () => {
+      closeMenu();
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [showMenu]);
+
 
   // Feedback visual al añadir a la cola o reproducir siguiente
   const [addedToQueue, setAddedToQueue] = useState(false);
@@ -140,6 +246,237 @@ export const MusicCard: React.FC<MusicCardProps> = ({
   const hasVideo = Boolean((song as any).video_url && (song as any).video_url.trim());
   const hasTabs = Boolean((song as any).tabs_url && (song as any).tabs_url.trim());
 
+  const renderMenuActions = (isMobile: boolean) => {
+    const itemPadding = isMobile ? 'px-4 py-3 text-sm' : 'px-3 py-2 text-xs';
+    const iconSize = isMobile ? 18 : 15;
+
+    return (
+      <>
+        {/* 1. LIKE / FAVORITOS */}
+        <button
+          type="button"
+          onClick={() => { hapticImpact('light'); onToggleLike(); closeMenu(); }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+        >
+          <Heart size={iconSize} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
+          <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+        </button>
+
+        {/* 1.5 DESCARGAR MODO SIN CONEXIÓN */}
+        <button
+          type="button"
+          disabled={isDownloading}
+          onClick={() => {
+            hapticImpact('light');
+            void toggleSongOffline(song);
+            closeMenu();
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50`}
+        >
+          {isDownloading ? (
+            <Loader2 size={iconSize} className="text-brand-primary animate-spin" />
+          ) : (
+            <Download size={iconSize} className={isOffline ? "text-emerald-400" : ""} />
+          )}
+          <span>
+            {isDownloading
+              ? 'Descargando...'
+              : isOffline
+                ? 'Quitar descarga offline'
+                : 'Descargar sin conexión'}
+          </span>
+        </button>
+
+        {/* 1.6 GUARDAR ARCHIVO EN DISCO DURO */}
+        <button
+          type="button"
+          disabled={isDiskDownloading}
+          onClick={() => {
+            hapticImpact('light');
+            void downloadSongToDisk(song);
+            closeMenu();
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50`}
+        >
+          {isDiskDownloading ? (
+            <Loader2 size={iconSize} className="text-brand-primary animate-spin" />
+          ) : isDiskDownloaded ? (
+            <Check size={iconSize} className="text-emerald-400" />
+          ) : (
+            <HardDriveDownload size={iconSize} />
+          )}
+          <span className={isDiskDownloaded ? "text-emerald-400" : ""}>
+            {isDiskDownloading
+              ? 'Descargando al disco...'
+              : isDiskDownloaded
+                ? 'Descargada en disco (guardar copia)'
+                : 'Descargar archivo al disco'}
+          </span>
+        </button>
+
+        {/* 2. VER TABS / ACORDES */}
+        <button
+          type="button"
+          onClick={() => { 
+            closeMenu();
+            const tabsUrl = (song as any).tabs_url;
+            if (tabsUrl && tabsUrl.trim()) {
+              openExternalLink(tabsUrl);
+            } else {
+              onOpenTabs();
+            }
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold transition-colors cursor-pointer text-left ${
+            hasTabs ? 'text-white/70 hover:text-brand-primary hover:bg-white/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
+          }`}
+        >
+          <Guitar size={iconSize} />
+          <span>{hasTabs ? 'Ver Acordes / Tabs' : 'Sin acordes / tabs'}</span>
+        </button>
+
+        {/* 3. VÍDEO OFICIAL YOUTUBE */}
+        <button
+          type="button"
+          onClick={() => { closeMenu(); handleOpenVideo(); }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold transition-colors cursor-pointer text-left ${
+            hasVideo ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
+          }`}
+        >
+          <Youtube size={iconSize} />
+          <span>{hasVideo ? 'Vídeo Oficial (YouTube)' : 'Sin vídeo oficial'}</span>
+        </button>
+
+        {/* IR AL ÁLBUM */}
+        {song.album && onOpenAlbum && (
+          <button
+            type="button"
+            onClick={() => {
+              closeMenu();
+              onOpenAlbum(song.album);
+            }}
+            className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+          >
+            <Disc size={iconSize} />
+            <span className="truncate">Ir al álbum</span>
+          </button>
+        )}
+
+        {/* IR AL ARTISTA */}
+        {song.artist && onOpenArtist && (
+          <button
+            type="button"
+            onClick={() => {
+              closeMenu();
+              onOpenArtist(song.artist);
+            }}
+            className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+          >
+            <User size={iconSize} />
+            <span className="truncate">Ir al artista</span>
+          </button>
+        )}
+
+        {/* 4. REPRODUCIR SIGUIENTE */}
+        <button
+          type="button"
+          onClick={(e) => {
+            handlePlayNextClick(e);
+            closeMenu();
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+        >
+          {playedNext ? <Check size={iconSize} className="text-green-400" /> : <ListMusic size={iconSize} />}
+          <span>{playedNext ? '¡Se reproducirá siguiente!' : 'Reproducir siguiente'}</span>
+        </button>
+
+        {/* 5. AÑADIR A LA COLA */}
+        <button
+          type="button"
+          onClick={(e) => { 
+            handleQueueClick(e);
+            closeMenu(); 
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+        >
+          {addedToQueue ? <Check size={iconSize} className="text-green-400" /> : <ListPlus size={iconSize} />}
+          <span>{addedToQueue ? '¡Añadida a la cola!' : 'Añadir a la cola'}</span>
+        </button>
+
+        {/* 6. AÑADIR A PLAYLIST */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPlaylistSubmenu(!showPlaylistSubmenu)}
+            className={`w-full flex items-center justify-between ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+          >
+            <div className="flex items-center gap-3">
+              <ListPlus size={iconSize} />
+              <span>Añadir a Playlist</span>
+            </div>
+            <span className="text-[10px] text-white/30">{showPlaylistSubmenu ? '▲' : '▼'}</span>
+          </button>
+
+          {showPlaylistSubmenu && (
+            <div className={`${isMobile ? 'max-h-48' : 'max-h-36'} overflow-y-auto pl-8 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5`}>
+              {playlists.length > 0 ? (
+                playlists.map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      onAddToPlaylist(p.id.toString());
+                      closeMenu();
+                    }}
+                    className={`w-full text-left py-2 px-2.5 ${isMobile ? 'text-xs' : 'text-[11px]'} font-medium text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer truncate`}
+                  >
+                    {p.name}
+                  </button>
+                ))
+              ) : (
+                <p className="py-2 text-[10px] text-white/30 text-center">No hay playlists</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 7. QUITAR DE LA PLAYLIST Y DE TODO */}
+        {onRemoveFromPlaylist && (
+          <button
+            type="button"
+            onClick={() => { onRemoveFromPlaylist(); closeMenu(); }}
+            className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1`}
+          >
+            <Trash2 size={iconSize} />
+            <span>Quitar de esta lista</span>
+          </button>
+        )}
+
+        {/* 8. OPCIONES DE ADMINISTRACIÓN */}
+        {(userRole === 'admin' || userRole === 'moderator') && (
+          <button
+            type="button"
+            onClick={() => { onEdit(); closeMenu(); }}
+            className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1`}
+          >
+            <Edit2 size={iconSize} />
+            <span>Editar metadatos</span>
+          </button>
+        )}
+
+        {userRole === 'admin' && (
+          <button
+            type="button"
+            onClick={() => { hapticImpact('heavy'); onDelete(); closeMenu(); }}
+            className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer text-left`}
+          >
+            <Trash2 size={iconSize} />
+            <span>Eliminar canción</span>
+          </button>
+        )}
+      </>
+    );
+  };
+
   return (
     <div
       draggable={!!onDragStart}
@@ -228,12 +565,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         {/* MENÚ DE 3 PUNTOS */}
         <div className="relative flex items-center shrink-0">
           <button
+            ref={menuButtonRef}
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowMenu(!showMenu);
-              setShowPlaylistSubmenu(false);
-            }}
+            onClick={handleToggleMenu}
             className={`p-1.5 sm:p-2 rounded-full border transition-all cursor-pointer outline-none ${
               showMenu 
                 ? 'bg-brand-primary text-black border-brand-primary shadow-lg' 
@@ -243,251 +577,97 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           >
             <MoreVertical size={16} className="md:w-4 md:h-4" />
           </button>
-
-          {/* DESPLEGABLE CON TODAS LAS ACCIONES */}
-          {showMenu && (
-            <>
-              <div 
-                className="fixed inset-0 z-40" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowMenu(false);
-                  setShowPlaylistSubmenu(false);
-                }} 
-              />
-
-              <div 
-                className="absolute bottom-full right-0 mb-2 w-64 bg-[#161616]/95 backdrop-blur-2xl border border-white/10 rounded-2xl overflow-hidden z-50 shadow-2xl p-1.5 text-xs select-none animate-in fade-in zoom-in-95 duration-150"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* 1. LIKE / FAVORITOS */}
-                <button
-                  type="button"
-                  onClick={() => { hapticImpact('light'); onToggleLike(); setShowMenu(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                >
-                  <Heart size={15} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
-                  <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
-                </button>
-
-                {/* 1.5 DESCARGAR MODO SIN CONEXIÓN */}
-                <button
-                  type="button"
-                  disabled={isDownloading}
-                  onClick={() => {
-                    hapticImpact('light');
-                    void toggleSongOffline(song);
-                    setShowMenu(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50"
-                >
-                  {isDownloading ? (
-                    <Loader2 size={15} className="text-brand-primary animate-spin" />
-                  ) : (
-                    <Download size={15} className={isOffline ? "text-emerald-400" : ""} />
-                  )}
-                  <span>
-                    {isDownloading
-                      ? 'Descargando...'
-                      : isOffline
-                        ? 'Quitar descarga offline'
-                        : 'Descargar sin conexión'}
-                  </span>
-                </button>
-
-                {/* 1.6 GUARDAR ARCHIVO EN DISCO DURO */}
-                <button
-                  type="button"
-                  disabled={isDiskDownloading}
-                  onClick={() => {
-                    hapticImpact('light');
-                    void downloadSongToDisk(song);
-                    setShowMenu(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left disabled:opacity-50"
-                >
-                  {isDiskDownloading ? (
-                    <Loader2 size={15} className="text-brand-primary animate-spin" />
-                  ) : isDiskDownloaded ? (
-                    <Check size={15} className="text-emerald-400" />
-                  ) : (
-                    <HardDriveDownload size={15} />
-                  )}
-                  <span className={isDiskDownloaded ? "text-emerald-400" : ""}>
-                    {isDiskDownloading
-                      ? 'Descargando al disco...'
-                      : isDiskDownloaded
-                        ? 'Descargada en disco (guardar copia)'
-                        : 'Descargar archivo al disco'}
-                  </span>
-                </button>
-
-                {/* 2. VER TABS / ACORDES (Abre Songsterr en el navegador del sistema) */}
-                <button
-                  type="button"
-                  onClick={() => { 
-                    setShowMenu(false);
-                    const tabsUrl = (song as any).tabs_url;
-                    if (tabsUrl && tabsUrl.trim()) {
-                      openExternalLink(tabsUrl);
-                    } else {
-                      onOpenTabs();
-                    }
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
-                    hasTabs ? 'text-white/70 hover:text-brand-primary hover:bg-white/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
-                  }`}
-                >
-                  <Guitar size={15} />
-                  <span>{hasTabs ? 'Ver Acordes / Tabs' : 'Sin acordes / tabs'}</span>
-                </button>
-
-                {/* 3. VÍDEO OFICIAL YOUTUBE (Abre el vídeo en el navegador del sistema) */}
-                <button
-                  type="button"
-                  onClick={() => { setShowMenu(false); handleOpenVideo(); }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
-                    hasVideo ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10' : 'text-white/30 hover:text-white/50 hover:bg-white/5'
-                  }`}
-                >
-                  <Youtube size={15} />
-                  <span>{hasVideo ? 'Vídeo Oficial (YouTube)' : 'Sin vídeo oficial'}</span>
-                </button>
-
-                {/* IR AL ÁLBUM */}
-                {song.album && onOpenAlbum && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowMenu(false);
-                      onOpenAlbum(song.album);
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                  >
-                    <Disc size={15} />
-                    <span className="truncate">Ir al álbum</span>
-                  </button>
-                )}
-
-                {/* IR AL ARTISTA */}
-                {song.artist && onOpenArtist && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowMenu(false);
-                      onOpenArtist(song.artist);
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                  >
-                    <User size={15} />
-                    <span className="truncate">Ir al artista</span>
-                  </button>
-                )}
-
-                {/* 4. REPRODUCIR SIGUIENTE */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    handlePlayNextClick(e);
-                    setShowMenu(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                >
-                  {playedNext ? <Check size={15} className="text-green-400" /> : <ListMusic size={15} />}
-                  <span>{playedNext ? '¡Se reproducirá siguiente!' : 'Reproducir siguiente'}</span>
-                </button>
-
-                {/* 5. AÑADIR A LA COLA */}
-                <button
-                  type="button"
-                  onClick={(e) => { 
-                    handleQueueClick(e);
-                    setShowMenu(false); 
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                >
-                  {addedToQueue ? <Check size={15} className="text-green-400" /> : <ListPlus size={15} />}
-                  <span>{addedToQueue ? '¡Añadida a la cola!' : 'Añadir a la cola'}</span>
-                </button>
-
-                {/* 6. AÑADIR A PLAYLIST */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowPlaylistSubmenu(!showPlaylistSubmenu)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ListPlus size={15} />
-                      <span>Añadir a Playlist</span>
-                    </div>
-                    <span className="text-[10px] text-white/30">{showPlaylistSubmenu ? '▲' : '▼'}</span>
-                  </button>
-
-                  {showPlaylistSubmenu && (
-                    <div className="max-h-36 overflow-y-auto pl-8 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5">
-                      {playlists.length > 0 ? (
-                        playlists.map(p => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              onAddToPlaylist(p.id.toString());
-                              setShowMenu(false);
-                              setShowPlaylistSubmenu(false);
-                            }}
-                            className="w-full text-left py-1.5 px-2 text-[11px] font-medium text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer truncate"
-                          >
-                            {p.name}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="py-2 text-[10px] text-white/30 text-center">No hay playlists</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* 7. QUITAR DE LA PLAYLIST Y DE TODO */}
-                {onRemoveFromPlaylist && (
-                  <button
-                    type="button"
-                    onClick={() => { onRemoveFromPlaylist(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1"
-                  >
-                    <Trash2 size={15} />
-                    <span>Quitar de esta lista</span>
-                  </button>
-                )}
-
-                {/* 8. OPCIONES DE ADMINISTRACIÓN */}
-                {(userRole === 'admin' || userRole === 'moderator') && (
-                  <button
-                    type="button"
-                    onClick={() => { onEdit(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1"
-                  >
-                    <Edit2 size={15} />
-                    <span>Editar metadatos</span>
-                  </button>
-                )}
-
-                {userRole === 'admin' && (
-                  <button
-                    type="button"
-                    onClick={() => { hapticImpact('heavy'); onDelete(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer text-left"
-                  >
-                    <Trash2 size={15} />
-                    <span>Eliminar canción</span>
-                  </button>
-                )}
-              </div>
-            </>
-          )}
         </div>
 
       </div>
+
+      {/* PORTAL DEL MENÚ DESPLEGABLE (EVITA CLIPPING POR OVERFLOW-HIDDEN O BORDES) */}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {showMenu && menuPlacement && (
+            menuPlacement.isMobile ? (
+              <div className="fixed inset-0 z-[600] flex flex-col justify-end">
+                {/* Backdrop */}
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeMenu();
+                  }}
+                />
+                {/* Bottom Sheet */}
+                <motion.div 
+                  ref={menuContainerRef}
+                  initial={{ y: "100%", opacity: 0.5 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: "100%", opacity: 0 }}
+                  transition={{ type: "spring", damping: 28, stiffness: 320 }}
+                  className="relative z-[601] w-full max-h-[82vh] bg-[#161616] border-t border-white/10 rounded-t-3xl shadow-2xl flex flex-col overflow-hidden pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="w-10 h-1 bg-white/20 rounded-full mx-auto my-3 shrink-0" />
+                  
+                  {/* Cabecera de la pista */}
+                  <div className="px-5 pb-3 flex items-center gap-3 border-b border-white/5 shrink-0">
+                    <img
+                      src={resolvedCoverUrl || song.coverUrl || DEFAULT_COVER}
+                      alt={song.title}
+                      className="w-11 h-11 rounded-xl object-cover bg-white/5 border border-white/10 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-sm font-bold text-white truncate">{song.title}</h4>
+                      <p className="text-xs text-white/50 truncate font-medium mt-0.5">{song.artist}</p>
+                    </div>
+                  </div>
+
+                  {/* Acciones */}
+                  <div className="overflow-y-auto px-3 py-2 space-y-1 overscroll-contain">
+                    {renderMenuActions(true)}
+                  </div>
+                </motion.div>
+              </div>
+            ) : (
+              <div className="fixed inset-0 z-[550]">
+                {/* Backdrop invisible para cerrar al hacer clic fuera */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeMenu();
+                  }}
+                />
+                <motion.div 
+                  ref={menuContainerRef}
+                  initial={{ opacity: 0, scale: 0.94, y: menuPlacement.top !== undefined ? -8 : 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.94, y: menuPlacement.top !== undefined ? -8 : 8 }}
+                  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                  style={{
+                    position: 'fixed',
+                    left: `${menuPlacement.left}px`,
+                    top: menuPlacement.top !== undefined ? `${menuPlacement.top}px` : undefined,
+                    bottom: menuPlacement.bottom !== undefined ? `${menuPlacement.bottom}px` : undefined,
+                    maxHeight: `${menuPlacement.maxHeight}px`,
+                    width: '260px',
+                  }}
+                  className="bg-[#161616]/95 backdrop-blur-2xl border border-white/10 rounded-2xl overflow-y-auto z-[551] shadow-2xl p-1.5 text-xs select-none"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {renderMenuActions(false)}
+                </motion.div>
+              </div>
+            )
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };
