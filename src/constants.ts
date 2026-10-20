@@ -16,10 +16,12 @@ export interface Song {
 export interface Playlist {
   id: string;
   name: string;
-  songIds: string[];
-  color: string;
-  ownerId: string;
-  createdAt: string;
+  songIds?: string[];
+  color?: string;
+  ownerId?: string;
+  createdAt?: string;
+  description?: string;
+  cover_path?: string;
 }
 
 

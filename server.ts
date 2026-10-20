@@ -228,6 +228,24 @@ pool.execute(`
     console.error('[DB] Error verificando/agregando columna gemini_api_key:', err);
 });
 
+// Auto-crear columnas description y cover_path si no existen en la tabla playlists
+pool.execute(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'playlists' AND COLUMN_NAME IN ('description', 'cover_path')
+`).then(async ([rows]: any) => {
+    const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
+    if (!existingCols.has('description')) {
+        await pool.execute('ALTER TABLE playlists ADD COLUMN description TEXT NULL');
+        console.log('[DB] Columna description agregada a la tabla playlists.');
+    }
+    if (!existingCols.has('cover_path')) {
+        await pool.execute('ALTER TABLE playlists ADD COLUMN cover_path VARCHAR(500) NULL');
+        console.log('[DB] Columna cover_path agregada a la tabla playlists.');
+    }
+}).catch(err => {
+    console.error('[DB] Error verificando/agregando columnas a playlists:', err);
+});
+
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -1354,60 +1372,125 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
 
 
 
-app.post('/api/playlists', authenticateToken, async (req: any, res: Response) => {
-
+app.post('/api/playlists', authenticateToken, upload.single('cover'), async (req: any, res: Response) => {
     try {
+        const name = (req.body.name || '').trim();
+        if (!name) {
+            return res.status(400).json({ error: "Playlist name is required" });
+        }
+        const description = req.body.description !== undefined && req.body.description !== null 
+            ? (String(req.body.description).trim() || null) 
+            : null;
+        let cover_path: string | null = null;
 
-        await pool.execute(
+        if (req.file) {
+            cover_path = `/uploads/${req.file.filename}`;
+            if (isB2Configured()) {
+                await syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+            }
+        }
 
-            'INSERT INTO playlists (name, owner_id) VALUES (?, ?)',
-
-            [req.body.name, req.user.userId]
-
+        const [result]: any = await pool.execute(
+            'INSERT INTO playlists (name, description, cover_path, owner_id) VALUES (?, ?, ?, ?)',
+            [name, description, cover_path, req.user.userId]
         );
 
-
-
-        res.send();
-
+        res.json({ id: result.insertId, name, description, cover_path });
     } catch (e) {
-
         console.error("Create playlist error:", e);
-
         res.status(500).json({ error: "Error creating playlist" });
-
     }
-
 });
 
-
-
-
-
-app.delete('/api/playlists/:id', authenticateToken, async (req: any, res: Response) => {
-
+app.patch('/api/playlists/:id', authenticateToken, upload.single('cover'), async (req: any, res: Response) => {
     try {
+        const playlistId = req.params.id;
+        const [rows]: any = await pool.execute(
+            'SELECT * FROM playlists WHERE id = ? AND owner_id = ?',
+            [playlistId, req.user.userId]
+        );
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Playlist not found or unauthorized" });
+        }
+        const current = rows[0];
+
+        let name = req.body.name !== undefined ? String(req.body.name).trim() : current.name;
+        if (!name) name = current.name;
+
+        let description = req.body.description !== undefined 
+            ? (String(req.body.description).trim() || null) 
+            : current.description;
+        let cover_path = current.cover_path;
+
+        if (req.file) {
+            const newCoverPath = `/uploads/${req.file.filename}`;
+            if (current.cover_path) {
+                const oldPath = resolveDiskPath(current.cover_path);
+                if (oldPath && fs.existsSync(oldPath)) {
+                    try { fs.unlinkSync(oldPath); } catch {}
+                }
+                if (isB2Configured()) {
+                    const oldFilename = path.basename(current.cover_path.split('?')[0]);
+                    deleteFromB2(oldFilename).catch(() => {});
+                }
+            }
+            if (isB2Configured()) {
+                await syncFileToB2(req.file.filename, req.file.path, req.file.mimetype, req.file.size);
+            }
+            cover_path = newCoverPath;
+        } else if (req.body.removeCover === 'true' || req.body.removeCover === true) {
+            if (current.cover_path) {
+                const oldPath = resolveDiskPath(current.cover_path);
+                if (oldPath && fs.existsSync(oldPath)) {
+                    try { fs.unlinkSync(oldPath); } catch {}
+                }
+                if (isB2Configured()) {
+                    const oldFilename = path.basename(current.cover_path.split('?')[0]);
+                    deleteFromB2(oldFilename).catch(() => {});
+                }
+            }
+            cover_path = null;
+        }
 
         await pool.execute(
-
-            'DELETE FROM playlists WHERE id = ? AND owner_id = ?',
-
-            [req.params.id, req.user.userId]
-
+            'UPDATE playlists SET name = ?, description = ?, cover_path = ? WHERE id = ? AND owner_id = ?',
+            [name, description, cover_path, playlistId, req.user.userId]
         );
 
+        res.json({ id: Number(playlistId), name, description, cover_path });
+    } catch (e) {
+        console.error("Update playlist error:", e);
+        res.status(500).json({ error: "Error updating playlist" });
+    }
+});
 
+app.delete('/api/playlists/:id', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT cover_path FROM playlists WHERE id = ? AND owner_id = ?',
+            [req.params.id, req.user.userId]
+        );
+        if (rows?.[0]?.cover_path) {
+            const oldPath = resolveDiskPath(rows[0].cover_path);
+            if (oldPath && fs.existsSync(oldPath)) {
+                try { fs.unlinkSync(oldPath); } catch {}
+            }
+            if (isB2Configured()) {
+                const oldFilename = path.basename(rows[0].cover_path.split('?')[0]);
+                deleteFromB2(oldFilename).catch(() => {});
+            }
+        }
+
+        await pool.execute(
+            'DELETE FROM playlists WHERE id = ? AND owner_id = ?',
+            [req.params.id, req.user.userId]
+        );
 
         res.send();
-
     } catch (e) {
-
         console.error("Delete playlist error:", e);
-
         res.status(500).json({ error: "Error deleting playlist" });
-
     }
-
 });
 
 

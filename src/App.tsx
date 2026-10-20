@@ -4,7 +4,7 @@ import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
 import { AlbumDetailView } from "./components/AlbumDetailView";
-import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl } from "./utils/api";
+import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl, resolveApiUrl } from "./utils/api";
 import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
 import { THEMES } from "./constants/themes";
@@ -30,6 +30,7 @@ Copy,
   SlidersHorizontal,
   CheckCircle2,
   Loader2,
+  Shuffle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -390,7 +391,13 @@ export default function App() {
   
   const [trackToDelete, setTrackToDelete] = useState<string | null>(null);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState(false);
+  const [editingPlaylist, setEditingPlaylist] = useState<any | null>(null);
   const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [newPlaylistDescription, setNewPlaylistDescription] = useState("");
+  const [playlistCoverFile, setPlaylistCoverFile] = useState<File | null>(null);
+  const [playlistCoverPreview, setPlaylistCoverPreview] = useState<string | null>(null);
+  const [playlistRemoveCover, setPlaylistRemoveCover] = useState(false);
+  const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isPersonalizationOpen, setIsPersonalizationOpen] = useState(false);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
@@ -1215,6 +1222,8 @@ useEffect(() => {
           name: p.name,
           songIds: p.songIds,
           color: p.color || '#a855f7',
+          description: p.description,
+          cover_path: p.cover_path,
           ownerId: '',
           createdAt: new Date(p.syncedAt).toISOString()
         })));
@@ -1235,6 +1244,8 @@ useEffect(() => {
             name: p.name,
             songIds: p.songIds,
             color: p.color || '#a855f7',
+            description: p.description,
+            cover_path: p.cover_path,
             ownerId: '',
             createdAt: new Date(p.syncedAt).toISOString()
           })));
@@ -1252,6 +1263,8 @@ useEffect(() => {
           name: p.name,
           songIds: p.songIds,
           color: p.color || '#a855f7',
+          description: p.description,
+          cover_path: p.cover_path,
           ownerId: '',
           createdAt: new Date(p.syncedAt).toISOString()
         })));
@@ -2162,29 +2175,94 @@ useEffect(() => {
     }
   };
 
-  const handleCreatePlaylist = async (e: React.FormEvent) => {
+  const handleOpenCreatePlaylist = () => {
+    setEditingPlaylist(null);
+    setNewPlaylistName("");
+    setNewPlaylistDescription("");
+    setPlaylistCoverFile(null);
+    setPlaylistCoverPreview(null);
+    setPlaylistRemoveCover(false);
+    setIsCreatePlaylistOpen(true);
+  };
+
+  const handleOpenEditPlaylist = (playlist: any) => {
+    setEditingPlaylist(playlist);
+    setNewPlaylistName(playlist.name || "");
+    setNewPlaylistDescription(playlist.description || "");
+    setPlaylistCoverFile(null);
+    setPlaylistCoverPreview(playlist.cover_path ? (resolveApiUrl(playlist.cover_path) || null) : null);
+    setPlaylistRemoveCover(false);
+    setIsCreatePlaylistOpen(true);
+  };
+
+  const handleSavePlaylistModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlaylistName.trim()) return;
     const activeToken = token || localStorage.getItem('aura_token');
+    setIsSavingPlaylist(true);
+
     try {
-        const res = await fetch(`${API_BASE}/api/playlists`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` }, 
-            body: JSON.stringify({ name: newPlaylistName }) 
+      const formData = new FormData();
+      formData.append('name', newPlaylistName.trim());
+      formData.append('description', newPlaylistDescription.trim());
+      if (playlistCoverFile) {
+        formData.append('cover', playlistCoverFile);
+      }
+      if (editingPlaylist && playlistRemoveCover) {
+        formData.append('removeCover', 'true');
+      }
+
+      if (editingPlaylist) {
+        const res = await fetch(`${API_BASE}/api/playlists/${editingPlaylist.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${activeToken}`
+          },
+          body: formData
         });
         if (res.ok) {
-            setNewPlaylistName(""); 
-            setIsCreatePlaylistOpen(false); 
-            loadPlaylists();
+          setIsCreatePlaylistOpen(false);
+          setEditingPlaylist(null);
+          await loadPlaylists();
+          await loadContent();
+        } else {
+          alert('Error al actualizar la playlist.');
         }
-    } catch(err) { console.error("Error creating playlist"); }
+      } else {
+        const res = await fetch(`${API_BASE}/api/playlists`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${activeToken}`
+          },
+          body: formData
+        });
+        if (res.ok) {
+          setIsCreatePlaylistOpen(false);
+          setNewPlaylistName("");
+          setNewPlaylistDescription("");
+          setPlaylistCoverFile(null);
+          setPlaylistCoverPreview(null);
+          await loadPlaylists();
+        } else {
+          alert('Error al crear la playlist.');
+        }
+      }
+    } catch (err) {
+      console.error("Error saving playlist:", err);
+      alert('Error de conexión al guardar la playlist.');
+    } finally {
+      setIsSavingPlaylist(false);
+    }
   };
 
-  const handleDeletePlaylist = async (playlistId: string) => {
-    if (!confirm("Delete playlist?")) return;
+  const handleCreatePlaylist = handleSavePlaylistModal;
+
+  const handleDeletePlaylist = async (playlistId: string | number) => {
+    if (!confirm("¿Eliminar esta playlist?")) return;
     const activeToken = token || localStorage.getItem('aura_token');
     await fetch(`${API_BASE}/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
-    if (activePlaylistId === playlistId) setActivePlaylistId("all");
+    if (activePlaylistId === playlistId.toString()) setActivePlaylistId("all");
+    try { await removePlaylistOffline(playlistId); } catch {}
     loadPlaylists();
   };
 
@@ -3464,10 +3542,11 @@ transition={{
 
               <button
                 onClick={() => {
-                  setIsCreatePlaylistOpen(true);
+                  handleOpenCreatePlaylist();
                   setIsMobileMenuOpen(false);
                 }}
-                className="w-6 h-6 rounded-full bg-brand-primary text-black flex items-center justify-center hover:scale-105 transition-transform"
+                className="w-6 h-6 rounded-full bg-brand-primary text-black flex items-center justify-center hover:scale-105 transition-transform cursor-pointer"
+                title="Crear playlist"
               >
                 <Plus size={13} />
               </button>
@@ -3478,7 +3557,7 @@ transition={{
               {playlists.length === 0 ? (
                 <button
                   onClick={() => {
-                    setIsCreatePlaylistOpen(true);
+                    handleOpenCreatePlaylist();
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs opacity-40 hover:opacity-70 transition-opacity ${
@@ -3518,7 +3597,16 @@ transition={{
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <Music2 size={13} className="shrink-0 opacity-50" />
+                        {p.cover_path ? (
+                          <img 
+                            src={getThumbnailUrl(resolveApiUrl(p.cover_path), 80)} 
+                            alt="" 
+                            className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" 
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <Music2 size={13} className="shrink-0 opacity-50" />
+                        )}
                         <span className="truncate">
                           {p.name}
                         </span>
@@ -3531,10 +3619,24 @@ transition={{
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setIsMobileMenuOpen(false);
+                        handleOpenEditPlaylist(p);
+                      }}
+                      className="p-2 rounded-md text-white/40 active:text-brand-primary transition-colors shrink-0"
+                      aria-label={`Editar playlist ${p.name}`}
+                      title="Editar playlist"
+                    >
+                      <Edit2 size={12} />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         handleDeletePlaylist(p.id);
                       }}
                       className="mr-1.5 p-2 rounded-md text-red-500/50 active:text-red-500 active:bg-red-500/10 transition-colors shrink-0"
                       aria-label={`Delete playlist ${p.name}`}
+                      title="Eliminar playlist"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -3868,7 +3970,7 @@ transition={{
                       <div className="flex items-center justify-between mb-6">
                         <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3>
                         <div className="flex gap-3">
-                          <Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsCreatePlaylistOpen(true)} />
+                          <Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" title="Crear playlist" onClick={handleOpenCreatePlaylist} />
                           <UploadIcon size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
                         </div>
                       </div>
@@ -3882,13 +3984,26 @@ transition={{
                         </li>
                         {playlists.map(p => (
                             <li key={p.id} className="group flex items-center justify-between cursor-pointer">
-                                <div className="flex items-center gap-2 min-w-0" onClick={() => { setActivePlaylistId(p.id.toString()); setShowModeration(false); setSelectedAlbumName(null); }}>
-                                  <span className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary" : "text-white/50 hover:text-white"}`}>{p.name}</span>
+                                <div className="flex items-center gap-2.5 min-w-0" onClick={() => { setActivePlaylistId(p.id.toString()); setShowModeration(false); setSelectedAlbumName(null); setSelectedArtistName(null); }}>
+                                  {p.cover_path ? (
+                                    <img 
+                                      src={getThumbnailUrl(resolveApiUrl(p.cover_path), 80)} 
+                                      alt="" 
+                                      className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" 
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  ) : (
+                                    <Music2 size={13} className="shrink-0 opacity-40 group-hover:opacity-75 transition-opacity" />
+                                  )}
+                                  <span className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary font-bold" : "text-white/50 hover:text-white"}`}>{p.name}</span>
                                   {offlinePlaylistIds.has(p.id.toString()) && (
                                     <Download size={11} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
                                   )}
                                 </div>
-                                <Trash2 size={12} className="opacity-0 group-hover:opacity-40 hover:!opacity-100 text-red-500 transition-all shrink-0 ml-2" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }} />
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2">
+                                  <Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }} />
+                                  <Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }} />
+                                </div>
                             </li>
                         ))}
                       </ul>
@@ -4143,18 +4258,198 @@ transition={{
                 
                 {/* HERO BANNER */}
                 {!isMinigameActive && !selectedAlbumName && (
-                    <section className="relative h-48 md:h-72 shrink-0 flex flex-col justify-end p-6 md:p-10 rounded-[30px] md:rounded-[40px] overflow-hidden group shadow-2xl">
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent z-10" />
-                        <motion.div key={currentSong?.id} initial={{ scale: 1.1, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="absolute inset-0 -z-10 bg-[#0a0a0a]">
-                            {currentSong && !heroImageError ? <img src={resolvedCoverUrl || undefined} className="w-full h-full object-cover grayscale-[0.3] brightness-75 transition-transform duration-1000" onError={() => setHeroImageError(true)} /> : <div className="w-full h-full flex flex-col items-center justify-center text-white/5"><Music2 size={80} /></div>}
-                        </motion.div>
-                        <div className="z-20">
-                            <p className="text-[9px] md:text-[11px] uppercase tracking-[0.4em] text-brand-primary font-bold mb-2 md:mb-3">{currentSong ? "Now Streaming" : "Library Core"}</p>
-                            <h1 className="text-3xl md:text-6xl font-serif italic text-white mb-2 leading-none truncate">{currentSong?.title || "AURA Library"}</h1>
-                            {currentSong && <p className="text-white/60 italic mb-4 md:mb-6 font-serif text-sm md:text-lg">{currentSong.artist}</p>}
-                            <div className="flex gap-4"><button onClick={() => currentSong && setIsPlaying(!isPlaying)} className="px-6 md:px-8 py-2 md:py-2.5 rounded-full bg-white text-black font-bold text-[9px] md:text-[10px] uppercase shadow-xl hover:scale-105 transition-all cursor-pointer">{isPlaying ? "Pause" : "Resume"}</button></div>
-                        </div>
-                </section>
+                  (() => {
+                    const currentPlaylist = playlists.find(p => p.id.toString() === activePlaylistId);
+                    if (currentPlaylist) {
+                      const plCover = currentPlaylist.cover_path 
+                        ? resolveApiUrl(currentPlaylist.cover_path) 
+                        : (songs[0]?.coverUrl || DEFAULT_COVER);
+                      const isCurrentPlPlaying = isPlaying && currentSong && songs.some(s => s.id === currentSong.id);
+
+                      return (
+                        <section className="relative min-h-[14rem] md:min-h-[16rem] shrink-0 flex flex-col justify-end p-6 md:p-8 rounded-[30px] md:rounded-[40px] overflow-hidden group shadow-2xl border border-white/10 bg-white/[0.02]">
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/30 z-10" />
+                          <div className="absolute inset-0 -z-10 bg-[#0c0c0c]">
+                            {currentPlaylist.cover_path || songs[0]?.coverUrl ? (
+                              <img 
+                                src={plCover} 
+                                className="w-full h-full object-cover blur-2xl opacity-40 scale-110" 
+                                alt="" 
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-brand-primary/10 via-black to-black" />
+                            )}
+                          </div>
+
+                          <div className="z-20 flex flex-col md:flex-row items-center md:items-end gap-6">
+                            <div 
+                              onClick={() => handleOpenEditPlaylist(currentPlaylist)} 
+                              className="relative group/cover w-32 h-32 md:w-44 md:h-44 rounded-2xl md:rounded-3xl overflow-hidden shrink-0 shadow-2xl border border-white/10 bg-white/5 cursor-pointer"
+                              title="Haz clic para cambiar la portada o editar la playlist"
+                            >
+                              {currentPlaylist.cover_path || songs[0]?.coverUrl ? (
+                                <img 
+                                  src={getThumbnailUrl(plCover, 500) || DEFAULT_COVER} 
+                                  alt={currentPlaylist.name} 
+                                  className="w-full h-full object-cover group-hover/cover:scale-105 transition-transform duration-500" 
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-white/20">
+                                  <Music2 size={48} />
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/cover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 text-white">
+                                <Edit2 size={20} className="text-brand-primary" />
+                                <span className="text-[10px] font-bold uppercase tracking-wider">Cambiar foto</span>
+                              </div>
+                            </div>
+
+                            <div className="flex-1 min-w-0 text-center md:text-left">
+                              <p className="text-[9px] md:text-[11px] uppercase tracking-[0.4em] text-brand-primary font-bold mb-2">Playlist</p>
+                              <div className="flex items-center justify-center md:justify-start gap-3">
+                                <h1 className="text-2xl md:text-5xl font-serif italic text-white mb-2 leading-tight truncate">
+                                  {currentPlaylist.name}
+                                </h1>
+                                <button 
+                                  onClick={() => handleOpenEditPlaylist(currentPlaylist)} 
+                                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer"
+                                  title="Editar nombre, descripción y portada"
+                                >
+                                  <Edit2 size={16} />
+                                </button>
+                              </div>
+                              
+                              {currentPlaylist.description ? (
+                                <p className="text-white/70 text-xs md:text-sm line-clamp-2 max-w-2xl font-sans mb-4">
+                                  {currentPlaylist.description}
+                                </p>
+                              ) : (
+                                <p 
+                                  onClick={() => handleOpenEditPlaylist(currentPlaylist)}
+                                  className="text-white/30 hover:text-white/60 text-xs italic cursor-pointer mb-4 transition-colors"
+                                >
+                                  Añadir una descripción...
+                                </p>
+                              )}
+
+                              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+                                <button 
+                                  onClick={() => {
+                                    if (songs.length > 0) {
+                                      if (currentSong && songs.some(s => s.id === currentSong.id)) {
+                                        setIsPlaying(!isPlaying);
+                                      } else {
+                                        handlePlaySong(songs[0]);
+                                      }
+                                    }
+                                  }} 
+                                  disabled={songs.length === 0}
+                                  className="px-6 py-2 rounded-full bg-white text-black font-bold text-[10px] uppercase shadow-xl hover:scale-105 transition-all cursor-pointer flex items-center gap-2"
+                                >
+                                  <Play size={12} className="fill-black" />
+                                  <span>{isCurrentPlPlaying ? "Pausar" : "Reproducir"}</span>
+                                </button>
+
+                                <button 
+                                  onClick={() => {
+                                    if (songs.length > 0) {
+                                      const randomIdx = Math.floor(Math.random() * songs.length);
+                                      if (!socketObj.isShuffle) socketObj.setIsShuffle(true);
+                                      handlePlaySong(songs[randomIdx]);
+                                    }
+                                  }} 
+                                  disabled={songs.length === 0}
+                                  className="px-5 py-2 rounded-full bg-white/10 text-white font-bold text-[10px] uppercase border border-white/10 hover:bg-white/20 transition-all cursor-pointer flex items-center gap-1.5"
+                                >
+                                  <Shuffle size={12} />
+                                  <span>Aleatorio</span>
+                                </button>
+
+                                <button
+                                  onClick={() => setIsAuraDjOpen(true)}
+                                  className="px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-amber-500/20 via-[#F27D26]/20 to-rose-500/20 text-brand-primary border border-brand-primary/40 hover:bg-brand-primary/20 shadow-md"
+                                >
+                                  <Sparkles size={12} className="fill-brand-primary" />
+                                  <span>Aura DJ</span>
+                                </button>
+
+                                {(() => {
+                                  const plDownloaded = songs.filter(s => offlineIds.has(String(s.id))).length;
+                                  const isPlSyncing = isPlaylistSyncing(activePlaylistId);
+                                  const isPlOffline = isPlaylistOffline(activePlaylistId);
+                                  const syncProgress = playlistSyncProgress.get(activePlaylistId);
+                                  const allDownloaded = songs.length > 0 && plDownloaded === songs.length;
+
+                                  return (
+                                    <button
+                                      onClick={() => {
+                                        if (isPlSyncing) return;
+                                        if (isPlOffline && allDownloaded) {
+                                          if (confirm(`¿Quitar "${currentPlaylist.name}" del modo sin conexión?`)) {
+                                            void removePlaylistOffline(currentPlaylist.id);
+                                          }
+                                        } else {
+                                          void syncPlaylistOffline(currentPlaylist, songs);
+                                        }
+                                      }}
+                                      disabled={isPlSyncing || songs.length === 0}
+                                      className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                                        isPlSyncing
+                                          ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/40'
+                                          : isPlOffline && allDownloaded
+                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                                          : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/15 hover:text-white'
+                                      }`}
+                                    >
+                                      {isPlSyncing ? (
+                                        <>
+                                          <Loader2 size={12} className="animate-spin text-brand-primary" />
+                                          <span>Sincronizando ({syncProgress?.current || 0}/{syncProgress?.total || songs.length})</span>
+                                        </>
+                                      ) : isPlOffline && allDownloaded ? (
+                                        <>
+                                          <CheckCircle2 size={12} className="text-emerald-400" />
+                                          <span>Descargada ({songs.length})</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Download size={12} />
+                                          <span>Descargar ({plDownloaded}/{songs.length})</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  );
+                                })()}
+
+                                <button
+                                  onClick={() => handleOpenEditPlaylist(currentPlaylist)}
+                                  className="px-4 py-2 rounded-full bg-white/5 text-white/70 hover:text-white font-bold text-[10px] uppercase border border-white/10 hover:bg-white/15 transition-all cursor-pointer flex items-center gap-1.5"
+                                >
+                                  <Edit2 size={12} />
+                                  <span>Editar</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </section>
+                      );
+                    }
+
+                    return (
+                      <section className="relative h-48 md:h-72 shrink-0 flex flex-col justify-end p-6 md:p-10 rounded-[30px] md:rounded-[40px] overflow-hidden group shadow-2xl">
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent z-10" />
+                          <motion.div key={currentSong?.id} initial={{ scale: 1.1, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="absolute inset-0 -z-10 bg-[#0a0a0a]">
+                              {currentSong && !heroImageError ? <img src={resolvedCoverUrl || undefined} className="w-full h-full object-cover grayscale-[0.3] brightness-75 transition-transform duration-1000" onError={() => setHeroImageError(true)} /> : <div className="w-full h-full flex flex-col items-center justify-center text-white/5"><Music2 size={80} /></div>}
+                          </motion.div>
+                          <div className="z-20">
+                              <p className="text-[9px] md:text-[11px] uppercase tracking-[0.4em] text-brand-primary font-bold mb-2 md:mb-3">{currentSong ? "Now Streaming" : "Library Core"}</p>
+                              <h1 className="text-3xl md:text-6xl font-serif italic text-white mb-2 leading-none truncate">{currentSong?.title || "AURA Library"}</h1>
+                              {currentSong && <p className="text-white/60 italic mb-4 md:mb-6 font-serif text-sm md:text-lg">{currentSong.artist}</p>}
+                              <div className="flex gap-4"><button onClick={() => currentSong && setIsPlaying(!isPlaying)} className="px-6 md:px-8 py-2 md:py-2.5 rounded-full bg-white text-black font-bold text-[9px] md:text-[10px] uppercase shadow-xl hover:scale-105 transition-all cursor-pointer">{isPlaying ? "Pause" : "Resume"}</button></div>
+                          </div>
+                      </section>
+                    );
+                  })()
                 )}
 
                 <section>
@@ -4222,11 +4517,21 @@ transition={{
                                       : activePlaylistId === 'offline'
                                       ? "Offline Tracks"
                                       : currentPlaylist
-                                      ? `Playlist: ${currentPlaylist.name.toUpperCase()}`
+                                      ? `Canciones (${songs.length})`
                                       : "Playlist Stream"}
                                   </h2>
                                   {!selectedAlbumName && !isMinigameActive && (
                                     <div className="flex flex-wrap items-center gap-3">
+                                      {currentPlaylist && !showModeration && (
+                                        <button
+                                          onClick={() => handleOpenEditPlaylist(currentPlaylist)}
+                                          title={`Editar "${currentPlaylist.name}"`}
+                                          className="px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm bg-white/5 text-white/70 border border-white/10 hover:bg-white/15 hover:text-white"
+                                        >
+                                          <Edit2 size={11} />
+                                          <span>Editar</span>
+                                        </button>
+                                      )}
                                       {currentPlaylist && !showModeration && (
                                         (() => {
                                           const plDownloaded = songs.filter(s => offlineIds.has(String(s.id))).length;
@@ -4956,20 +5261,150 @@ getCurrentTime={audioObj.getCurrentTime}
         </AnimatePresence>
       </Suspense>
 
-      {/* MODAL CREAR PLAYLIST */}
+      {/* MODAL CREAR / EDITAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 text-white">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl">
-            <h3 className="text-xl font-bold uppercase mb-4 text-white">Create Playlist</h3>
-            <form onSubmit={handleCreatePlaylist}> 
-              <input 
-                type="text" placeholder="Playlist Name" required 
-                value={newPlaylistName} onChange={e => setNewPlaylistName(e.target.value)} 
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white mb-6 outline-none focus:border-brand-primary transition-all font-bold" 
-              />
-              <div className="flex gap-4">
-                <button type="button" onClick={() => setIsCreatePlaylistOpen(false)} className="flex-1 text-[10px] font-bold uppercase text-white/40">Cancel</button>
-                <button type="submit" className="flex-1 bg-brand-primary text-black py-3 rounded-xl font-bold uppercase text-xs">Create</button>
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md px-4 text-white">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }} 
+            animate={{ opacity: 1, scale: 1 }} 
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-[#121212] border border-white/10 rounded-3xl p-6 sm:p-8 w-full max-w-md relative text-white shadow-2xl space-y-6"
+          >
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 className="text-lg sm:text-xl font-bold uppercase tracking-wider text-white">
+                {editingPlaylist ? "Editar Playlist" : "Nueva Playlist"}
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setIsCreatePlaylistOpen(false)} 
+                className="text-white/40 hover:text-white p-1 rounded-full transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePlaylistModal} className="space-y-5">
+              {/* PORTADA / FOTO DE PLAYLIST */}
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative group/pic w-32 h-32 rounded-2xl overflow-hidden border border-white/10 bg-white/5 shadow-inner flex items-center justify-center">
+                  {playlistCoverPreview ? (
+                    <>
+                      <img 
+                        src={playlistCoverPreview} 
+                        alt="Playlist Cover" 
+                        className="w-full h-full object-cover" 
+                      />
+                      <label 
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover/pic:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 cursor-pointer"
+                        title="Cambiar foto"
+                      >
+                        <ImageIcon size={20} className="text-brand-primary" />
+                        <span className="text-[10px] font-bold uppercase text-white">Cambiar</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setPlaylistCoverFile(file);
+                              setPlaylistCoverPreview(URL.createObjectURL(file));
+                              setPlaylistRemoveCover(false);
+                            }
+                          }} 
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label 
+                      className="w-full h-full flex flex-col items-center justify-center gap-2 cursor-pointer text-white/40 hover:text-brand-primary hover:bg-white/[0.04] transition-all p-3 text-center"
+                    >
+                      <ImageIcon size={26} />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Subir Foto</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setPlaylistCoverFile(file);
+                            setPlaylistCoverPreview(URL.createObjectURL(file));
+                            setPlaylistRemoveCover(false);
+                          }
+                        }} 
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {playlistCoverPreview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlaylistCoverFile(null);
+                      setPlaylistCoverPreview(null);
+                      setPlaylistRemoveCover(true);
+                    }}
+                    className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-wider cursor-pointer"
+                  >
+                    Quitar foto
+                  </button>
+                )}
+              </div>
+
+              {/* NOMBRE DE LA PLAYLIST */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                  Nombre
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="Ej. Lo-Fi Nocturno, Gym Beats..." 
+                  required 
+                  value={newPlaylistName} 
+                  onChange={e => setNewPlaylistName(e.target.value)} 
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-brand-primary transition-all font-semibold" 
+                />
+              </div>
+
+              {/* DESCRIPCIÓN */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                  Descripción <span className="text-[9px] opacity-60 font-normal lowercase">(opcional)</span>
+                </label>
+                <textarea 
+                  rows={3} 
+                  placeholder="Describe el ambiente, género o temática de esta playlist..." 
+                  value={newPlaylistDescription} 
+                  onChange={e => setNewPlaylistDescription(e.target.value)} 
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-brand-primary transition-all font-sans resize-none" 
+                />
+              </div>
+
+              {/* ACCIONES */}
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setIsCreatePlaylistOpen(false)} 
+                  className="flex-1 text-[11px] font-bold uppercase py-3 rounded-xl border border-white/10 hover:bg-white/5 text-white/60 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSavingPlaylist || !newPlaylistName.trim()} 
+                  className="flex-1 bg-brand-primary text-black py-3 rounded-xl font-bold uppercase text-[11px] shadow-lg hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {isSavingPlaylist ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Guardando...</span>
+                    </>
+                  ) : (
+                    <span>{editingPlaylist ? "Guardar cambios" : "Crear playlist"}</span>
+                  )}
+                </button>
               </div>
             </form>
           </motion.div>

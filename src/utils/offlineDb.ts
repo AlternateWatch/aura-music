@@ -17,6 +17,8 @@ export interface OfflinePlaylistRecord {
   id: string;
   name: string;
   color?: string;
+  description?: string;
+  cover_path?: string;
   songIds: string[];
   syncedAt: number;
 }
@@ -408,7 +410,7 @@ export async function getOfflinePlaylistTracks(playlistId: string): Promise<Song
 }
 
 export async function syncPlaylistOffline(
-  playlist: { id: string | number; name: string; color?: string },
+  playlist: { id: string | number; name: string; color?: string; description?: string; cover_path?: string },
   songs: Song[]
 ): Promise<boolean> {
   const pId = String(playlist.id);
@@ -455,6 +457,8 @@ export async function syncPlaylistOffline(
       id: pId,
       name: playlist.name,
       color: playlist.color,
+      description: playlist.description,
+      cover_path: playlist.cover_path,
       songIds: songs.map((s) => String(s.id)),
       syncedAt: Date.now(),
     });
