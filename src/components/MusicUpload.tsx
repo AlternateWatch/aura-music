@@ -19,6 +19,78 @@ interface ITunesTrack {
   collectionName: string;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 MB';
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  const kb = bytes / 1024;
+  return `${kb.toFixed(0)} KB`;
+}
+
+interface UploadProgressState {
+  percent: number;
+  loadedStr: string;
+  totalStr: string;
+  phase: 'uploading' | 'processing';
+}
+
+interface BatchUploadProgressState {
+  current: number;
+  total: number;
+  title: string;
+  trackPercent: number;
+  loadedStr: string;
+  totalStr: string;
+  phase: 'uploading' | 'processing';
+}
+
+function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  token: string | null,
+  onProgress: (percent: number, loaded: number, total: number) => void
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
+        onProgress(percent, event.loaded, event.total);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          resolve({ ok: true });
+        }
+      } else if (xhr.status === 401 || xhr.status === 403) {
+        reject(new Error("Tu sesión ha caducado. Vuelve a iniciar sesión."));
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          reject(new Error(data.error || `Fallo en la subida (código ${xhr.status})`));
+        } catch {
+          reject(new Error(`Fallo en la subida (código ${xhr.status})`));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Error de conexión al subir la canción."));
+    xhr.ontimeout = () => reject(new Error("La subida tardó demasiado tiempo y se canceló."));
+    xhr.timeout = 180000; // 3 minutos
+
+    xhr.send(formData);
+  });
+}
+
 export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadComplete }) => {
   const [mode, setMode] = useState<'single' | 'album'>('single');
   const [isUploading, setIsUploading] = useState(false);
@@ -64,7 +136,8 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileAssignments, setFileAssignments] = useState<{ [trackNumber: number]: File | null }>({});
-  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; title: string } | null>(null);
+  const [singleProgress, setSingleProgress] = useState<UploadProgressState | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<BatchUploadProgressState | null>(null);
 
   const multipleFilesRef = useRef<HTMLInputElement>(null);
 
@@ -137,6 +210,12 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
     setIsUploading(true);
     setError(null);
+    setSingleProgress({
+      percent: 0,
+      loadedStr: '0 MB',
+      totalStr: formatBytes(audioFile.size),
+      phase: 'uploading'
+    });
 
     const formData = new FormData();
     formData.append('title', title);
@@ -152,33 +231,34 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       formData.append('cover_url', coverUrl);
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-
     try {
-      const response = await fetch(`${API_BASE}/api/tracks`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` },
-        body: formData,
-        signal: controller.signal
-      });
+      await uploadWithProgress(
+        `${API_BASE}/api/tracks`,
+        formData,
+        localStorage.getItem('aura_token'),
+        (percent, loaded, total) => {
+          setSingleProgress({
+            percent,
+            loadedStr: formatBytes(loaded),
+            totalStr: formatBytes(total),
+            phase: percent >= 99 ? 'processing' : 'uploading'
+          });
+        }
+      );
 
-      if (response.ok) {
-        setSuccess(true);
-        setTimeout(() => { onUploadComplete(); onClose(); }, 1800);
-      } else if (response.status === 401 || response.status === 403) {
-        setError("Tu sesión ha caducado. Vuelve a iniciar sesión.");
-      } else {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || `Fallo en la subida (error ${response.status}).`);
-      }
+      setSingleProgress({
+        percent: 100,
+        loadedStr: formatBytes(audioFile.size),
+        totalStr: formatBytes(audioFile.size),
+        phase: 'processing'
+      });
+      setSuccess(true);
+      setTimeout(() => { onUploadComplete(); onClose(); }, 1800);
     } catch (err: any) {
-      setError(err?.name === 'AbortError'
-        ? "La subida tardó demasiado y se canceló. Inténtalo de nuevo."
-        : "No se pudo conectar con el servidor.");
+      setError(err?.message || "No se pudo conectar con el servidor.");
     } finally {
-      clearTimeout(timeoutId);
       setIsUploading(false);
+      setSingleProgress(null);
     }
   };
 
@@ -344,7 +424,11 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       setUploadProgress({
         current: i + 1,
         total,
-        title: track.trackName
+        title: track.trackName,
+        trackPercent: 0,
+        loadedStr: '0 MB',
+        totalStr: formatBytes(file.size),
+        phase: 'uploading'
       });
 
       const formData = new FormData();
@@ -359,33 +443,29 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
         formData.append('cover_url', albumCoverUrl);
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
-
       try {
-        const response = await fetch(`${API_BASE}/api/tracks`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` },
-          body: formData,
-          signal: controller.signal
-        });
+        const data = await uploadWithProgress(
+          `${API_BASE}/api/tracks`,
+          formData,
+          localStorage.getItem('aura_token'),
+          (trackPercent, loaded, totalBytes) => {
+            setUploadProgress({
+              current: i + 1,
+              total,
+              title: track.trackName,
+              trackPercent,
+              loadedStr: formatBytes(loaded),
+              totalStr: formatBytes(totalBytes),
+              phase: trackPercent >= 99 ? 'processing' : 'uploading'
+            });
+          }
+        );
 
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`El servidor respondió con error ${response.status}`);
-        }
-
-        const data = await response.json().catch(() => ({}));
-        if (data.id) {
+        if (data?.id) {
           uploadedTrackIds.push(data.id);
         }
       } catch(err: any) {
-        clearTimeout(timeoutId);
-        const isTimeout = err.name === 'AbortError';
-        const failMsg = isTimeout 
-          ? `La pista ${track.trackNumber} ("${track.trackName}") se quedó atascada (tiempo agotado).`
-          : `Error al subir pista ${track.trackNumber} ("${track.trackName}"): ${err.message || 'Fallo de red'}.`;
+        const failMsg = `Error al subir pista ${track.trackNumber} ("${track.trackName}"): ${err.message || 'Fallo de red'}.`;
 
         if (uploadedTrackIds.length > 0) {
           setError(`${failMsg} Limpiando y cancelando las ${uploadedTrackIds.length} pistas anteriores...`);
@@ -548,8 +628,52 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
                 {error && <div className="text-red-500 text-[10px] font-bold uppercase p-3 bg-red-500/10 rounded-xl border border-red-500/20"><AlertCircle size={14} className="inline mr-2" /> {error}</div>}
 
-                <button type="submit" disabled={isUploading || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
-                  {isUploading ? <Loader2 className="animate-spin" size={16} /> : 'Subir pista'}
+                {/* BARRA DE PROGRESO REAL DE SUBIDA */}
+                {isUploading && singleProgress && (
+                  <div className="p-4 bg-white/[0.04] border border-white/10 rounded-2xl space-y-2.5 animate-in fade-in duration-200 shadow-xl">
+                    <div className="flex justify-between items-center text-xs font-bold text-white">
+                      <span className="flex items-center gap-2">
+                        <UploadIcon size={14} className="text-brand-primary animate-bounce" />
+                        <span>
+                          {singleProgress.phase === 'processing'
+                            ? 'Procesando audio y metadatos...'
+                            : `Subiendo pista (${singleProgress.percent}%)`}
+                        </span>
+                      </span>
+                      <span className="font-mono text-[11px] text-white/50">
+                        {singleProgress.loadedStr} / {singleProgress.totalStr}
+                      </span>
+                    </div>
+
+                    <div className="relative h-2.5 bg-black/40 border border-white/10 rounded-full overflow-hidden p-0.5">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 rounded-full shadow-lg shadow-orange-500/30"
+                        initial={{ width: '0%' }}
+                        animate={{ width: `${singleProgress.percent}%` }}
+                        transition={{ ease: "easeOut", duration: 0.15 }}
+                      />
+                    </div>
+
+                    <p className="text-[10px] text-white/40 text-center font-medium">
+                      {singleProgress.phase === 'processing'
+                        ? 'Finalizando análisis de volumen e indexación...'
+                        : 'Por favor, mantén la ventana abierta hasta completar la transferencia'}
+                    </p>
+                  </div>
+                )}
+
+                <button type="submit" disabled={isUploading || !audioFile} className="w-full bg-white text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-lg">
+                  {isUploading ? (
+                    <span className="font-mono">
+                      {singleProgress
+                        ? singleProgress.phase === 'processing'
+                          ? 'PROCESANDO PISTA...'
+                          : `SUBIENDO ${singleProgress.percent}%`
+                        : 'SUBIENDO...'}
+                    </span>
+                  ) : (
+                    'Subir pista'
+                  )}
                 </button>
               </form>
             )}
@@ -693,15 +817,40 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                 )}
 
                 {uploadProgress && (
-                  <div className="p-3 bg-brand-primary/10 border border-brand-primary/20 rounded-xl space-y-1.5">
-                    <div className="flex justify-between text-[10px] font-bold text-white uppercase tracking-wider">
-                      <span>Subiendo: {uploadProgress.title}</span>
-                      <span>{uploadProgress.current} / {uploadProgress.total}</span>
+                  <div className="p-4 bg-white/[0.04] border border-white/10 rounded-2xl space-y-3 animate-in fade-in shadow-xl">
+                    <div className="flex justify-between items-center text-xs font-bold text-white">
+                      <span className="flex items-center gap-2 truncate">
+                        <UploadIcon size={14} className="text-brand-primary animate-bounce shrink-0" />
+                        <span className="truncate">
+                          {uploadProgress.phase === 'processing'
+                            ? `Procesando ${uploadProgress.current}/${uploadProgress.total}: ${uploadProgress.title}`
+                            : `Subiendo ${uploadProgress.current}/${uploadProgress.total}: ${uploadProgress.title}`}
+                        </span>
+                      </span>
+                      <span className="font-mono text-[11px] text-white/50 shrink-0 ml-2">
+                        {uploadProgress.trackPercent}%
+                      </span>
                     </div>
+
+                    {/* Barra de progreso en bytes de la pista actual */}
+                    <div className="relative h-2.5 bg-black/40 border border-white/10 rounded-full overflow-hidden p-0.5">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 rounded-full"
+                        animate={{ width: `${uploadProgress.trackPercent}%` }}
+                        transition={{ ease: "easeOut", duration: 0.15 }}
+                      />
+                    </div>
+
+                    <div className="flex justify-between items-center text-[10px] text-white/40">
+                      <span>{uploadProgress.loadedStr} / {uploadProgress.totalStr}</span>
+                      <span>Pistas: {uploadProgress.current} de {uploadProgress.total}</span>
+                    </div>
+
+                    {/* Barra global del progreso del álbum */}
                     <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-brand-primary transition-all duration-300"
-                        style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                        style={{ width: `${((uploadProgress.current - 1 + (uploadProgress.trackPercent / 100)) / uploadProgress.total) * 100}%` }}
                       />
                     </div>
                   </div>
@@ -716,7 +865,13 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                     disabled={isUploading || Object.values(fileAssignments).filter(Boolean).length === 0}
                     className="w-full bg-brand-primary text-black py-4 rounded-2xl font-bold uppercase text-[10px] tracking-[0.3em] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    {isUploading ? <Loader2 className="animate-spin" size={16} /> : `Subir Álbum (${Object.values(fileAssignments).filter(Boolean).length} pistas listas)`}
+                    {isUploading ? (
+                      <span className="font-mono">
+                        {uploadProgress ? `SUBIENDO ${uploadProgress.current}/${uploadProgress.total} (${uploadProgress.trackPercent}%)` : 'SUBIENDO ÁLBUM...'}
+                      </span>
+                    ) : (
+                      `Subir Álbum (${Object.values(fileAssignments).filter(Boolean).length} pistas listas)`
+                    )}
                   </button>
                 )}
               </div>
