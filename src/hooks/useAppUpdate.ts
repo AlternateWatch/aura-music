@@ -105,8 +105,12 @@ export function useAppUpdate() {
     }
   }, [currentVersion]);
 
-  // Comprobar automáticamente al arrancar la app en Android (con un pequeño retardo para no interferir en la carga inicial)
+  // Comprobar automáticamente al arrancar ÚNICAMENTE en Android nativo
   useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+      return;
+    }
+
     const timer = setTimeout(() => {
       checkForUpdates(false);
     }, 2500);

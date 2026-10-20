@@ -439,7 +439,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 // --- APP AUTO-UPDATER ENDPOINTS ---
 
 // 1. Consulta pública de la versión más reciente de la app
-app.get('/api/app/version', async (req: Request, res: Response) => {
+app.get(['/api/app/version', '/api/version'], async (req: Request, res: Response) => {
     try {
         const candidates = [
             path.join(uploadDir, 'version.json'),
@@ -819,12 +819,12 @@ app.delete('/api/tracks/:id', authenticateToken, async (req: any, res: Response)
 // Obtener todos los artistas en una sola consulta para evitar saturar conexiones
 app.get('/api/artists', async (req: Request, res: Response) => {
     try {
-        const [rows]: any = await pool.execute('SELECT name, bio, image_url FROM artists');
+        const [rows]: any = await pool.execute("SELECT name, image_url FROM artists WHERE image_url IS NOT NULL AND image_url != ''");
         const map: Record<string, { bio: string | null; image_url: string | null }> = {};
         if (Array.isArray(rows)) {
             for (const r of rows) {
                 if (r.name) {
-                    map[r.name] = { bio: r.bio || null, image_url: r.image_url || null };
+                    map[r.name] = { bio: null, image_url: r.image_url };
                 }
             }
         }
