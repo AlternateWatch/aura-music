@@ -18,7 +18,7 @@ import {
   downloadSongToDisk,
 } from '../utils/offlineDb';
 import { useFileUrl } from '../hooks/useFileUrl';
-import { DEFAULT_COVER, getResponsiveCoverSrcSet } from '../utils/api';
+import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl } from '../utils/api';
 
 interface MusicCardProps {
   song: Song;
@@ -44,12 +44,13 @@ interface MusicCardProps {
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: () => void;
   isDragging?: boolean;
+  priority?: boolean;
 }
 
 export const MusicCard: React.FC<MusicCardProps> = ({ 
   song, isActive, isPlaying, playlists = [], userRole, isLiked, onToggleLike,
   onAddToPlaylist, onRemoveFromPlaylist, onOpenTabs, onDelete, onPlayNext, onAddToQueue, onEdit, onOpenAlbum, onOpenArtist, onClick, onDragStart,
-  onDragOver, onDrop, isDragging
+  onDragOver, onDrop, isDragging, priority
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState(false);
@@ -511,12 +512,18 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-xl md:rounded-2xl overflow-hidden mb-2.5 sm:mb-3 cursor-pointer shrink-0 bg-white/5 shadow-md">
         <img
-          src={resolvedCoverUrl || song.coverUrl || DEFAULT_COVER}
-          srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || song.coverUrl)}
+          ref={(el) => {
+            if (el?.complete && !coverLoaded) {
+              setCoverLoaded(true);
+            }
+          }}
+          src={getThumbnailUrl(resolvedCoverUrl || song.coverUrl, 300) || DEFAULT_COVER}
+          srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || song.coverUrl, 600)}
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1536px) 25vw, 20vw"
-          loading="lazy"
-          decoding="async"
-          className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'} ${coverLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "auto"}
+          decoding={priority ? "sync" : "async"}
+          className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'}`}
           alt={song.title}
           draggable={false}
           onLoad={() => setCoverLoaded(true)}

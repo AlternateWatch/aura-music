@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useFileUrl } from '../hooks/useFileUrl';
-import { DEFAULT_COVER, getResponsiveCoverSrcSet } from '../utils/api';
+import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl } from '../utils/api';
 import {
   subscribeOfflineStore,
   getOfflineIdsSnapshot,
@@ -251,9 +251,12 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
         {/* Portada en alta resolución con soporte responsive */}
         <div className="relative w-44 h-44 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-2xl md:rounded-3xl overflow-hidden shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.8)] border border-white/10 bg-white/5">
           <img
-            src={getCachedOfflineBlobUrl(coverUrlCandidate) || resolvedCover || DEFAULT_COVER}
-            srcSet={getResponsiveCoverSrcSet(resolvedCover || coverUrlCandidate)}
+            src={getCachedOfflineBlobUrl(coverUrlCandidate) || getThumbnailUrl(resolvedCover || coverUrlCandidate, 600) || DEFAULT_COVER}
+            srcSet={getResponsiveCoverSrcSet(resolvedCover || coverUrlCandidate, 800)}
             sizes="(max-width: 640px) 176px, (max-width: 768px) 224px, 256px"
+            loading="eager"
+            fetchPriority="high"
+            decoding="sync"
             alt={albumName}
             onError={(e) => {
               if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {

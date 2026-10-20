@@ -4,7 +4,7 @@ import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
 import { AlbumDetailView } from "./components/AlbumDetailView";
-import { DEFAULT_COVER, getResponsiveCoverSrcSet } from "./utils/api";
+import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl } from "./utils/api";
 import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
 import { THEMES } from "./constants/themes";
@@ -2447,6 +2447,20 @@ useEffect(() => {
     return items;
   }, [flattenedSongs, songs, allArtists, allAlbums, artistFuse, albumFuse, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
 
+  // RENDERIZADO PROGRESIVO DE TARJETAS (evita saturar el DOM y la red con cientos de imágenes a la vez)
+  const [renderedCount, setRenderedCount] = useState(48);
+
+  useEffect(() => {
+    setRenderedCount(48);
+  }, [activePlaylistId, searchQuery, librarySection, selectedArtistName, selectedAlbumName]);
+
+  const handleMainScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 900) {
+      setRenderedCount(prev => (prev < displayItems.length ? prev + 36 : prev));
+    }
+  }, [displayItems.length]);
+
   // PRECARGA DE LAS PRIMERAS CARÁTULAS DE LA REJILLA (solo una vez, al
   // arrancar la app) usando displayItems — el mismo array, en el mismo
   // orden, que se usa para pintar las tarjetas — para que lo que se
@@ -2458,10 +2472,13 @@ useEffect(() => {
 
     gridPreloadedRef.current = true;
 
-    const GRID_PRELOAD_COUNT = 24;
+    const GRID_PRELOAD_COUNT = 16;
     Promise.allSettled(
       displayItems.slice(0, GRID_PRELOAD_COUNT).map((item: any) =>
-        resolveFileUrl(item.coverUrl).then((url) => preloadImage(url))
+        resolveFileUrl(item.coverUrl).then((url) => {
+          const thumb = getThumbnailUrl(url, 300) || url;
+          return preloadImage(thumb);
+        })
       )
     ).then(() => {
       readinessRef.current.grid = true;
@@ -3866,7 +3883,7 @@ transition={{
                           </div>
                       </div>
                     )}
-                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform bg-white/5"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl || DEFAULT_COVER} onError={(e) => { if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) { e.currentTarget.src = DEFAULT_COVER; } }} className="w-full h-full object-cover" alt={song.title} /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
+                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform bg-white/5"><img src={getCachedOfflineBlobUrl(song.coverUrl) || getThumbnailUrl(song.coverUrl, 150) || DEFAULT_COVER} onError={(e) => { if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) { e.currentTarget.src = DEFAULT_COVER; } }} className="w-full h-full object-cover" alt={song.title} /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
                 <div className="mt-auto pt-6">
                   <div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all">
@@ -3880,6 +3897,7 @@ transition={{
 
        <main
   ref={mainRef}
+  onScroll={handleMainScroll}
   className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full px-4 md:px-10 ${
     isDesktop 
       ? 'pt-[calc(9rem+env(safe-area-inset-top))]' 
@@ -4035,10 +4053,11 @@ transition={{
                     Todas las canciones ({flattenedSongs.length})
                   </h3>
                   <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6">
-                    {flattenedSongs.map(song => (
+                    {flattenedSongs.slice(0, renderedCount).map((song, idx) => (
                       <MusicCard 
                         key={song.id}
                         song={song}
+                        priority={idx < 12}
                         isActive={!isMinigameActive && currentSong?.id === song.id}
                         isPlaying={!isMinigameActive && currentSong?.id === song.id && isPlaying}
                         playlists={playlists}
@@ -4330,7 +4349,7 @@ transition={{
                     {/* RESPONSIVE GRID */}
                     {activePlaylistId === 'all' && librarySection === 'albums' ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
-                        {filteredAlbums.map(alb => (
+                        {filteredAlbums.map((alb, idx) => (
                           <div
                             key={alb.title}
                             onClick={() => setSelectedAlbumName(alb.title)}
@@ -4338,16 +4357,17 @@ transition={{
                           >
                             <div className="aspect-square rounded-2xl overflow-hidden mb-3 relative bg-white/5 shadow-md">
                               <img
-                                src={getCachedOfflineBlobUrl(alb.coverUrl) || alb.coverUrl || DEFAULT_COVER}
-                                srcSet={getResponsiveCoverSrcSet(alb.coverUrl)}
+                                src={getCachedOfflineBlobUrl(alb.coverUrl) || getThumbnailUrl(alb.coverUrl, 300) || DEFAULT_COVER}
+                                srcSet={getResponsiveCoverSrcSet(alb.coverUrl, 600)}
                                 sizes="(max-width: 640px) 48vw, (max-width: 1024px) 25vw, (max-width: 1536px) 20vw, 16vw"
                                 onError={(e) => {
                                   if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                     e.currentTarget.src = DEFAULT_COVER;
                                   }
                                 }}
-                                loading="lazy"
-                                decoding="async"
+                                loading={idx < 12 ? "eager" : "lazy"}
+                                fetchPriority={idx < 4 ? "high" : "auto"}
+                                decoding={idx < 12 ? "sync" : "async"}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                 alt={alb.title}
                               />
@@ -4395,7 +4415,7 @@ transition={{
                       </div>
                     ) : activePlaylistId === 'all' && librarySection === 'artists' ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
-                        {filteredArtists.map(art => (
+                        {filteredArtists.map((art, idx) => (
                           <div
                             key={art.name}
                             onClick={() => setSelectedArtistName(art.name)}
@@ -4403,16 +4423,17 @@ transition={{
                           >
                             <div className="w-20 h-20 sm:w-28 sm:h-28 aspect-square rounded-full overflow-hidden mb-2.5 sm:mb-3 relative bg-white/5 shadow-xl border border-white/10 shrink-0 mx-auto">
                               <img
-                                src={getCachedOfflineBlobUrl(art.coverUrl) || art.coverUrl || DEFAULT_COVER}
-                                srcSet={getResponsiveCoverSrcSet(art.coverUrl)}
+                                src={getCachedOfflineBlobUrl(art.coverUrl) || getThumbnailUrl(art.coverUrl, 300) || DEFAULT_COVER}
+                                srcSet={getResponsiveCoverSrcSet(art.coverUrl, 600)}
                                 sizes="(max-width: 640px) 100px, (max-width: 1024px) 120px, 150px"
                                 onError={(e) => {
                                   if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                     e.currentTarget.src = DEFAULT_COVER;
                                   }
                                 }}
-                                loading="lazy"
-                                decoding="async"
+                                loading={idx < 12 ? "eager" : "lazy"}
+                                fetchPriority={idx < 4 ? "high" : "auto"}
+                                decoding={idx < 12 ? "sync" : "async"}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                 alt={art.name}
                               />
@@ -4436,7 +4457,7 @@ transition={{
                       </div>
                     ) : (
                     <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6 w-full max-w-full">
-                        {displayItems.map((item: any) => (
+                        {displayItems.slice(0, renderedCount).map((item: any, idx: number) => (
                             <div
                                 key={item.id}
                                 draggable={canReorderPlaylist && item.type !== 'album' && item.type !== 'artist'}
@@ -4496,7 +4517,12 @@ transition={{
                                     >
                                       <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
                                         <img 
-                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || DEFAULT_COVER} 
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || getThumbnailUrl(item.coverUrl, 300) || DEFAULT_COVER} 
+                                          srcSet={getResponsiveCoverSrcSet(item.coverUrl, 600)}
+                                          sizes="(max-width: 640px) 100px, 150px"
+                                          loading={idx < 12 ? "eager" : "lazy"}
+                                          fetchPriority={idx < 4 ? "high" : "auto"}
+                                          decoding={idx < 12 ? "sync" : "async"}
                                           onError={(e) => {
                                             if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                               e.currentTarget.src = DEFAULT_COVER;
@@ -4527,7 +4553,12 @@ transition={{
                                     <div onClick={() => setSelectedAlbumName(item.title)} className="min-w-0 overflow-hidden w-full group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
                                         <img
-                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || DEFAULT_COVER}
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || getThumbnailUrl(item.coverUrl, 300) || DEFAULT_COVER}
+                                          srcSet={getResponsiveCoverSrcSet(item.coverUrl, 600)}
+                                          sizes="(max-width: 640px) 50vw, 25vw"
+                                          loading={idx < 12 ? "eager" : "lazy"}
+                                          fetchPriority={idx < 4 ? "high" : "auto"}
+                                          decoding={idx < 12 ? "sync" : "async"}
                                           onError={(e) => {
                                             if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                               e.currentTarget.src = DEFAULT_COVER;
@@ -4549,6 +4580,7 @@ transition={{
                                     >
                                       <MusicCard 
                                         song={item}
+                                        priority={idx < 12}
                                         isActive={!isMinigameActive && currentSong?.id === item.id}
                                         isPlaying={!isMinigameActive && currentSong?.id === item.id && isPlaying}
                                         playlists={playlists}

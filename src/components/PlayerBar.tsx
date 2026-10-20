@@ -1,4 +1,4 @@
-import { getResponsiveCoverSrcSet, DEFAULT_COVER } from '../utils/api';
+import { getResponsiveCoverSrcSet, DEFAULT_COVER, getThumbnailUrl } from '../utils/api';
 import { useState, useEffect, useRef } from "react";
 import {
   Play,
@@ -228,10 +228,12 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           >
             <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 shadow-md bg-white/5 pointer-events-none">
               <img
-                src={resolvedCoverUrl || currentSong.coverUrl || DEFAULT_COVER}
-                srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
+                src={getThumbnailUrl(resolvedCoverUrl || currentSong.coverUrl, 150) || DEFAULT_COVER}
+                srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl, 300)}
                 sizes="56px"
-                decoding="async"
+                loading="eager"
+                fetchPriority="high"
+                decoding="sync"
                 className="w-full h-full object-cover"
                 alt={currentSong.title}
                 onError={(e) => {
@@ -323,10 +325,12 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
         <div className="flex items-center gap-4 w-1/3 min-w-0 shrink-0">
           <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-xl bg-white/5">
             <img
-              src={resolvedCoverUrl || currentSong.coverUrl || DEFAULT_COVER}
-              srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
+              src={getThumbnailUrl(resolvedCoverUrl || currentSong.coverUrl, 150) || DEFAULT_COVER}
+              srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl, 300)}
               sizes="56px"
-              decoding="async"
+              loading="eager"
+              fetchPriority="high"
+              decoding="sync"
               className="w-full h-full object-cover"
               alt={currentSong.title}
               onError={(e) => {

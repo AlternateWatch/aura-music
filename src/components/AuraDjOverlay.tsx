@@ -19,7 +19,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import type { Song } from '../constants';
-import { DEFAULT_COVER } from '../utils/api';
+import { DEFAULT_COVER, getThumbnailUrl } from '../utils/api';
 import {
   generateDjMix,
   getStoredGeminiKey,
@@ -324,7 +324,7 @@ export function AuraDjOverlay({
                     </span>
 
                     <img
-                      src={track.coverUrl || DEFAULT_COVER}
+                      src={getThumbnailUrl(track.coverUrl, 150) || DEFAULT_COVER}
                       alt={track.title}
                       className="w-10 h-10 rounded-lg object-cover bg-white/5 shrink-0"
                       onError={(e) => {

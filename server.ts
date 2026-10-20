@@ -2629,7 +2629,7 @@ const ALLOWED_THUMB_WIDTHS = [150, 300, 480, 600, 800, 1000, 1200];
 // Limitar concurrencia de procesamiento de imágenes con Sharp para no saturar los hilos de libuv
 // ni quitarle CPU o I/O a las peticiones de streaming de audio.
 let activeThumbJobs = 0;
-const MAX_CONCURRENT_THUMBS = 2;
+const MAX_CONCURRENT_THUMBS = 6;
 const thumbWaitQueue: (() => void)[] = [];
 const acquireThumbSlot = (): Promise<void> => {
     if (activeThumbJobs < MAX_CONCURRENT_THUMBS) {
