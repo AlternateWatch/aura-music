@@ -2603,6 +2603,82 @@ app.get(['/default-cover.jpg', '/uploads/default-cover.jpg', '/uploads/default%2
     next();
 });
 
+// Endpoint de miniaturas responsivas para portadas:
+// Intercepta peticiones /uploads/:filename?w=... antes de que express.static devuelva el archivo original gigante.
+// Permite que móviles y pantallas de distintas densidades carguen exactamente la resolución que necesitan.
+const thumbsDir = path.join(uploadDir, 'thumbs');
+if (!fs.existsSync(thumbsDir)) {
+    try { fs.mkdirSync(thumbsDir, { recursive: true }); } catch {}
+}
+
+const ALLOWED_THUMB_WIDTHS = [150, 300, 480, 600, 800, 1000, 1200];
+
+app.get('/uploads/:filename', async (req: Request, res: Response, next: NextFunction) => {
+    const rawW = req.query.w ? parseInt(String(req.query.w), 10) : null;
+    const filename = path.basename(decodeURIComponent(req.params.filename.split('?')[0]));
+
+    if (!rawW || isNaN(rawW) || !/\.(jpe?g|png|webp)$/i.test(filename)) {
+        return next();
+    }
+
+    const targetWidth = ALLOWED_THUMB_WIDTHS.reduce((prev, curr) =>
+        Math.abs(curr - rawW) < Math.abs(prev - rawW) ? curr : prev
+    );
+
+    const baseName = path.parse(filename).name;
+    const thumbFilename = `${baseName}_w${targetWidth}.webp`;
+    const cachedThumbPath = path.join(thumbsDir, thumbFilename);
+
+    if (fs.existsSync(cachedThumbPath)) {
+        res.setHeader('Content-Type', 'image/webp');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.sendFile(cachedThumbPath);
+    }
+
+    try {
+        let sourceBuffer: Buffer | null = null;
+        const localSourcePath = resolveDiskPath(filename);
+
+        if (localSourcePath && fs.existsSync(localSourcePath)) {
+            sourceBuffer = fs.readFileSync(localSourcePath);
+        } else if (isB2Configured()) {
+            const b2Obj = await getB2ObjectStream(filename);
+            if (b2Obj && b2Obj.stream) {
+                const chunks: Buffer[] = [];
+                for await (const chunk of b2Obj.stream) {
+                    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                }
+                sourceBuffer = Buffer.concat(chunks);
+                if (localSourcePath && !fs.existsSync(localSourcePath)) {
+                    try { fs.writeFileSync(localSourcePath, sourceBuffer); } catch {}
+                }
+            }
+        }
+
+        if (!sourceBuffer || sourceBuffer.length === 0) {
+            return next();
+        }
+
+        const sharp = (await import('sharp')).default;
+        const thumbBuffer = await sharp(sourceBuffer, { failOn: 'none' })
+            .rotate()
+            .resize({ width: targetWidth, withoutEnlargement: true })
+            .webp({ quality: 82, effort: 4 })
+            .toBuffer();
+
+        try {
+            fs.writeFileSync(cachedThumbPath, thumbBuffer);
+        } catch {}
+
+        res.setHeader('Content-Type', 'image/webp');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(thumbBuffer);
+    } catch (err: any) {
+        console.warn(`[Thumbnails] Fallback a imagen completa para ${filename}:`, err?.message || err);
+        return next();
+    }
+});
+
 // Servir uploads desde uploadDir persistente (y respaldos si existieran)
 app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));

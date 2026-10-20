@@ -1,3 +1,4 @@
+import { getResponsiveCoverSrcSet } from '../utils/api';
 import { useState, useEffect, useRef } from "react";
 import {
   Play,
@@ -220,6 +221,9 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-lg">
               <img
                 src={resolvedCoverUrl || currentSong.coverUrl}
+                srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
+                sizes="56px"
+                decoding="async"
                 className="w-full h-full object-cover"
                 alt={currentSong.title}
               />
@@ -380,7 +384,10 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-xl">
             <img
               src={resolvedCoverUrl || currentSong.coverUrl}
-              className="w-full h-full object-cover"
+                srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
+                sizes="56px"
+                decoding="async"
+                className="w-full h-full object-cover"
               alt={currentSong.title}
             />
           </div>

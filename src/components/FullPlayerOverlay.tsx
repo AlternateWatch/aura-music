@@ -1,3 +1,4 @@
+import { getResponsiveCoverSrcSet, DEFAULT_COVER } from '../utils/api';
 import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { 
@@ -283,7 +284,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                     src={animUrl} 
                     onError={(e) => {
                       if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                        e.currentTarget.src = '/default-cover.jpg';
+                        e.currentTarget.src = DEFAULT_COVER;
                       }
                     }}
                     className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
@@ -292,7 +293,10 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 )
               ) : (
                 <img 
-                  src={coverSrc} 
+                  src={coverSrc}
+                  srcSet={getResponsiveCoverSrcSet(coverSrc)}
+                  sizes="(max-width: 768px) 90vw, 600px"
+                  decoding="async" 
                   onError={(e) => {
                     if (!e.currentTarget.src.includes('default-cover.jpg')) {
                       e.currentTarget.src = '/default-cover.jpg';

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, Reorder, useDragControls } from 'motion/react';
 import { X, ListMusic, Play, Disc, GripVertical, ChevronUp, ChevronDown, Radio } from 'lucide-react';
 import { type Song } from '../constants';
-import { DEFAULT_COVER } from '../utils/api';
+import { DEFAULT_COVER, getResponsiveCoverSrcSet } from '../utils/api';
 
 interface QueueOverlayProps {
   isOpen: boolean;
@@ -83,6 +83,10 @@ const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, isRadio, onPlay
       >
         <img
           src={song.coverUrl || DEFAULT_COVER}
+          srcSet={getResponsiveCoverSrcSet(song.coverUrl)}
+          sizes="48px"
+          loading="lazy"
+          decoding="async"
           onError={(e) => {
             if (!e.currentTarget.src.includes('default-cover.jpg')) {
               e.currentTarget.src = DEFAULT_COVER;
