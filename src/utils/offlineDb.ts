@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { type Song } from '../constants';
+import { playbackPriority, fetchWithPlaybackPriority } from './playbackPriority';
 
 export interface OfflineTrackRecord {
   id: string;
@@ -280,11 +281,7 @@ export async function downloadSongOffline(song: Song, silent = false): Promise<b
     const rawAudioUrl = song.audioUrl.startsWith('/uploads/')
       ? `https://aura.basildo.me${song.audioUrl}`
       : song.audioUrl;
-    const audioRes = await fetch(rawAudioUrl);
-    if (!audioRes.ok) {
-      throw new Error(`HTTP ${audioRes.status} descargando audio`);
-    }
-    const audioBlob = await audioRes.blob();
+    const audioBlob = await fetchWithPlaybackPriority(rawAudioUrl);
 
     let coverBlob: Blob | null = null;
     if (song.coverUrl) {
@@ -292,10 +289,7 @@ export async function downloadSongOffline(song: Song, silent = false): Promise<b
         const rawCoverUrl = song.coverUrl.startsWith('/uploads/')
           ? `https://aura.basildo.me${song.coverUrl}`
           : song.coverUrl;
-        const coverRes = await fetch(rawCoverUrl);
-        if (coverRes.ok) {
-          coverBlob = await coverRes.blob();
-        }
+        coverBlob = await fetchWithPlaybackPriority(rawCoverUrl);
       } catch {}
     }
 
@@ -440,7 +434,9 @@ export async function syncPlaylistOffline(
     for (const song of songs) {
       const songId = String(song.id);
       if (!offlineIdsSnapshot.has(songId)) {
+        await playbackPriority.waitForBandwidth();
         await downloadSongOffline(song, true);
+        await new Promise((r) => setTimeout(r, 200));
       }
       current++;
       playlistSyncProgressSnapshot.set(pId, { current, total });
@@ -538,7 +534,9 @@ export async function syncAlbumOffline(
     for (const song of songs) {
       const songId = String(song.id);
       if (!offlineIdsSnapshot.has(songId)) {
+        await playbackPriority.waitForBandwidth();
         await downloadSongOffline(song, true);
+        await new Promise((r) => setTimeout(r, 200));
       }
       current++;
       setNotice(
@@ -630,9 +628,8 @@ export async function downloadSongToDisk(song: Song): Promise<void> {
       const base = isRemoteHost ? 'https://aura.basildo.me' : '';
       const downloadUrl = `${base}/api/tracks/${encodeURIComponent(song.id)}/download`;
 
-      const res = await fetch(downloadUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      blob = await res.blob();
+      await playbackPriority.waitForBandwidth();
+      blob = await fetchWithPlaybackPriority(downloadUrl);
     }
 
     const tempUrl = URL.createObjectURL(blob);

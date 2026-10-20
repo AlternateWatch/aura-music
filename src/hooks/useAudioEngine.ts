@@ -143,8 +143,14 @@ export function useAudioEngine(
       // 1. LOOKAHEAD: Pre-cargar silenciosamente en el reproductor standby
       // cuando falten 10 segundos para el final de la pista (o 40% en pistas muy cortas).
       // Guardia de seguridad: la pista debe llevar al menos 5 segundos reproduciéndose o haber superado el 40%.
+      // Informar al gestor de prioridad del estado del buffer de reproducción
+      playbackPriority.reportPlaybackState(audio ? !audio.paused : true, audio, remaining);
+
+      // LOOKAHEAD: Solo precargar la siguiente si la activa ya tiene todo su final buferizado
       const prebufferThreshold = Math.min(10, Math.max(3, dur * 0.4));
-      const canPrebuffer = time > 5 && time >= dur * 0.4 && remaining <= prebufferThreshold;
+      const bufferedAhead = playbackPriority.getBufferedAhead(audio);
+      const isActiveTrackSafe = bufferedAhead >= Math.min(remaining - 0.5, 8) || remaining <= 2;
+      const canPrebuffer = time > 5 && time >= dur * 0.4 && remaining <= prebufferThreshold && isActiveTrackSafe;
 
       if (canPrebuffer && standbyPreloadedForSongRef.current !== songId) {
         standbyPreloadedForSongRef.current = songId;
@@ -270,12 +276,30 @@ export function useAudioEngine(
     const onEndA = () => { if (activePlayerRef.current === "A") handleEnded("A"); };
     const onEndB = () => { if (activePlayerRef.current === "B") handleEnded("B"); };
 
+    const onWaiting = () => playbackPriority.setBuffering(true);
+    const onPlaying = () => {
+      playbackPriority.setBuffering(false);
+      playbackPriority.reportPlaybackState(true, audioRef.current);
+    };
+    const onPause = () => playbackPriority.reportPlaybackState(false, audioRef.current);
+    const onCanPlay = () => playbackPriority.setBuffering(false);
+
     a1.addEventListener("timeupdate", onTimeA);
     a2.addEventListener("timeupdate", onTimeB);
     a1.addEventListener("loadedmetadata", onMetaA);
     a2.addEventListener("loadedmetadata", onMetaB);
     a1.addEventListener("ended", onEndA);
     a2.addEventListener("ended", onEndB);
+    a1.addEventListener("waiting", onWaiting);
+    a2.addEventListener("waiting", onWaiting);
+    a1.addEventListener("stalled", onWaiting);
+    a2.addEventListener("stalled", onWaiting);
+    a1.addEventListener("playing", onPlaying);
+    a2.addEventListener("playing", onPlaying);
+    a1.addEventListener("pause", onPause);
+    a2.addEventListener("pause", onPause);
+    a1.addEventListener("canplay", onCanPlay);
+    a2.addEventListener("canplay", onCanPlay);
 
     return () => {
       a1.removeEventListener("timeupdate", onTimeA);
@@ -284,6 +308,16 @@ export function useAudioEngine(
       a2.removeEventListener("loadedmetadata", onMetaB);
       a1.removeEventListener("ended", onEndA);
       a2.removeEventListener("ended", onEndB);
+      a1.removeEventListener("waiting", onWaiting);
+      a2.removeEventListener("waiting", onWaiting);
+      a1.removeEventListener("stalled", onWaiting);
+      a2.removeEventListener("stalled", onWaiting);
+      a1.removeEventListener("playing", onPlaying);
+      a2.removeEventListener("playing", onPlaying);
+      a1.removeEventListener("pause", onPause);
+      a2.removeEventListener("pause", onPause);
+      a1.removeEventListener("canplay", onCanPlay);
+      a2.removeEventListener("canplay", onCanPlay);
     };
   }, [handleTimeUpdate, handleLoadedMetadata, handleEnded]);
 
