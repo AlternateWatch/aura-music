@@ -1658,6 +1658,46 @@ app.delete('/api/playlists/:id/tracks/:tid', authenticateToken, async (req: any,
 
 
 
+
+// Reemplazar / sobrescribir todas las canciones de una playlist (ej. por Aura DJ)
+app.put('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Response) => {
+    const { trackIds } = req.body;
+    if (!Array.isArray(trackIds)) {
+        return res.status(400).json({ error: "trackIds must be an array" });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        const [playlistRows]: any = await connection.execute(
+            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
+            [req.params.id, req.user.userId]
+        );
+
+        if (playlistRows.length === 0) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        await connection.beginTransaction();
+        await connection.execute('DELETE FROM playlist_tracks WHERE playlist_id = ?', [req.params.id]);
+
+        for (let i = 0; i < trackIds.length; i++) {
+            await connection.execute(
+                'INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)',
+                [req.params.id, trackIds[i], i]
+            );
+        }
+
+        await connection.commit();
+        res.json({ success: true, count: trackIds.length });
+    } catch (e) {
+        await connection.rollback();
+        console.error("Error overwriting playlist tracks:", e);
+        res.status(500).json({ error: "Error updating playlist tracks" });
+    } finally {
+        connection.release();
+    }
+});
+
 app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: any, res: Response) => {
 
     const { trackIds } = req.body;
@@ -3172,7 +3212,7 @@ app.post('/api/admin/sync-local-to-b2', authenticateToken, async (req: any, res:
 // AURA DJ - GENERADOR DE PLAYLISTS CON GEMINI
 // ==========================================
 app.post('/api/ai/dj', async (req: any, res: Response) => {
-    const { prompt, apiKey } = req.body;
+    const { prompt, apiKey, candidateTrackIds, playlistName } = req.body;
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
         return res.status(400).json({ error: "PROMPT_REQUIRED", message: "Escribe qué tipo de música o ambiente deseas." });
     }

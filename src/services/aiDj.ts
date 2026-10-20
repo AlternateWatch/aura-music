@@ -8,6 +8,12 @@ export interface DjMixResult {
   tracks: Song[];
 }
 
+export interface DjSourceInfo {
+  type: 'library' | 'playlist' | 'liked';
+  name?: string;
+  playlistId?: string | number;
+}
+
 const LOCAL_STORAGE_KEY = 'aura_gemini_api_key';
 
 export function getStoredGeminiKey(): string {
@@ -82,6 +88,7 @@ export async function saveStoredGeminiKey(key: string, authToken?: string | null
 
 /**
  * Genera una mezcla musical inteligente a partir de una descripción en lenguaje natural.
+ * Puede operar sobre toda la biblioteca o sobre una playlist existente específica.
  * Intenta primero el endpoint del backend `/api/ai/dj`.
  * Si el backend no tiene clave o falla, usa fallback directo en cliente contra la API de Gemini.
  */
@@ -89,7 +96,8 @@ export async function generateDjMix(
   prompt: string,
   localSongs: Song[],
   userApiKey?: string,
-  authToken?: string | null
+  authToken?: string | null,
+  sourceInfo?: DjSourceInfo
 ): Promise<DjMixResult> {
   let activeKey = (userApiKey && userApiKey.trim()) || getStoredGeminiKey();
 
@@ -107,12 +115,15 @@ export async function generateDjMix(
       headers['Authorization'] = `Bearer ${authToken}`;
     }
 
+    const isPlaylistMode = sourceInfo && sourceInfo.type !== 'library';
     const res = await fetch(`${API_BASE}/api/ai/dj`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         prompt,
         apiKey: activeKey || undefined,
+        candidateTrackIds: isPlaylistMode ? localSongs.map(s => s.id) : undefined,
+        playlistName: isPlaylistMode ? sourceInfo.name : undefined
       }),
     });
 
@@ -123,7 +134,6 @@ export async function generateDjMix(
       }
     } else {
       const errData = await res.json().catch(() => ({}));
-      // Si el servidor indica que falta la API key o no es válida, continuar al fallback cliente si el usuario tiene clave
       if (errData.error === 'MISSING_API_KEY' && !activeKey) {
         throw new Error('MISSING_API_KEY');
       }
@@ -132,7 +142,7 @@ export async function generateDjMix(
     if (backendErr.message === 'MISSING_API_KEY') {
       throw new Error('Configura tu API Key gratuita de Gemini para usar Aura DJ.');
     }
-    // Si el backend no está disponible o devolvió error, intentamos directamente desde el cliente si hay clave
+    // Si el backend no está disponible o devolvió error, continuamos al fallback cliente
   }
 
   // 2. Fallback en cliente directo contra Gemini API (usando la API Key del usuario y las canciones locales)
@@ -140,7 +150,7 @@ export async function generateDjMix(
     throw new Error('Configura tu API Key gratuita de Gemini para usar Aura DJ (en Google AI Studio puedes generarla gratis en 1 clic).');
   }
 
-  return generateDjMixClientSide(prompt, localSongs, activeKey);
+  return generateDjMixClientSide(prompt, localSongs, activeKey, sourceInfo?.name);
 }
 
 /**
@@ -179,9 +189,7 @@ async function getAvailableModels(apiKey: string): Promise<string[]> {
         if (sorted.length > 0) return sorted;
       }
     }
-  } catch {
-    // Fallback a lista predefinida si el endpoint de list models no responde
-  }
+  } catch {}
 
   return preferredOrder;
 }
@@ -192,10 +200,11 @@ async function getAvailableModels(apiKey: string): Promise<string[]> {
 async function generateDjMixClientSide(
   prompt: string,
   localSongs: Song[],
-  apiKey: string
+  apiKey: string,
+  playlistName?: string
 ): Promise<DjMixResult> {
   if (!localSongs || localSongs.length === 0) {
-    throw new Error('No hay canciones en tu biblioteca local para mezclar.');
+    throw new Error('No hay canciones en la lista seleccionada para mezclar.');
   }
 
   const catalog = localSongs.slice(0, 300).map(s => ({
@@ -205,7 +214,23 @@ async function generateDjMixClientSide(
     album: s.album || ''
   }));
 
-  const systemInstruction = `Eres "Aura DJ", un selector musical inteligente de una app de música.
+  const isPlaylistMode = !!(playlistName && playlistName.trim());
+  const systemInstruction = isPlaylistMode
+    ? `Eres "Aura DJ", un selector musical inteligente de una app de música.
+Tu tarea es seleccionar, reordenar o filtrar las canciones de la playlist existente "${playlistName}" según la petición del usuario.
+Tu respuesta debe ser EXCLUSIVAMENTE un bloque JSON válido estructurado así:
+{
+  "title": "${playlistName} (Aura DJ)",
+  "description": "Una frase corta que describa el flujo u orden aplicado a la playlist",
+  "vibeTags": ["tag1", "tag2", "tag3"],
+  "trackIds": ["id1", "id2", "id3", ...]
+}
+REGLAS:
+- Si el usuario pide reordenar o mejorar el flujo, incluye todas las canciones de la playlist en el orden óptimo.
+- Si pide filtrar (ej: "solo las acústicas", "los 6 temas más rápidos"), incluye solo las canciones que encajen.
+- Solo utiliza IDs que existan en el catálogo de esta playlist. No inventes IDs.
+- Devuelve ÚNICAMENTE el bloque JSON, sin textos ni explicaciones fuera del JSON.`
+    : `Eres "Aura DJ", un selector musical inteligente de una app de música.
 Tu trabajo es responder EXCLUSIVAMENTE con un JSON válido estructurado así:
 {
   "title": "Nombre creativo de la sesión / mix (máx 5 palabras)",
@@ -214,14 +239,14 @@ Tu trabajo es responder EXCLUSIVAMENTE con un JSON válido estructurado así:
   "trackIds": ["id1", "id2", "id3", ...]
 }
 REGLAS:
-- Selecciona entre 6 y 18 canciones del catálogo proporcionado que mejor encajen con la petición del usuario.
+- Selecciona entre 6 y 20 canciones del catálogo proporcionado que mejor encajen con la petición del usuario.
 - El orden debe tener una progresión de ritmo/atmósfera fluida (como una sesión de DJ real).
 - Solo utiliza IDs que existan en el catálogo. No inventes IDs.
 - Devuelve ÚNICAMENTE el bloque JSON, sin introducciones ni marcas de formato fuera del JSON.`;
 
   const userContent = `PETICIÓN DEL USUARIO: "${prompt.trim()}"
 
-CATÁLOGO DISPONIBLE:
+CATÁLOGO ${isPlaylistMode ? `DE LA PLAYLIST "${playlistName}"` : 'DISPONIBLE'}:
 ${JSON.stringify(catalog)}`;
 
   const models = await getAvailableModels(apiKey);
@@ -273,11 +298,11 @@ ${JSON.stringify(catalog)}`;
       }
 
       if (selectedTracks.length === 0) {
-        throw new Error('El modelo no seleccionó canciones existentes en la biblioteca.');
+        throw new Error('El modelo no seleccionó canciones existentes en la lista.');
       }
 
       return {
-        title: parsed.title || 'Aura Mix',
+        title: parsed.title || (isPlaylistMode ? `${playlistName} (Aura DJ)` : 'Aura Mix'),
         description: parsed.description || 'Sesión generada por Aura DJ',
         vibeTags: Array.isArray(parsed.vibeTags) ? parsed.vibeTags : ['Aura DJ'],
         tracks: selectedTracks

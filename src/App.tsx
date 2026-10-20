@@ -4277,6 +4277,16 @@ transition={{
                                           );
                                         })()
                                       )}
+                                      {currentPlaylist && !showModeration && (
+                                        <button
+                                          onClick={() => setIsAuraDjOpen(true)}
+                                          title={`Aura DJ: mezclar o reordenar "${currentPlaylist.name}"`}
+                                          className="px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm bg-gradient-to-r from-amber-500/15 via-[#F27D26]/15 to-rose-500/15 text-brand-primary border border-brand-primary/30 hover:bg-brand-primary/25"
+                                        >
+                                          <Sparkles size={11} className="fill-brand-primary" />
+                                          <span>Aura DJ</span>
+                                        </button>
+                                      )}
                                       {showModeration && userRole === 'admin' && (
                                         <div className="flex flex-col gap-3 w-full max-w-[200px]">
                                           <button
@@ -4934,6 +4944,8 @@ getCurrentTime={audioObj.getCurrentTime}
               onClose={() => setIsAuraDjOpen(false)}
               songs={songs}
               token={token}
+              playlists={playlists}
+              activePlaylistId={activePlaylistId}
               onPlayQueue={handlePlayDjMix}
               onPlaylistCreated={() => {
                 loadPlaylists();
