@@ -2877,7 +2877,7 @@ useEffect(() => {
                   {/* AURA DJ BUTTON */}
                   <button
                     onClick={() => setIsAuraDjOpen(true)}
-                    className="bg-gradient-to-r from-purple-600 via-pink-600 to-purple-600 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                    className="bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-orange-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
                     title="Aura DJ con Gemini AI"
                   >
                     <Sparkles size={13} className="fill-white" />
@@ -2948,13 +2948,13 @@ useEffect(() => {
                               }}
                               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
                             >
-                              <div className="p-2 rounded-lg bg-purple-500/15 text-purple-300 group-hover:bg-purple-500/25 transition-colors">
-                                <Sparkles size={16} className="fill-purple-300" />
+                              <div className="p-2 rounded-lg bg-brand-primary/15 text-brand-primary group-hover:bg-brand-primary/25 transition-colors">
+                                <Sparkles size={16} className="fill-brand-primary" />
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-semibold text-white flex items-center gap-2">
                                   <span>Aura DJ (Gemini AI)</span>
-                                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/30 font-bold">NUEVO</span>
+                                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-brand-primary/20 text-brand-primary border border-brand-primary/30 font-bold">NUEVO</span>
                                 </div>
                                 <div className="text-[10px] text-white/40 truncate">
                                   Crea mezclas por lenguaje natural
@@ -3678,19 +3678,7 @@ transition={{
                     )}
                     <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
-                <div className="mt-auto pt-6 space-y-2">
-                  <div
-                    onClick={() => setIsAuraDjOpen(true)}
-                    className="p-4 rounded-[24px] border border-purple-500/30 bg-purple-950/20 cursor-pointer flex items-center gap-3.5 hover:bg-purple-900/30 transition-all group"
-                  >
-                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center shrink-0 shadow-md shadow-purple-500/20 group-hover:scale-105 transition-transform">
-                      <Sparkles size={16} className="text-white fill-white" />
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-purple-200 block">Aura DJ</span>
-                      <span className="text-[9px] text-purple-300/60 block">Gemini AI</span>
-                    </div>
-                  </div>
+                <div className="mt-auto pt-6">
                   <div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all">
                     <Palette size={18} className="text-brand-primary" />
                     <span className="text-[10px] font-bold uppercase tracking-widest text-white/80">Aesthetic</span>
