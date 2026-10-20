@@ -1,7 +1,8 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
-  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2, HardDriveDownload
+  Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2, HardDriveDownload,
+  Disc, User
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { hapticImpact } from '../utils/haptics';
@@ -32,6 +33,8 @@ interface MusicCardProps {
   onPlayNext: () => void;
   onAddToQueue: () => void;
   onEdit: () => void;
+  onOpenAlbum?: (albumName: string) => void;
+  onOpenArtist?: (artistName: string) => void;
   /** Si estamos en una sesión colaborativa, muestra "Proponer para votación". */
   onClick: () => void;
 
@@ -43,7 +46,7 @@ interface MusicCardProps {
 
 export const MusicCard: React.FC<MusicCardProps> = ({ 
   song, isActive, isPlaying, playlists = [], userRole, isLiked, onToggleLike,
-  onAddToPlaylist, onRemoveFromPlaylist, onOpenTabs, onDelete, onPlayNext, onAddToQueue, onEdit, onClick, onDragStart,
+  onAddToPlaylist, onRemoveFromPlaylist, onOpenTabs, onDelete, onPlayNext, onAddToQueue, onEdit, onOpenAlbum, onOpenArtist, onClick, onDragStart,
   onDragOver, onDrop, isDragging
 }) => {
   const [showMenu, setShowMenu] = useState(false);
@@ -173,7 +176,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         <img
           src={resolvedCoverUrl || song.coverUrl || DEFAULT_COVER}
           srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || song.coverUrl)}
-          sizes="(max-width: 640px) 95vw, (max-width: 1024px) 33vw, 25vw"
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1536px) 25vw, 20vw"
           loading="lazy"
           decoding="async"
           className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'} ${coverLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
@@ -342,6 +345,36 @@ export const MusicCard: React.FC<MusicCardProps> = ({
                   <Youtube size={15} />
                   <span>{hasVideo ? 'Vídeo Oficial (YouTube)' : 'Sin vídeo oficial'}</span>
                 </button>
+
+                {/* IR AL ÁLBUM */}
+                {song.album && onOpenAlbum && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMenu(false);
+                      onOpenAlbum(song.album);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                  >
+                    <Disc size={15} />
+                    <span className="truncate">Ir al álbum</span>
+                  </button>
+                )}
+
+                {/* IR AL ARTISTA */}
+                {song.artist && onOpenArtist && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMenu(false);
+                      onOpenArtist(song.artist);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left"
+                  >
+                    <User size={15} />
+                    <span className="truncate">Ir al artista</span>
+                  </button>
+                )}
 
                 {/* 4. REPRODUCIR SIGUIENTE */}
                 <button

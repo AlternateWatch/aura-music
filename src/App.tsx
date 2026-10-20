@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
 import { MusicCard } from "./components/MusicCard";
+import { AlbumDetailView } from "./components/AlbumDetailView";
+import { DEFAULT_COVER, getResponsiveCoverSrcSet } from "./utils/api";
 import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
 import { THEMES } from "./constants/themes";
@@ -269,6 +271,7 @@ export default function App() {
   const [showModeration, setShowModeration] = useState(false);
   const [selectedAlbumName, setSelectedAlbumName] = useState<string | null>(null);
   const [selectedArtistName, setSelectedArtistName] = useState<string | null>(null);
+  const [librarySection, setLibrarySection] = useState<'songs' | 'albums' | 'artists'>('songs');
   const [artistBio, setArtistBio] = useState<string | null>(null);
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [newBioText, setNewBioText] = useState("");
@@ -2300,6 +2303,103 @@ useEffect(() => {
     return Array.from(map.values());
   }, [selectedArtistName, songs]);
 
+  // TODOS LOS ÁLBUMES DE LA BIBLIOTECA
+  const allAlbums = useMemo(() => {
+    const map = new Map<string, {
+      title: string;
+      artist: string;
+      coverUrl: string;
+      trackCount: number;
+      tracks: Song[];
+      formats: Set<string>;
+    }>();
+
+    songs.forEach(s => {
+      if (!s.album || !s.album.trim()) return;
+      const albumKey = s.album.trim();
+      if (!map.has(albumKey)) {
+        map.set(albumKey, {
+          title: albumKey,
+          artist: s.artist || 'Artista Desconocido',
+          coverUrl: s.coverUrl,
+          trackCount: 0,
+          tracks: [],
+          formats: new Set<string>()
+        });
+      }
+      const item = map.get(albumKey)!;
+      item.tracks.push(s);
+      item.trackCount++;
+      if (s.format) item.formats.add(s.format.toUpperCase());
+      if ((!item.coverUrl || item.coverUrl.includes('default-cover')) && s.coverUrl) {
+        item.coverUrl = s.coverUrl;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+  }, [songs]);
+
+  // ÁLBUMES FILTRADOS POR BÚSQUEDA Y FORMATO
+  const filteredAlbums = useMemo(() => {
+    let list = allAlbums;
+    if (formatFilter !== 'all') {
+      list = list.filter(alb => alb.tracks.some(t => t.format === formatFilter));
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length > 0) {
+      list = list.filter(alb => 
+        alb.title.toLowerCase().includes(q) || 
+        alb.artist.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [allAlbums, searchQuery, formatFilter]);
+
+  // TODOS LOS ARTISTAS DE LA BIBLIOTECA
+  const allArtists = useMemo(() => {
+    const map = new Map<string, {
+      name: string;
+      coverUrl: string;
+      trackCount: number;
+      albumCount: number;
+    }>();
+
+    songs.forEach(song => {
+      const artists = parseArtists(song.artist);
+      artists.forEach(artistName => {
+        if (!map.has(artistName)) {
+          map.set(artistName, {
+            name: artistName,
+            coverUrl: artistsMap[artistName]?.image_url || song.coverUrl,
+            trackCount: 0,
+            albumCount: 0
+          });
+        }
+      });
+    });
+
+    map.forEach((entry, artistName) => {
+      const artistTracks = songs.filter(s => parseArtists(s.artist).includes(artistName));
+      const albums = new Set(artistTracks.map(s => s.album).filter(Boolean));
+      entry.trackCount = artistTracks.length;
+      entry.albumCount = albums.size;
+      if (artistsMap[artistName]?.image_url) {
+        entry.coverUrl = artistsMap[artistName]?.image_url;
+      } else if (!entry.coverUrl && artistTracks[0]?.coverUrl) {
+        entry.coverUrl = artistTracks[0].coverUrl;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.trackCount - a.trackCount);
+  }, [songs, artistsMap]);
+
+  // ARTISTAS FILTRADOS POR BÚSQUEDA
+  const filteredArtists = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return allArtists;
+    return allArtists.filter(art => art.name.toLowerCase().includes(q));
+  }, [allArtists, searchQuery]);
+
   const getFlattenedSongs = () => flattenedSongs;
 
   const canReorderPlaylist =
@@ -3689,12 +3789,47 @@ transition={{
                         onPlayNext={() => handlePlayNext(song)}
                         onAddToQueue={() => handleAddToQueue(song)}
                         onEdit={() => setSongToEdit(song)}
+                        onOpenAlbum={(album) => setSelectedAlbumName(album)}
+                        onOpenArtist={(artist) => setSelectedArtistName(artist)}
                         onClick={() => handlePlaySong(song)} 
                       />
                     ))}
                   </div>
                 </div>
               </section>
+            ) : selectedAlbumName ? (
+              <AlbumDetailView
+                albumName={selectedAlbumName}
+                songs={songs.filter(s => s.album === selectedAlbumName)}
+                currentSong={currentSong}
+                isPlaying={isPlaying}
+                likedIds={likedIds}
+                playlists={playlists}
+                userRole={userRole}
+                onPlaySong={handlePlaySong}
+                onPlayAll={(tracks) => {
+                  if (tracks.length > 0) handlePlaySong(tracks[0]);
+                }}
+                onShuffleAll={(tracks) => {
+                  if (tracks.length > 0) {
+                    const randomIdx = Math.floor(Math.random() * tracks.length);
+                    if (!socketObj.isShuffle) socketObj.setIsShuffle(true);
+                    handlePlaySong(tracks[randomIdx]);
+                  }
+                }}
+                onBack={() => setSelectedAlbumName(null)}
+                onOpenArtist={(art) => {
+                  setSelectedAlbumName(null);
+                  setSelectedArtistName(art);
+                }}
+                onToggleLike={handleToggleLike}
+                onAddToPlaylist={handleAddToPlaylist}
+                onPlayNext={handlePlayNext}
+                onAddToQueue={handleAddToQueue}
+                onEditSong={(song) => setSongToEdit(song)}
+                onDeleteSong={(songId) => setTrackToDelete(songId)}
+                onOpenTabs={(song) => setTabsSong(song)}
+              />
             ) : !isFocusMode ? (
               <>
       <AnimatePresence>
@@ -3720,7 +3855,7 @@ transition={{
                             {currentSong && <p className="text-white/60 italic mb-4 md:mb-6 font-serif text-sm md:text-lg">{currentSong.artist}</p>}
                             <div className="flex gap-4"><button onClick={() => currentSong && setIsPlaying(!isPlaying)} className="px-6 md:px-8 py-2 md:py-2.5 rounded-full bg-white text-black font-bold text-[9px] md:text-[10px] uppercase shadow-xl hover:scale-105 transition-all cursor-pointer">{isPlaying ? "Pause" : "Resume"}</button></div>
                         </div>
-                    </section>
+                </section>
                 )}
 
                 <section>
@@ -3738,7 +3873,51 @@ transition={{
                                       : showModeration
                                       ? "PENDING QUEUE"
                                       : activePlaylistId === 'all'
-                                      ? "Global Top Tracks"
+                                      ? (
+                                        <span className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-2xl bg-white/5 border border-white/10 shrink-0 normal-case">
+                                          <button
+                                            type="button"
+                                            onClick={() => setLibrarySection('songs')}
+                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              librarySection === 'songs'
+                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                                            }`}
+                                          >
+                                            <Music2 size={13} />
+                                            <span>Canciones</span>
+                                            <span className="text-[9px] opacity-75">({songs.length})</span>
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => setLibrarySection('albums')}
+                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              librarySection === 'albums'
+                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                                            }`}
+                                          >
+                                            <Disc size={13} />
+                                            <span>Álbumes</span>
+                                            <span className="text-[9px] opacity-75">({allAlbums.length})</span>
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => setLibrarySection('artists')}
+                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              librarySection === 'artists'
+                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                                            }`}
+                                          >
+                                            <User size={13} />
+                                            <span>Artistas</span>
+                                            <span className="text-[9px] opacity-75">({allArtists.length})</span>
+                                          </button>
+                                        </span>
+                                      )
                                       : activePlaylistId === 'liked'
                                       ? "Favorite Tracks"
                                       : activePlaylistId === 'offline'
@@ -3887,6 +4066,99 @@ transition={{
                     </div>
 
                     {/* RESPONSIVE GRID */}
+                    {activePlaylistId === 'all' && librarySection === 'albums' ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-6 animate-in fade-in duration-200">
+                        {filteredAlbums.map(alb => (
+                          <div
+                            key={alb.title}
+                            onClick={() => setSelectedAlbumName(alb.title)}
+                            className="group p-3.5 sm:p-4 rounded-[28px] sm:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col justify-between shadow-lg"
+                          >
+                            <div className="aspect-square rounded-2xl overflow-hidden mb-3 relative bg-white/5 shadow-md">
+                              <img
+                                src={getCachedOfflineBlobUrl(alb.coverUrl) || alb.coverUrl || DEFAULT_COVER}
+                                srcSet={getResponsiveCoverSrcSet(alb.coverUrl)}
+                                sizes="(max-width: 640px) 48vw, (max-width: 1024px) 25vw, (max-width: 1536px) 20vw, 16vw"
+                                onError={(e) => {
+                                  if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                    e.currentTarget.src = DEFAULT_COVER;
+                                  }
+                                }}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                alt={alb.title}
+                              />
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const first = alb.tracks[0];
+                                  if (first) {
+                                    setSelectedAlbumName(alb.title);
+                                    handlePlaySong(first);
+                                  }
+                                }}
+                                className="absolute bottom-2.5 right-2.5 w-10 h-10 rounded-full bg-brand-primary text-black flex items-center justify-center opacity-0 group-hover:opacity-100 shadow-2xl hover:scale-110 active:scale-95 transition-all duration-200"
+                                title={`Reproducir ${alb.title}`}
+                              >
+                                <Play size={16} fill="black" className="ml-0.5" />
+                              </div>
+                            </div>
+
+                            <div className="min-w-0 space-y-0.5">
+                              <h3 className="text-sm font-bold text-white truncate" title={alb.title}>
+                                {alb.title}
+                              </h3>
+                              <p className="text-xs text-white/50 truncate" title={alb.artist}>
+                                {alb.artist}
+                              </p>
+                              <div className="flex items-center gap-1.5 pt-1 text-[10px] font-mono text-white/40">
+                                <span>{alb.trackCount} {alb.trackCount === 1 ? 'pista' : 'pistas'}</span>
+                                {alb.tracks.some(t => t.format === 'flac') && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-brand-primary font-bold">FLAC</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : activePlaylistId === 'all' && librarySection === 'artists' ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-6 animate-in fade-in duration-200">
+                        {filteredArtists.map(art => (
+                          <div
+                            key={art.name}
+                            onClick={() => setSelectedArtistName(art.name)}
+                            className="group p-4 rounded-[28px] sm:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col items-center text-center shadow-lg"
+                          >
+                            <div className="w-full aspect-square rounded-full overflow-hidden mb-3 relative bg-white/5 shadow-xl border border-white/10">
+                              <img
+                                src={getCachedOfflineBlobUrl(art.coverUrl) || art.coverUrl || DEFAULT_COVER}
+                                srcSet={getResponsiveCoverSrcSet(art.coverUrl)}
+                                sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, (max-width: 1536px) 20vw, 16vw"
+                                onError={(e) => {
+                                  if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                    e.currentTarget.src = DEFAULT_COVER;
+                                  }
+                                }}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                alt={art.name}
+                              />
+                            </div>
+                            <h3 className="text-sm font-bold text-white truncate w-full" title={art.name}>
+                              {art.name}
+                            </h3>
+                            <p className="text-[10px] uppercase font-bold tracking-wider text-brand-primary mt-1">
+                              {art.albumCount} {art.albumCount === 1 ? 'Álbum' : 'Álbumes'} · {art.trackCount} {art.trackCount === 1 ? 'Pista' : 'Pistas'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8">
                         {displayItems.map((item: any) => (
                             <div
@@ -4018,6 +4290,8 @@ transition={{
                                         onPlayNext={() => handlePlayNext(item)}
                                         onAddToQueue={() => handleAddToQueue(item)}
                                         onEdit={() => setSongToEdit(item)}
+                                        onOpenAlbum={(album) => setSelectedAlbumName(album)}
+                                        onOpenArtist={(artist) => setSelectedArtistName(artist)}
                                         onClick={() => {
                                             if (isMinigameActive) {
                                                 handleMinigameGuess(item);
@@ -4037,6 +4311,7 @@ transition={{
                             </div>
                         ))}
                     </div>
+                    )}
                 </section>
               </>
             ) : (
