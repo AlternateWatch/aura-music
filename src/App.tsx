@@ -1130,7 +1130,12 @@ useEffect(() => {
       }
       const activeToken = token || localStorage.getItem('aura_token');
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
-      const res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      let res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      if (!res.ok) {
+        // Reintento automático tras 1.2s en caso de reinicio de servidor o corte temporal
+        await new Promise(r => setTimeout(r, 1200));
+        res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -1216,7 +1221,11 @@ useEffect(() => {
       return;
     }
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      let res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      if (!res.ok) {
+        await new Promise(r => setTimeout(r, 1200));
+        res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
+      }
       if (!res.ok) {
         const offlinePlaylists = await getAllOfflinePlaylists();
         if (offlinePlaylists.length > 0) {

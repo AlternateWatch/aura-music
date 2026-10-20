@@ -177,7 +177,8 @@ const pool = mysql.createPool({
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME || 'aura_music_db',
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 25,
+    keepAliveInitialDelay: 10000,
     enableKeepAlive: true
 });
 
@@ -578,7 +579,7 @@ app.get('/api/tracks', async (req, res) => {
 
         res.json(t); 
 
-    } catch (e) { res.status(500).send(); } 
+    } catch (e) { console.error("Error in GET /api/tracks:", e); res.status(500).json({ error: "Error loading tracks" }); } 
 
 });
 
