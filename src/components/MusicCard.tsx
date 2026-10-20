@@ -538,13 +538,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         />
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
           {isPlaying && isActive ? (
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] flex items-center justify-center shadow-lg shadow-orange-500/30 scale-100 transition-transform">
-              <Pause size={20} className="md:w-5 md:h-5 text-black" fill="black" />
-            </div>
+            <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white drop-shadow-md" />
           ) : (
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] flex items-center justify-center shadow-lg shadow-orange-500/30 scale-95 hover:scale-105 transition-transform">
-              <Play size={20} className="ml-0.5 md:w-5 md:h-5 text-black" fill="black" />
-            </div>
+            <Play size={48} fill="white" className="ml-1 md:w-8 md:h-8 md:ml-1 text-white drop-shadow-md" />
           )}
         </div>
       </div>
