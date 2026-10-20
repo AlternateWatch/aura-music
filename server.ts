@@ -1,3 +1,4 @@
+process.env.UV_THREADPOOL_SIZE = '16';
 import express, { Request, Response, NextFunction } from 'express';
 
 import { createServer } from 'http';
@@ -2613,6 +2614,87 @@ if (!fs.existsSync(thumbsDir)) {
 
 const ALLOWED_THUMB_WIDTHS = [150, 300, 480, 600, 800, 1000, 1200];
 
+// Limitar concurrencia de procesamiento de imágenes con Sharp para no saturar los hilos de libuv
+// ni quitarle CPU o I/O a las peticiones de streaming de audio.
+let activeThumbJobs = 0;
+const MAX_CONCURRENT_THUMBS = 2;
+const thumbWaitQueue: (() => void)[] = [];
+const acquireThumbSlot = (): Promise<void> => {
+    if (activeThumbJobs < MAX_CONCURRENT_THUMBS) {
+        activeThumbJobs++;
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => thumbWaitQueue.push(resolve));
+};
+const releaseThumbSlot = () => {
+    activeThumbJobs--;
+    const next = thumbWaitQueue.shift();
+    if (next) {
+        activeThumbJobs++;
+        next();
+    }
+};
+
+// Deduplicar peticiones simultáneas de la misma miniatura
+const thumbJobsInFlight = new Map<string, Promise<Buffer | null>>();
+
+const generateThumbnailBuffer = async (filename: string, targetWidth: number, cachedThumbPath: string): Promise<Buffer | null> => {
+    const jobKey = `${filename}_w${targetWidth}`;
+    const existingJob = thumbJobsInFlight.get(jobKey);
+    if (existingJob) return existingJob;
+
+    const job = (async (): Promise<Buffer | null> => {
+        await acquireThumbSlot();
+        try {
+            if (fs.existsSync(cachedThumbPath)) {
+                return await fs.promises.readFile(cachedThumbPath);
+            }
+
+            let sourceBuffer: Buffer | null = null;
+            const localSourcePath = resolveDiskPath(filename);
+
+            if (localSourcePath && fs.existsSync(localSourcePath)) {
+                sourceBuffer = await fs.promises.readFile(localSourcePath);
+            } else if (isB2Configured()) {
+                const b2Obj = await getB2ObjectStream(filename);
+                if (b2Obj && b2Obj.stream) {
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of b2Obj.stream) {
+                        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                    }
+                    sourceBuffer = Buffer.concat(chunks);
+                    if (localSourcePath && !fs.existsSync(localSourcePath)) {
+                        try { await fs.promises.writeFile(localSourcePath, sourceBuffer); } catch {}
+                    }
+                }
+            }
+
+            if (!sourceBuffer || sourceBuffer.length === 0) {
+                return null;
+            }
+
+            const sharp = (await import('sharp')).default;
+            const thumbBuffer = await sharp(sourceBuffer, { failOn: 'none' })
+                .rotate()
+                .resize({ width: targetWidth, withoutEnlargement: true })
+                .webp({ quality: 80, effort: 2 })
+                .toBuffer();
+
+            try {
+                await fs.promises.writeFile(cachedThumbPath, thumbBuffer);
+            } catch {}
+
+            return thumbBuffer;
+        } finally {
+            releaseThumbSlot();
+            thumbJobsInFlight.delete(jobKey);
+        }
+    })();
+
+    thumbJobsInFlight.set(jobKey, job);
+    return job;
+};
+
 app.get('/uploads/:filename', async (req: Request, res: Response, next: NextFunction) => {
     const rawW = req.query.w ? parseInt(String(req.query.w), 10) : null;
     const filename = path.basename(decodeURIComponent(req.params.filename.split('?')[0]));
@@ -2636,39 +2718,10 @@ app.get('/uploads/:filename', async (req: Request, res: Response, next: NextFunc
     }
 
     try {
-        let sourceBuffer: Buffer | null = null;
-        const localSourcePath = resolveDiskPath(filename);
-
-        if (localSourcePath && fs.existsSync(localSourcePath)) {
-            sourceBuffer = fs.readFileSync(localSourcePath);
-        } else if (isB2Configured()) {
-            const b2Obj = await getB2ObjectStream(filename);
-            if (b2Obj && b2Obj.stream) {
-                const chunks: Buffer[] = [];
-                for await (const chunk of b2Obj.stream) {
-                    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-                }
-                sourceBuffer = Buffer.concat(chunks);
-                if (localSourcePath && !fs.existsSync(localSourcePath)) {
-                    try { fs.writeFileSync(localSourcePath, sourceBuffer); } catch {}
-                }
-            }
-        }
-
-        if (!sourceBuffer || sourceBuffer.length === 0) {
+        const thumbBuffer = await generateThumbnailBuffer(filename, targetWidth, cachedThumbPath);
+        if (!thumbBuffer) {
             return next();
         }
-
-        const sharp = (await import('sharp')).default;
-        const thumbBuffer = await sharp(sourceBuffer, { failOn: 'none' })
-            .rotate()
-            .resize({ width: targetWidth, withoutEnlargement: true })
-            .webp({ quality: 82, effort: 4 })
-            .toBuffer();
-
-        try {
-            fs.writeFileSync(cachedThumbPath, thumbBuffer);
-        } catch {}
 
         res.setHeader('Content-Type', 'image/webp');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -2684,9 +2737,32 @@ app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
 app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
-// Cola ligera para cachear en el disco local del VPS las canciones que se reproducen desde B2
-// (evita que futuros Range requests a mitad de canción tengan que ir a B2 y sufran micro-cortes)
+// Cola de segundo plano con concurrencia 1 para cachear en disco local las canciones reproducidas desde B2
+// IMPORTANTE: Se retrasa 45 segundos para que la reproducción inicial del usuario nunca compita
+// por el ancho de banda de red ni por I/O con B2, erradicando los microcortes.
 const hotCacheInFlight = new Set<string>();
+let isWarmJobActive = false;
+const warmQueue: Array<{ filename: string; destPath: string }> = [];
+
+const processWarmQueue = async () => {
+    if (isWarmJobActive || warmQueue.length === 0) return;
+    isWarmJobActive = true;
+    const nextJob = warmQueue.shift();
+    if (nextJob) {
+        try {
+            if (!fs.existsSync(nextJob.destPath)) {
+                await downloadB2FileToDisk(nextJob.filename, nextJob.destPath);
+            }
+        } catch {} finally {
+            hotCacheInFlight.delete(nextJob.filename);
+        }
+    }
+    isWarmJobActive = false;
+    if (warmQueue.length > 0) {
+        setTimeout(processWarmQueue, 5000);
+    }
+};
+
 const warmAudioToLocalDisk = (filename: string) => {
     if (!isB2Configured() || !/\.(mp3|flac|m4a|wav|ogg|aac)$/i.test(filename)) return;
     if (hotCacheInFlight.has(filename)) return;
@@ -2694,16 +2770,14 @@ const warmAudioToLocalDisk = (filename: string) => {
     if (fs.existsSync(destPath)) return;
 
     hotCacheInFlight.add(filename);
-    // Damos 3 segundos de ventaja al stream inicial del reproductor para no competir en el arranque
-    setTimeout(async () => {
-        try {
-            if (!fs.existsSync(destPath)) {
-                await downloadB2FileToDisk(filename, destPath);
-            }
-        } catch {} finally {
+    setTimeout(() => {
+        if (!fs.existsSync(destPath)) {
+            warmQueue.push({ filename, destPath });
+            processWarmQueue();
+        } else {
             hotCacheInFlight.delete(filename);
         }
-    }, 3000);
+    }, 45000);
 };
 
 // Si un archivo en /uploads no existe en disco local, servir desde Backblaze B2 con soporte de Range (streaming)

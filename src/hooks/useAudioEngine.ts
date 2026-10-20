@@ -213,21 +213,12 @@ export function useAudioEngine(
       }
     };
 
-    const targetUrl = new URL(
-      resolvedAudioUrl,
-      window.location.origin
-    ).href;
-
     const isDifferentSong = loadedSongIdRef.current !== currentSong.id;
-    const isUrlDifferent = audio.src !== targetUrl;
-    // Solo evitamos recargar si es exactamente LA MISMA canción y ya está sonando
-    // (para que no se corte en el segundo 5 si IndexedDB descarga la versión offline en segundo plano)
-    const isSameSongMidTrack =
-      !isDifferentSong &&
-      Boolean(audio.src) &&
-      audio.currentTime > 0.2;
+    const needsNewTrackLoad = isDifferentSong || !audio.src;
 
-    if ((isDifferentSong || isUrlDifferent) && !isSameSongMidTrack) {
+    let errorHandler: (() => void) | null = null;
+
+    if (needsNewTrackLoad) {
       loadedSongIdRef.current = currentSong.id;
       audio.pause();
       currentTimeRef.current = 0;
@@ -247,7 +238,13 @@ export function useAudioEngine(
         }
       };
 
+      errorHandler = () => {
+        console.warn("Error en reproducción de audio, reseteando referencia de canción:", audio.error);
+        loadedSongIdRef.current = null;
+      };
+
       audio.addEventListener("canplay", canPlayHandler);
+      audio.addEventListener("error", errorHandler, { once: true });
     } else {
       if (isPlaying) {
         startPlayback();
@@ -260,6 +257,9 @@ export function useAudioEngine(
     return () => {
       if (canPlayHandler) {
         audio.removeEventListener("canplay", canPlayHandler);
+      }
+      if (errorHandler) {
+        audio.removeEventListener("error", errorHandler);
       }
     };
   }, [
