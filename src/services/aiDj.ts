@@ -87,6 +87,48 @@ export async function generateDjMix(
 }
 
 /**
+ * Obtiene dinámicamente los modelos de Gemini disponibles para esta API Key,
+ * priorizando las versiones Flash más rápidas y económicas.
+ */
+async function getAvailableModels(apiKey: string): Promise<string[]> {
+  try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`
+    );
+    if (listRes.ok) {
+      const data = await listRes.json();
+      if (Array.isArray(data.models)) {
+        const supported = data.models
+          .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+          .map((m: any) => m.name.replace(/^models\//, ''));
+
+        // Priorizar versiones Flash más recientes
+        const flashModels = supported.filter(
+          (name: string) => name.includes('flash') && !name.includes('8b')
+        );
+        const otherFlash = supported.filter(
+          (name: string) => name.includes('flash') && name.includes('8b')
+        );
+        const rest = supported.filter((name: string) => !name.includes('flash'));
+        const combined = [...flashModels, ...otherFlash, ...rest];
+        if (combined.length > 0) return combined;
+      }
+    }
+  } catch {}
+
+  // Fallbacks conocidos en caso de no poder listar modelos
+  return [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash-001',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro'
+  ];
+}
+
+/**
  * Fallback directo en cliente contra la API REST de Google Gemini
  */
 async function generateDjMixDirect(
@@ -123,10 +165,10 @@ INSTRUCCIONES CRÍTICAS:
 }
 IMPORTANTE: Usa ÚNICAMENTE IDs que existan en el catálogo. No inventes IDs.`;
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = await getAvailableModels(apiKey);
   let lastError: any = null;
 
-  for (const model of models) {
+  for (const model of models.slice(0, 4)) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
       const res = await fetch(url, {
@@ -144,7 +186,7 @@ IMPORTANTE: Usa ÚNICAMENTE IDs que existan en el catálogo. No inventes IDs.`;
       if (!res.ok) {
         const errorBody = await res.json().catch(() => ({}));
         const msg = errorBody?.error?.message || `Error HTTP ${res.status}`;
-        if (msg.includes('API key') || res.status === 400) {
+        if (msg.includes('API key') || res.status === 400 && msg.includes('API_KEY')) {
           throw new Error('Tu API Key de Gemini no es válida. Compruébala en Google AI Studio.');
         }
         lastError = new Error(msg);

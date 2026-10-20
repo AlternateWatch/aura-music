@@ -3001,29 +3001,23 @@ INSTRUCCIONES CRÍTICAS:
 }
 No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+        const candidateModels = [
+            'gemini-2.0-flash',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-flash-002',
+            'gemini-1.5-flash',
+            'gemini-2.0-flash-lite',
+            'gemini-1.5-pro'
+        ];
         
         let response: any;
-        try {
-            response = await axios.post(
-                geminiUrl,
-                {
-                    contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        temperature: 0.7
-                    }
-                },
-                {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: 20000
-                }
-            );
-        } catch (err: any) {
-            if (err.response?.status === 404 || err.response?.data?.error?.message?.includes('not found')) {
-                const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+        let lastAxiosError: any = null;
+
+        for (const model of candidateModels) {
+            try {
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
                 response = await axios.post(
-                    fallbackUrl,
+                    geminiUrl,
                     {
                         contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
                         generationConfig: {
@@ -3036,9 +3030,22 @@ No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
                         timeout: 20000
                     }
                 );
-            } else {
-                throw err;
+                if (response?.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    break;
+                }
+            } catch (err: any) {
+                lastAxiosError = err;
+                const msg = err.response?.data?.error?.message || err.message;
+                if (err.response?.status === 400 && msg?.includes('API key')) {
+                    throw err; // Clave inválida, no seguir probando modelos
+                }
+                // Si el modelo da 404 o no existe, probar el siguiente
+                continue;
             }
+        }
+
+        if (!response && lastAxiosError) {
+            throw lastAxiosError;
         }
 
         const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
