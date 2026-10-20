@@ -159,20 +159,20 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         e.stopPropagation();
         onDrop?.();
       }}
-      className={`group relative p-5 md:p-4 rounded-[32px] md:rounded-3xl transition-all duration-300 flex flex-col justify-between ${
+      className={`group relative p-2.5 sm:p-3 md:p-4 rounded-2xl md:rounded-3xl transition-all duration-300 flex flex-col justify-between ${
         showMenu ? 'z-30' : 'z-0'
       } ${
         isDragging
           ? 'opacity-30 scale-95'
           : isActive
-            ? 'bg-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)]'
+            ? 'bg-white/10 ring-1 ring-[#F27D26]/40 shadow-[0_8px_24px_rgba(242,125,38,0.2)]'
             : 'bg-white/5 hover:bg-white/[0.08]'
       } ${
         onDragStart ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
       {/* PORTADA LIMPIA */}
-      <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
+      <div onClick={onClick} className="relative aspect-square rounded-xl md:rounded-2xl overflow-hidden mb-2.5 sm:mb-3 cursor-pointer shrink-0 bg-white/5 shadow-md">
         <img
           src={resolvedCoverUrl || song.coverUrl || DEFAULT_COVER}
           srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || song.coverUrl)}
@@ -193,17 +193,25 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           }}
         />
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
-          {isPlaying && isActive ? <Pause size={48} fill="white" className="md:w-8 md:h-8 text-white" /> : <Play size={48} fill="white" className="ml-1.5 md:w-8 md:h-8 md:ml-1 text-white" />}
+          {isPlaying && isActive ? (
+            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] flex items-center justify-center shadow-lg shadow-orange-500/30 scale-100 transition-transform">
+              <Pause size={20} className="md:w-5 md:h-5 text-black" fill="black" />
+            </div>
+          ) : (
+            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] flex items-center justify-center shadow-lg shadow-orange-500/30 scale-95 hover:scale-105 transition-transform">
+              <Play size={20} className="ml-0.5 md:w-5 md:h-5 text-black" fill="black" />
+            </div>
+          )}
         </div>
       </div>
 
       {/* FILA INFERIOR: INFORMACIÓN + BOTÓN DE 3 PUNTOS */}
-      <div className="flex items-end justify-between gap-3 min-w-0 w-full pt-1">
+      <div className="flex items-end justify-between gap-2 min-w-0 w-full pt-0.5">
         
         {/* TÍTULO Y ARTISTA */}
-        <div className="min-w-0 flex-1 space-y-1 md:space-y-0.5">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center gap-1.5 min-w-0">
-            <h3 className="text-lg md:text-sm font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
+            <h3 className="text-sm md:text-sm font-semibold md:font-bold text-white truncate leading-tight tracking-tight" title={song.title}>
               {song.title}
             </h3>
             {isDownloading ? (
@@ -212,7 +220,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               <Download size={12} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
             ) : null}
           </div>
-          <p className="text-sm md:text-[10px] text-white/40 uppercase font-black tracking-widest truncate" title={song.artist}>
+          <p className="text-xs md:text-[10px] text-white/50 uppercase font-bold tracking-wider truncate" title={song.artist}>
             {song.artist}
           </p>
         </div>
@@ -226,14 +234,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               setShowMenu(!showMenu);
               setShowPlaylistSubmenu(false);
             }}
-            className={`p-2.5 md:p-2 rounded-full border transition-all cursor-pointer outline-none ${
+            className={`p-1.5 sm:p-2 rounded-full border transition-all cursor-pointer outline-none ${
               showMenu 
                 ? 'bg-brand-primary text-black border-brand-primary shadow-lg' 
                 : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border-white/5'
             }`}
             title="Opciones de la canción"
           >
-            <MoreVertical size={18} className="md:w-4 md:h-4" />
+            <MoreVertical size={16} className="md:w-4 md:h-4" />
           </button>
 
           {/* DESPLEGABLE CON TODAS LAS ACCIONES */}

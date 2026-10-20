@@ -209,11 +209,13 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
       {/* Background Ambient Glow */}
       <div 
         className="fixed inset-0 opacity-40 blur-[140px] pointer-events-none transition-all duration-1000"
-        style={{ background: `radial-gradient(circle at center, #6366f1 0%, transparent 80%)` }}
+        style={{ background: `radial-gradient(circle at 50% 35%, rgba(242,125,38,0.35) 0%, rgba(249,115,22,0.15) 45%, transparent 80%)` }}
       />
 
       {/* Contenedor principal que fluye completo */}
       <div className="flex flex-col min-h-full w-full relative z-10">
+        {/* Mobile Pull-down handle indicator */}
+        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mt-2.5 shrink-0 md:hidden pointer-events-none" />
         
         {/* Header Area */}
         {/* Header Area (deslizar hacia abajo para cerrar) */}
@@ -338,7 +340,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
               {/* Playback Controls */}
               <div className="flex items-center justify-between px-2 md:px-4">
-                <button onClick={() => { hapticImpact('light'); onToggleShuffle(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isShuffle ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
+                <button onClick={() => { hapticImpact('light'); onToggleShuffle(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isShuffle ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(242,125,38,0.5)]' : 'text-white/30'}`}>
                   <Shuffle size={24} className="md:w-7 md:h-7" />
                 </button>
 
@@ -348,7 +350,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                     </button>
                     <button
                         onClick={() => { hapticImpact('medium'); onTogglePlay(); }}
-                        className="w-20 h-20 md:w-28 md:h-28 bg-white cursor-pointer rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all shadow-[0_15px_35px_rgba(255,255,255,0.15)] shrink-0 outline-none"
+                        className="w-20 h-20 md:w-28 md:h-28 bg-gradient-to-tr from-amber-500 via-[#F27D26] to-orange-500 cursor-pointer rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all shadow-[0_15px_35px_rgba(242,125,38,0.35)] shrink-0 outline-none"
                     >
                         {isPlaying ? <Pause size={32} className="md:w-11 md:h-11" fill="black" /> : <Play size={32} className="md:w-11 md:h-11 ml-1.5 md:ml-2" fill="black" />}
                     </button>
@@ -357,7 +359,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                     </button>
                 </div>
 
-                <button onClick={() => { hapticImpact('light'); onToggleLoop(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isLoop ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'text-white/30'}`}>
+                <button onClick={() => { hapticImpact('light'); onToggleLoop(); }} className={`transition-all cursor-pointer hover:scale-125 active:scale-90 shrink-0 outline-none ${isLoop ? 'text-brand-primary drop-shadow-[0_0_10px_rgba(242,125,38,0.5)]' : 'text-white/30'}`}>
                   <Repeat size={24} className="md:w-7 md:h-7" />
                 </button>
               </div>
@@ -396,7 +398,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                   
                   <div className="relative flex-1 h-10 flex items-center group/slider">
                       <div className="absolute w-full h-[3px] md:h-[4px] bg-white/10 rounded-full pointer-events-none" />
-                      <div className="absolute h-[3px] md:h-[4px] bg-brand-primary rounded-full shadow-[0_0_15px_rgba(99,102,241,0.5)] pointer-events-none" style={{ width: `${volume * 100}%` }} />
+                      <div className="absolute h-[3px] md:h-[4px] bg-brand-primary rounded-full shadow-[0_0_15px_rgba(242,125,38,0.5)] pointer-events-none" style={{ width: `${volume * 100}%` }} />
                       <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => onVolumeChange(parseFloat(e.target.value))} className="absolute w-full h-full opacity-0 cursor-pointer z-20 outline-none" />
                       <div className="absolute w-4 h-4 md:w-5 md:h-5 bg-white rounded-full shadow-2xl scale-0 group-hover/slider:scale-100 transition-transform pointer-events-none z-10 border-2 md:border-4 border-black" style={{ left: `calc(${volume * 100}% - 8px)` }} />
                   </div>

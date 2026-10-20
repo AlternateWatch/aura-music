@@ -188,37 +188,45 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
       }}
       className={`
         relative w-full max-w-[100vw] shrink-0
-        backdrop-blur-md border-t box-border
         transition-all duration-1000 z-[100]
-        overflow-hidden outline-none select-none
-        ${glassClasses}
+        outline-none select-none
+        bg-transparent md:backdrop-blur-md md:border-t md:box-border
+        ${activeTheme === "light" ? "md:border-black/5 md:bg-white/60" : "md:border-white/10 md:bg-black/40"}
       `}
  >
 
       {/* =========================================================
-          MOBILE LAYOUT
+          MOBILE FLOATING ISLAND MINI-PLAYER
           ========================================================= */}
-      <div
-        onClick={onOpenFullPlayer}
-        onTouchStart={handleMobileTouchStart}
-        onTouchMove={handleMobileTouchMove}
-        onTouchEnd={handleMobileTouchEnd}
-        style={{
-          WebkitTapHighlightColor: "transparent",
-          WebkitTouchCallout: "none",
-        }}
-        className="flex md:hidden flex-col w-full h-auto pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] px-4 gap-4 box-border cursor-pointer outline-none select-none"
-      >
-        {/* ROW 1: Art, Info, and Controls */}
-        <div className="flex items-center justify-between w-full min-w-0 gap-3 pointer-events-auto">
+      <div className="flex md:hidden w-full px-3 pt-1 pb-[calc(0.6rem+env(safe-area-inset-bottom))] box-border">
+        <div
+          onClick={onOpenFullPlayer}
+          onTouchStart={handleMobileTouchStart}
+          onTouchMove={handleMobileTouchMove}
+          onTouchEnd={handleMobileTouchEnd}
+          style={{
+            WebkitTapHighlightColor: "transparent",
+            WebkitTouchCallout: "none",
+          }}
+          className="relative flex items-center justify-between w-full h-[62px] px-3 rounded-2xl bg-[#141416]/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_36px_rgba(0,0,0,0.7)] overflow-hidden cursor-pointer select-none"
+        >
+          {/* Hairline Progress Bar along the top edge */}
+          <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-white/10 overflow-hidden pointer-events-none">
+            <div
+              className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-orange-400 transition-all duration-150"
+              style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+            />
+          </div>
+
+          {/* Left: Cover Art & Song Info */}
           <div
             style={{
               transform: swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : undefined,
               transition: swipeOffset === 0 ? "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)" : "none",
             }}
-            className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none will-change-transform"
+            className="flex items-center gap-3 flex-1 min-w-0 pointer-events-none will-change-transform pr-2"
           >
-            <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-white/10 shadow-lg bg-white/5">
+            <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 shadow-md bg-white/5">
               <img
                 src={resolvedCoverUrl || currentSong.coverUrl || DEFAULT_COVER}
                 srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || currentSong.coverUrl)}
@@ -234,17 +242,18 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 }}
               />
             </div>
-            <div className="flex flex-col min-w-0 flex-1">
-              <h4 className="font-bold text-sm truncate text-white">
+            <div className="flex flex-col min-w-0 flex-1 justify-center">
+              <h4 className="font-bold text-sm truncate text-white leading-tight">
                 {currentSong.title}
               </h4>
-              <p className="text-white/50 text-[10px] uppercase font-bold truncate mt-0.5">
+              <p className="text-white/50 text-[11px] uppercase font-semibold tracking-wide truncate mt-0.5">
                 {currentSong.artist}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Right: Controls (Previous, Warm Glow Play/Pause, Next) */}
+          <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
             <button
               type="button"
               onClick={(e) => {
@@ -256,7 +265,8 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 WebkitTapHighlightColor: "transparent",
                 WebkitTouchCallout: "none",
               }}
-              className="w-8 h-8 flex items-center justify-center text-white/50 active:scale-90 transition-transform cursor-pointer outline-none focus:outline-none"
+              className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white active:scale-90 transition-transform cursor-pointer outline-none focus:outline-none"
+              title="Anterior"
             >
               <SkipBack size={18} fill="currentColor" />
             </button>
@@ -271,12 +281,13 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 WebkitTapHighlightColor: "transparent",
                 WebkitTouchCallout: "none",
               }}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black shrink-0 active:scale-95 transition-transform shadow-xl cursor-pointer outline-none focus:outline-none"
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] text-black shrink-0 active:scale-95 transition-transform shadow-[0_4px_16px_rgba(242,125,38,0.4)] cursor-pointer outline-none focus:outline-none"
+              title={isPlaying ? "Pausar" : "Reproducir"}
             >
               {isPlaying ? (
-                <Pause size={18} fill="currentColor" />
+                <Pause size={18} className="text-black" fill="black" />
               ) : (
-                <Play size={18} className="ml-0.5" fill="currentColor" />
+                <Play size={18} className="ml-0.5 text-black" fill="black" />
               )}
             </button>
             <button
@@ -290,95 +301,12 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 WebkitTapHighlightColor: "transparent",
                 WebkitTouchCallout: "none",
               }}
-              className="w-8 h-8 flex items-center justify-center text-white/50 active:scale-90 transition-transform cursor-pointer outline-none focus:outline-none"
+              className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white active:scale-90 transition-transform cursor-pointer outline-none focus:outline-none"
+              title="Siguiente"
             >
               <SkipForward size={18} fill="currentColor" />
             </button>
           </div>
-        </div>
-
-        {/* ROW 2: Progress Bar & Secondary Controls */}
-        <div
-          className="flex items-center w-full min-w-0 gap-2 sm:gap-3"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* SHUFFLE BUTTON */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleShuffle(e);
-            }}
-            style={{
-              WebkitTapHighlightColor: "transparent",
-              WebkitTouchCallout: "none",
-            }}
-            className={`w-7 h-7 flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer outline-none focus:outline-none ${
-              isShuffle ? "text-brand-primary" : "text-white/40"
-            }`}
-          >
-            <Shuffle size={14} />
-          </button>
-
-          <span className="text-[10px] font-bold text-white/40 w-7 text-right font-mono shrink-0 pointer-events-none">
-            {formatTime(progressValue)}
-          </span>
-
-          <div className="relative flex-1 h-1.5 flex items-center min-w-0">
-            <div className="absolute inset-0 bg-white/10 rounded-full w-full h-full pointer-events-none" />
-            <div
-              className="absolute left-0 bg-white rounded-full h-full z-10 pointer-events-none"
-              style={{
-                width: `${Math.min(100, Math.max(0, progressPercent))}%`,
-              }}
-            />
-            <input
-              type="range"
-              min="0"
-              max={duration || 0}
-              step="0.1"
-              value={progressValue}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={handleSeekStart}
-              onChange={handleSeekChange}
-              onMouseUp={handleSeekEnd}
-              onTouchStart={handleSeekStart}
-              onTouchEnd={handleSeekEnd}
-              style={{
-                WebkitTapHighlightColor: "transparent",
-                WebkitTouchCallout: "none",
-              }}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 outline-none focus:outline-none"
-            />
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md z-30 pointer-events-none"
-              style={{
-                left: `calc(${Math.min(100, Math.max(0, progressPercent))}% - 6px)`,
-              }}
-            />
-          </div>
-
-          <span className="text-[10px] font-bold text-white/40 w-7 font-mono shrink-0 pointer-events-none">
-            {formatTime(duration)}
-          </span>
-
-          {/* LOOP BUTTON */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleLoop(e);
-            }}
-            style={{
-              WebkitTapHighlightColor: "transparent",
-              WebkitTouchCallout: "none",
-            }}
-            className={`w-7 h-7 flex items-center justify-center shrink-0 transition-transform active:scale-90 cursor-pointer outline-none focus:outline-none ${
-              isLoop ? "text-brand-primary" : "text-white/40"
-            }`}
-          >
-            <Repeat size={14} />
-          </button>
         </div>
       </div>
 
