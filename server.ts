@@ -1,5 +1,6 @@
 process.env.UV_THREADPOOL_SIZE = '16';
 import express, { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 
 import { createServer } from 'http';
 
@@ -180,6 +181,51 @@ const pool = mysql.createPool({
     connectionLimit: 25,
     keepAliveInitialDelay: 10000,
     enableKeepAlive: true
+});
+
+
+// --- ENCRYPTED USER API KEYS (AES-256-GCM) ---
+const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET || process.env.JWT_SECRET || 'aura-gemini-secret-seed-998811';
+const ENCRYPTION_KEY = crypto.createHash('sha256').update(String(ENCRYPTION_SECRET)).digest();
+
+function encryptApiKey(text: string): string {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+function decryptApiKey(ciphertext: string): string | null {
+    try {
+        const parts = ciphertext.split(':');
+        if (parts.length !== 3) return null;
+        const [ivHex, authTagHex, encHex] = parts;
+        const iv = Buffer.from(ivHex, 'hex');
+        const authTag = Buffer.from(authTagHex, 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+        decipher.setAuthTag(authTag);
+        let decrypted = decipher.update(encHex, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (e) {
+        console.error("Error descifrando API Key:", e);
+        return null;
+    }
+}
+
+// Auto-crear columna gemini_api_key si no existe en la tabla users
+pool.execute(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'gemini_api_key'
+`).then(async ([rows]: any) => {
+    if (!rows || rows.length === 0) {
+        await pool.execute('ALTER TABLE users ADD COLUMN gemini_api_key TEXT NULL');
+        console.log('[DB] Columna gemini_api_key agregada a la tabla users.');
+    }
+}).catch(err => {
+    console.error('[DB] Error verificando/agregando columna gemini_api_key:', err);
 });
 
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
@@ -951,6 +997,39 @@ app.post('/api/artists/:name/image', authenticateToken, upload.single('image'), 
 
 
 // --- USERS & PROFILE ---
+
+
+// --- USER GEMINI API KEY (ENCRYPTED) ---
+
+app.get('/api/user/gemini-key', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute('SELECT gemini_api_key FROM users WHERE id = ?', [req.user.userId]);
+        if (!rows || rows.length === 0 || !rows[0].gemini_api_key) {
+            return res.json({ apiKey: null });
+        }
+        const decrypted = decryptApiKey(rows[0].gemini_api_key);
+        res.json({ apiKey: decrypted });
+    } catch (e) {
+        console.error("Error obteniendo gemini-key:", e);
+        res.status(500).json({ error: "Error al consultar la API key" });
+    }
+});
+
+app.post('/api/user/gemini-key', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const { apiKey } = req.body;
+        if (apiKey && typeof apiKey === 'string' && apiKey.trim()) {
+            const encrypted = encryptApiKey(apiKey.trim());
+            await pool.execute('UPDATE users SET gemini_api_key = ? WHERE id = ?', [encrypted, req.user.userId]);
+        } else {
+            await pool.execute('UPDATE users SET gemini_api_key = NULL WHERE id = ?', [req.user.userId]);
+        }
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Error guardando gemini-key:", e);
+        res.status(500).json({ error: "Error al guardar la API key" });
+    }
+});
 
 app.get('/api/users/me', authenticateToken, async (req: any, res: Response) => {
 
@@ -3098,9 +3177,26 @@ app.post('/api/ai/dj', async (req: any, res: Response) => {
         return res.status(400).json({ error: "PROMPT_REQUIRED", message: "Escribe qué tipo de música o ambiente deseas." });
     }
 
-    const geminiKey = (apiKey && typeof apiKey === 'string' && apiKey.trim()) 
+    let geminiKey = (apiKey && typeof apiKey === 'string' && apiKey.trim()) 
         ? apiKey.trim() 
-        : process.env.GEMINI_API_KEY;
+        : null;
+
+    if (!geminiKey && req.headers['authorization']) {
+        try {
+            const token = req.headers['authorization'].split(' ')[1];
+            const decoded: any = jwt.verify(token, JWT_SECRET);
+            if (decoded?.userId) {
+                const [uRows]: any = await pool.execute('SELECT gemini_api_key FROM users WHERE id = ?', [decoded.userId]);
+                if (uRows[0]?.gemini_api_key) {
+                    geminiKey = decryptApiKey(uRows[0].gemini_api_key);
+                }
+            }
+        } catch {}
+    }
+
+    if (!geminiKey) {
+        geminiKey = process.env.GEMINI_API_KEY || null;
+    }
 
     if (!geminiKey) {
         return res.status(400).json({ 

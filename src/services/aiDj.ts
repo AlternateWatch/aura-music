@@ -18,14 +18,66 @@ export function getStoredGeminiKey(): string {
   }
 }
 
-export function saveStoredGeminiKey(key: string): void {
+/**
+ * Consulta la clave de Gemini del usuario guardada de forma cifrada en la base de datos
+ * y sincroniza la caché local.
+ */
+export async function fetchAndSyncGeminiKey(authToken?: string | null): Promise<string> {
+  const activeToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('aura_token') : null);
+  if (!activeToken) return getStoredGeminiKey();
+
   try {
-    if (key.trim()) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, key.trim());
+    const res = await fetch(`${API_BASE}/api/user/gemini-key`, {
+      headers: {
+        'Authorization': `Bearer ${activeToken}`
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.apiKey === 'string') {
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, data.apiKey);
+        } catch {}
+        return data.apiKey;
+      }
+    }
+  } catch (err) {
+    console.warn("No se pudo obtener la API Key de Gemini desde la base de datos:", err);
+  }
+
+  return getStoredGeminiKey();
+}
+
+/**
+ * Guarda la clave de Gemini en localStorage y de forma cifrada en la base de datos
+ * asociada al usuario actual.
+ */
+export async function saveStoredGeminiKey(key: string, authToken?: string | null): Promise<void> {
+  const cleanKey = key.trim();
+  try {
+    if (cleanKey) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, cleanKey);
     } else {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
     }
   } catch {}
+
+  const activeToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('aura_token') : null);
+  if (activeToken) {
+    try {
+      await fetch(`${API_BASE}/api/user/gemini-key`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${activeToken}`
+        },
+        body: JSON.stringify({ apiKey: cleanKey || null })
+      });
+    } catch (err) {
+      console.warn("No se pudo guardar la API Key cifrada en la base de datos:", err);
+    }
+  }
 }
 
 /**
@@ -39,7 +91,12 @@ export async function generateDjMix(
   userApiKey?: string,
   authToken?: string | null
 ): Promise<DjMixResult> {
-  const activeKey = (userApiKey && userApiKey.trim()) || getStoredGeminiKey();
+  let activeKey = (userApiKey && userApiKey.trim()) || getStoredGeminiKey();
+
+  // Si no hay clave local pero hay sesión, intentar sincronizarla
+  if (!activeKey && authToken) {
+    activeKey = await fetchAndSyncGeminiKey(authToken);
+  }
 
   // 1. Intento principal: Backend de Aura
   try {
@@ -83,166 +140,154 @@ export async function generateDjMix(
     throw new Error('Configura tu API Key gratuita de Gemini para usar Aura DJ (en Google AI Studio puedes generarla gratis en 1 clic).');
   }
 
-  return generateDjMixDirect(prompt, localSongs, activeKey);
+  return generateDjMixClientSide(prompt, localSongs, activeKey);
 }
 
 /**
  * Obtiene dinámicamente los modelos de Gemini disponibles para esta API Key,
- * priorizando las versiones Flash más rápidas y económicas.
+ * ordenados por preferencia (modelos Flash rápidos y ligeros).
  */
 async function getAvailableModels(apiKey: string): Promise<string[]> {
-  const fallbackList = [
-    'gemini-3.5-flash-lite',
-    'gemini-3-flash-preview',
-    'gemini-3.5-flash',
-    'gemini-flash-latest',
+  const preferredOrder = [
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-1.5-flash'
   ];
 
   try {
-    const listRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`,
+      { headers: { 'Content-Type': 'application/json' } }
     );
-    if (listRes.ok) {
-      const data = await listRes.json();
-      if (Array.isArray(data.models)) {
-        const supported = data.models
-          .filter((m: any) => 
-            Array.isArray(m.supportedGenerationMethods) && 
-            m.supportedGenerationMethods.includes('generateContent') &&
-            !m.name.includes('-tts') &&
-            !m.name.includes('-image') &&
-            !m.name.includes('-transcribe') &&
-            !m.name.includes('embedding')
-          )
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.models)) {
+        const availableNames: string[] = data.models
+          .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
           .map((m: any) => m.name.replace(/^models\//, ''));
 
-        const prioritized = [
-          'gemini-3.5-flash-lite',
-          'gemini-3-flash-preview',
-          'gemini-3.5-flash',
-          'gemini-flash-latest',
-          'gemini-2.0-flash',
-          'gemini-1.5-flash'
-        ];
+        const sorted = availableNames.sort((a, b) => {
+          const indexA = preferredOrder.findIndex(p => a.includes(p));
+          const indexB = preferredOrder.findIndex(p => b.includes(p));
+          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          return a.localeCompare(b);
+        });
 
-        const sorted = [
-          ...prioritized.filter(p => supported.includes(p)),
-          ...supported.filter(s => !prioritized.includes(s) && s.includes('flash')),
-          ...supported.filter(s => !prioritized.includes(s) && !s.includes('flash'))
-        ];
-
-        if (sorted.length > 0) return Array.from(new Set(sorted));
+        if (sorted.length > 0) return sorted;
       }
     }
-  } catch {}
+  } catch {
+    // Fallback a lista predefinida si el endpoint de list models no responde
+  }
 
-  // Fallbacks conocidos en caso de no poder listar modelos
-  return fallbackList;
+  return preferredOrder;
 }
 
 /**
  * Fallback directo en cliente contra la API REST de Google Gemini
  */
-async function generateDjMixDirect(
+async function generateDjMixClientSide(
   prompt: string,
-  songs: Song[],
+  localSongs: Song[],
   apiKey: string
 ): Promise<DjMixResult> {
-  if (!songs || songs.length === 0) {
-    throw new Error('No hay canciones cargadas en la biblioteca para que el DJ pueda elegir.');
+  if (!localSongs || localSongs.length === 0) {
+    throw new Error('No hay canciones en tu biblioteca local para mezclar.');
   }
 
-  // Compactar catálogo para optimizar tokens
-  const catalogList = songs
-    .slice(0, 500)
-    .map(s => `${s.id}|${s.title}|${s.artist}|${s.album || ''}`)
-    .join('\n');
+  const catalog = localSongs.slice(0, 300).map(s => ({
+    id: s.id,
+    title: s.title,
+    artist: s.artist,
+    album: s.album || ''
+  }));
 
-  const systemPrompt = `Eres "Aura DJ", un DJ y selector musical de clase mundial.
-El usuario quiere una playlist para la siguiente situación: "${prompt.trim()}"
-
-A continuación tienes las canciones disponibles en su biblioteca (Formato: ID|Título|Artista|Álbum):
-${catalogList}
-
-INSTRUCCIONES CRÍTICAS:
-1. Elige entre 8 y 25 canciones que mejor encajen con la vibra, estilo, género o energía solicitada.
-2. Si la petición es muy concreta y hay pocas canciones exactas, amplía con temas compatibles de artistas similares o misma energía.
-3. Ordena las canciones con progresión musical atractiva (un inicio que enganche, desarrollo, subida de energía/clímax, y un buen cierre).
-4. Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura:
+  const systemInstruction = `Eres "Aura DJ", un selector musical inteligente de una app de música.
+Tu trabajo es responder EXCLUSIVAMENTE con un JSON válido estructurado así:
 {
-  "title": "Nombre creativo y atractivo para la mezcla",
-  "description": "Una o dos frases explicando por qué estas canciones crean la atmósfera perfecta",
-  "vibeTags": ["Rock", "Noche", "Energía"],
-  "songIds": ["id1", "id2", "id3"]
+  "title": "Nombre creativo de la sesión / mix (máx 5 palabras)",
+  "description": "Una frase corta evocadora y profesional que describa el flujo de la sesión",
+  "vibeTags": ["tag1", "tag2", "tag3"],
+  "trackIds": ["id1", "id2", "id3", ...]
 }
-IMPORTANTE: Usa ÚNICAMENTE IDs que existan en el catálogo. No inventes IDs.`;
+REGLAS:
+- Selecciona entre 6 y 18 canciones del catálogo proporcionado que mejor encajen con la petición del usuario.
+- El orden debe tener una progresión de ritmo/atmósfera fluida (como una sesión de DJ real).
+- Solo utiliza IDs que existan en el catálogo. No inventes IDs.
+- Devuelve ÚNICAMENTE el bloque JSON, sin introducciones ni marcas de formato fuera del JSON.`;
+
+  const userContent = `PETICIÓN DEL USUARIO: "${prompt.trim()}"
+
+CATÁLOGO DISPONIBLE:
+${JSON.stringify(catalog)}`;
 
   const models = await getAvailableModels(apiKey);
   let lastError: any = null;
 
-  for (const model of models.slice(0, 4)) {
+  for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+          contents: [{ parts: [{ text: `${systemInstruction}\n\n${userContent}` }] }],
           generationConfig: {
-            responseMimeType: 'application/json',
             temperature: 0.7,
-          },
-        }),
+            maxOutputTokens: 1024,
+            responseMimeType: 'application/json'
+          }
+        })
       });
 
       if (!res.ok) {
-        const errorBody = await res.json().catch(() => ({}));
-        const msg = errorBody?.error?.message || `Error HTTP ${res.status}`;
-        if (msg.includes('API key') || res.status === 400 && msg.includes('API_KEY')) {
+        const errText = await res.text();
+        const msg = (errText || '').toLowerCase();
+        if (msg.includes('api key') || (res.status === 400 && msg.includes('api_key'))) {
           throw new Error('Tu API Key de Gemini no es válida. Compruébala en Google AI Studio.');
         }
-        lastError = new Error(msg);
-        continue; // Probar siguiente modelo
+        lastError = new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
+        continue;
       }
 
       const data = await res.json();
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) continue;
+      if (!rawText) throw new Error('Respuesta vacía del modelo Gemini.');
 
-      const parsed = JSON.parse(rawText);
-      const songMap = new Map<string, Song>();
-      songs.forEach(s => songMap.set(String(s.id), s));
+      const cleanJson = rawText.replace(/```json\s*/i, '').replace(/```\s*$/i, '').trim();
+      const parsed = JSON.parse(cleanJson);
 
-      const tracks: Song[] = [];
-      const seen = new Set<string>();
+      const songMap = new Map(localSongs.map(s => [String(s.id), s]));
+      const selectedTracks: Song[] = [];
 
-      if (Array.isArray(parsed.songIds)) {
-        parsed.songIds.forEach((sid: any) => {
-          const key = String(sid);
-          if (songMap.has(key) && !seen.has(key)) {
-            tracks.push(songMap.get(key)!);
-            seen.add(key);
+      if (Array.isArray(parsed.trackIds)) {
+        for (const tid of parsed.trackIds) {
+          const found = songMap.get(String(tid));
+          if (found && !selectedTracks.some(st => String(st.id) === String(found.id))) {
+            selectedTracks.push(found);
           }
-        });
+        }
       }
 
-      if (tracks.length === 0) {
-        throw new Error('No se encontraron canciones en tu biblioteca que coincidan con esa vibra.');
+      if (selectedTracks.length === 0) {
+        throw new Error('El modelo no seleccionó canciones existentes en la biblioteca.');
       }
 
       return {
-        title: parsed.title || 'Aura DJ Mix',
-        description: parsed.description || 'Selección personalizada creada por Aura DJ.',
-        vibeTags: Array.isArray(parsed.vibeTags) ? parsed.vibeTags : ['Aura DJ', 'Mix'],
-        tracks,
+        title: parsed.title || 'Aura Mix',
+        description: parsed.description || 'Sesión generada por Aura DJ',
+        vibeTags: Array.isArray(parsed.vibeTags) ? parsed.vibeTags : ['Aura DJ'],
+        tracks: selectedTracks
       };
     } catch (err: any) {
       lastError = err;
       if (err.message?.includes('API Key')) throw err;
+      continue;
     }
   }
 
-  throw lastError || new Error('No se pudo generar la mezcla con Aura DJ.');
+  throw lastError || new Error('No se pudo generar la mezcla con los modelos de Gemini disponibles.');
 }

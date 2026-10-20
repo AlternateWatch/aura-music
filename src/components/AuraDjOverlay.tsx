@@ -24,6 +24,7 @@ import {
   generateDjMix,
   getStoredGeminiKey,
   saveStoredGeminiKey,
+  fetchAndSyncGeminiKey,
   type DjMixResult
 } from '../services/aiDj';
 import { API_BASE } from '../utils/api';
@@ -81,8 +82,15 @@ export function AuraDjOverlay({
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  const handleSaveApiKey = () => {
-    saveStoredGeminiKey(apiKey);
+  // Sincronizar API Key guardada de forma cifrada en la base de datos al abrir
+  useEffect(() => {
+    fetchAndSyncGeminiKey(token).then(k => {
+      if (k) setApiKey(k);
+    });
+  }, [token]);
+
+  const handleSaveApiKey = async () => {
+    await saveStoredGeminiKey(apiKey, token);
     setKeySavedMessage(true);
     setTimeout(() => {
       setKeySavedMessage(false);

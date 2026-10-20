@@ -61,6 +61,7 @@ const LazySleepTimerOverlay = lazy(() => import("./components/SleepTimerOverlay"
 const LazyAuraDjOverlay = lazy(() => import("./components/AuraDjOverlay").then(m => ({ default: m.AuraDjOverlay })));
 
 // MODULED IMPORTS AND HOOKS
+import { fetchAndSyncGeminiKey } from "./services/aiDj";
 import { useAppUpdate } from "./hooks/useAppUpdate";
 import { UpdateModal } from "./components/UpdateModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
@@ -1323,6 +1324,7 @@ useEffect(() => {
   useEffect(() => { loadContent(); }, [showModeration, activePlaylistId]);
   useEffect(() => { loadPlaylists(); }, [token]);
   useEffect(() => { loadLastTrack(); }, [token]);
+  useEffect(() => { if (token) void fetchAndSyncGeminiKey(token); }, [token]);
 
   useEffect(() => {
     const handleOnline = () => {
