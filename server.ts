@@ -436,6 +436,104 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
 
 
+// --- APP AUTO-UPDATER ENDPOINTS ---
+
+// 1. Consulta pública de la versión más reciente de la app
+app.get('/api/app/version', async (req: Request, res: Response) => {
+    try {
+        const candidates = [
+            path.join(uploadDir, 'version.json'),
+            path.join(ROOT_DIR, 'version.json'),
+            path.join(DIST_DIR, 'version.json')
+        ];
+        for (const file of candidates) {
+            if (fs.existsSync(file)) {
+                const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                return res.json(data);
+            }
+        }
+
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.json({
+            platform: "android",
+            latestVersion: "1.0.0",
+            versionCode: 1,
+            releaseNotes: "Mejoras de rendimiento y estabilidad.",
+            downloadUrl: `${req.protocol}://${req.get('host')}/download/aura-latest.apk`,
+            mandatory: false,
+            publishedAt: new Date().toISOString()
+        });
+    } catch (e: any) {
+        console.error("Error al obtener versión de la app:", e);
+        res.status(500).json({ error: "No se pudo consultar la versión" });
+    }
+});
+
+// 2. Descarga directa del APK de actualización para Android
+app.get(['/download/aura-latest.apk', '/download/app-release.apk', '/api/app/download'], async (req: Request, res: Response) => {
+    try {
+        const apkCandidates = [
+            path.join(uploadDir, 'aura-latest.apk'),
+            path.join(uploadDir, 'app-release.apk'),
+            path.join(ROOT_DIR, 'public', 'aura-latest.apk'),
+            path.join(DIST_DIR, 'aura-latest.apk'),
+            path.join(ROOT_DIR, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
+        ];
+
+        for (const file of apkCandidates) {
+            if (fs.existsSync(file)) {
+                res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+                res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
+                res.setHeader('Cache-Control', 'public, max-age=3600');
+                return res.sendFile(file);
+            }
+        }
+
+        if (isB2Configured()) {
+            const b2Obj = await getB2ObjectStream('aura-latest.apk');
+            if (b2Obj && b2Obj.stream) {
+                res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+                res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
+                res.setHeader('Cache-Control', 'public, max-age=3600');
+                return b2Obj.stream.pipe(res);
+            }
+        }
+
+        return res.status(404).send("El instalador APK de la actualización aún no está disponible en el servidor.");
+    } catch (e: any) {
+        console.error("Error al servir el APK de actualización:", e);
+        res.status(500).send("Error interno al descargar el APK.");
+    }
+});
+
+// 3. Endpoint administrativo para actualizar la información de versión
+app.post('/api/admin/app/version', authenticateToken, async (req: any, res: Response) => {
+    if (req.user?.role !== 'admin') {
+        return res.status(403).json({ error: "Acceso denegado: solo administradores" });
+    }
+    const { latestVersion, releaseNotes, mandatory, versionCode, downloadUrl } = req.body;
+    if (!latestVersion) {
+        return res.status(400).json({ error: "latestVersion es requerido" });
+    }
+    try {
+        const versionData = {
+            platform: "android",
+            latestVersion: String(latestVersion).trim(),
+            versionCode: versionCode ? Number(versionCode) : 1,
+            releaseNotes: String(releaseNotes || "Novedades y mejoras de rendimiento.").trim(),
+            downloadUrl: downloadUrl || `${req.protocol}://${req.get('host')}/download/aura-latest.apk`,
+            mandatory: Boolean(mandatory),
+            publishedAt: new Date().toISOString()
+        };
+        const dest = path.join(uploadDir, 'version.json');
+        fs.writeFileSync(dest, JSON.stringify(versionData, null, 2), 'utf8');
+        res.json({ success: true, versionData });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message || "Error al actualizar versión" });
+    }
+});
+
 // --- TRACKS (Con Soporte para Likes) ---
 
 app.get('/api/tracks', async (req, res) => { 

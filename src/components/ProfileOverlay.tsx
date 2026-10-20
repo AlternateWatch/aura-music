@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { X, Shield, Calendar, Music, ListMusic, Loader2, Mail, Camera, Activity } from 'lucide-react';
+import { X, Shield, Calendar, Music, ListMusic, Loader2, Mail, Camera, Activity, Sparkles } from 'lucide-react';
 
 // En Android (Capacitor) el origen es https://localhost, así que las rutas relativas
 // como '/api/users/me' devolverían el index.html de la app en vez de la API.
@@ -14,10 +14,22 @@ interface ProfileOverlayProps {
   isNormalizerEnabled: boolean;
   onToggleNormalizer: (val: boolean) => void;
   onOpenAudioSettings?: () => void;
+  currentVersion?: string;
+  isCheckingUpdate?: boolean;
+  updateCheckMessage?: string | null;
+  onCheckForUpdates?: () => void;
 }
 
 export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({ 
-  onClose, token, isNormalizerEnabled, onToggleNormalizer, onOpenAudioSettings 
+  onClose,
+  token,
+  isNormalizerEnabled,
+  onToggleNormalizer,
+  onOpenAudioSettings,
+  currentVersion = "1.0.0",
+  isCheckingUpdate = false,
+  updateCheckMessage = null,
+  onCheckForUpdates 
 }) => {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -60,7 +72,7 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
 
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-xl px-4 font-sans">
-      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-[40px] p-10 w-full max-w-lg shadow-2xl relative overflow-hidden">
+      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#121212] border border-white/10 rounded-[40px] p-8 sm:p-10 w-full max-w-lg shadow-2xl relative max-h-[90vh] overflow-y-auto">
         <button onClick={onClose} className="absolute top-8 right-8 text-white/20 hover:text-white transition-colors"><X size={24}/></button>
         {loading ? (
             <div className="py-20 flex flex-col items-center gap-4"><Loader2 className="animate-spin text-brand-primary" size={32} /><p className="text-[10px] font-bold uppercase tracking-widest text-white/20">Accessing Vault...</p></div>
@@ -107,6 +119,39 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
                 </div>
 
                 <div className="flex items-center gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl"><Mail size={16} className="text-white/20" /><p className="text-sm font-medium text-white/60">{profile?.email}</p></div>
+
+                {/* Sección Versión y Actualizaciones */}
+                <div className="mt-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Sparkles size={16} className="text-brand-primary" />
+                        <div>
+                            <p className="text-xs font-bold text-white leading-none">Aura Music</p>
+                            <p className="text-[10px] text-white/40 mt-1">Versión {currentVersion || '1.0.0'}</p>
+                        </div>
+                    </div>
+                    {onCheckForUpdates && (
+                        <button
+                            type="button"
+                            onClick={onCheckForUpdates}
+                            disabled={isCheckingUpdate}
+                            className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 active:scale-95 text-[10px] font-bold uppercase tracking-wider text-white/70 hover:text-white transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                        >
+                            {isCheckingUpdate ? (
+                                <>
+                                    <Loader2 size={12} className="animate-spin text-brand-primary" />
+                                    <span>Buscando...</span>
+                                </>
+                            ) : (
+                                <span>Buscar actualizaciones</span>
+                            )}
+                        </button>
+                    )}
+                </div>
+                {updateCheckMessage && (
+                    <p className="mt-2 text-center text-[10px] font-medium text-brand-primary/90 animate-in fade-in">
+                        {updateCheckMessage}
+                    </p>
+                )}
             </>
         )}
       </motion.div>

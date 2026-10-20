@@ -1,0 +1,9 @@
+{
+  "platform": "android",
+  "latestVersion": "1.0.0",
+  "versionCode": 1,
+  "releaseNotes": "• Actualización automática integrada para Android.\n• Rendimiento ultra-rápido en carga de portadas e imágenes.\n• Corrección de menús y optimización táctil.\n• Mejoras generales de estabilidad y reproducción.",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk",
+  "mandatory": false,
+  "publishedAt": "2026-10-20T21:00:00Z"
+}

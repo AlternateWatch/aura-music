@@ -61,6 +61,8 @@ const LazySleepTimerOverlay = lazy(() => import("./components/SleepTimerOverlay"
 const LazyAuraDjOverlay = lazy(() => import("./components/AuraDjOverlay").then(m => ({ default: m.AuraDjOverlay })));
 
 // MODULED IMPORTS AND HOOKS
+import { useAppUpdate } from "./hooks/useAppUpdate";
+import { UpdateModal } from "./components/UpdateModal";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useSleepTimer } from "./hooks/useSleepTimer";
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from "./audio/audioSettings";
@@ -226,6 +228,17 @@ export default function App() {
 
   return url;
 };
+
+  // --- IN-APP UPDATER (ANDROID) ---
+  const {
+    updateInfo,
+    currentVersion,
+    isUpdateModalOpen,
+    isChecking: isCheckingUpdate,
+    checkMessage: updateCheckMessage,
+    checkForUpdates,
+    dismissUpdate
+  } = useAppUpdate();
 
   // --- CORE STATE ---
   const [token, setToken] = useState<string | null>(localStorage.getItem('aura_token'));
@@ -4884,7 +4897,19 @@ getCurrentTime={audioObj.getCurrentTime}
           onClearLoudnessCache={audioObj.clearLoudnessCache}
         />
       )}</AnimatePresence></Suspense>
-      <Suspense fallback={null}><AnimatePresence>{isProfileOpen && ( <LazyProfileOverlay token={token} isNormalizerEnabled={isNormalizerEnabled} onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })} onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }} onClose={() => setIsProfileOpen(false)} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isProfileOpen && (
+        <LazyProfileOverlay
+          token={token}
+          isNormalizerEnabled={isNormalizerEnabled}
+          onToggleNormalizer={(val: boolean) => updateAudioSettings({ ...audioSettings, normalizer: { ...audioSettings.normalizer, enabled: val } })}
+          onOpenAudioSettings={() => { setIsProfileOpen(false); setIsAudioSettingsOpen(true); }}
+          onClose={() => setIsProfileOpen(false)}
+          currentVersion={currentVersion}
+          isCheckingUpdate={isCheckingUpdate}
+          updateCheckMessage={updateCheckMessage}
+          onCheckForUpdates={() => checkForUpdates(true)}
+        />
+      )}</AnimatePresence></Suspense>
       <AnimatePresence>{isImportOpen && (
         <PlaylistImportOverlay
           onClose={() => setIsImportOpen(false)}
@@ -5099,6 +5124,14 @@ getCurrentTime={audioObj.getCurrentTime}
             </motion.div>
         </div> 
       )}</AnimatePresence>
+
+      {/* MODAL DE ACTUALIZACIÓN AUTOMÁTICA */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={dismissUpdate}
+        updateInfo={updateInfo}
+        currentVersion={currentVersion}
+      />
     </div>
   );
 }
