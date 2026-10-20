@@ -91,6 +91,15 @@ export async function generateDjMix(
  * priorizando las versiones Flash más rápidas y económicas.
  */
 async function getAvailableModels(apiKey: string): Promise<string[]> {
+  const fallbackList = [
+    'gemini-3.5-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash'
+  ];
+
   try {
     const listRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`
@@ -99,33 +108,38 @@ async function getAvailableModels(apiKey: string): Promise<string[]> {
       const data = await listRes.json();
       if (Array.isArray(data.models)) {
         const supported = data.models
-          .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+          .filter((m: any) => 
+            Array.isArray(m.supportedGenerationMethods) && 
+            m.supportedGenerationMethods.includes('generateContent') &&
+            !m.name.includes('-tts') &&
+            !m.name.includes('-image') &&
+            !m.name.includes('-transcribe') &&
+            !m.name.includes('embedding')
+          )
           .map((m: any) => m.name.replace(/^models\//, ''));
 
-        // Priorizar versiones Flash más recientes
-        const flashModels = supported.filter(
-          (name: string) => name.includes('flash') && !name.includes('8b')
-        );
-        const otherFlash = supported.filter(
-          (name: string) => name.includes('flash') && name.includes('8b')
-        );
-        const rest = supported.filter((name: string) => !name.includes('flash'));
-        const combined = [...flashModels, ...otherFlash, ...rest];
-        if (combined.length > 0) return combined;
+        const prioritized = [
+          'gemini-3.5-flash-lite',
+          'gemini-3-flash-preview',
+          'gemini-3.5-flash',
+          'gemini-flash-latest',
+          'gemini-2.0-flash',
+          'gemini-1.5-flash'
+        ];
+
+        const sorted = [
+          ...prioritized.filter(p => supported.includes(p)),
+          ...supported.filter(s => !prioritized.includes(s) && s.includes('flash')),
+          ...supported.filter(s => !prioritized.includes(s) && !s.includes('flash'))
+        ];
+
+        if (sorted.length > 0) return Array.from(new Set(sorted));
       }
     }
   } catch {}
 
   // Fallbacks conocidos en caso de no poder listar modelos
-  return [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-002',
-    'gemini-1.5-flash-001',
-    'gemini-1.5-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-pro'
-  ];
+  return fallbackList;
 }
 
 /**

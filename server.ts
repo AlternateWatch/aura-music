@@ -3001,14 +3001,47 @@ INSTRUCCIONES CRÍTICAS:
 }
 No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
 
-        const candidateModels = [
+        let candidateModels = [
+            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-3.5-flash',
+            'gemini-flash-latest',
             'gemini-2.0-flash',
             'gemini-1.5-flash-latest',
-            'gemini-1.5-flash-002',
             'gemini-1.5-flash',
-            'gemini-2.0-flash-lite',
             'gemini-1.5-pro'
         ];
+
+        try {
+            const listRes = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, { timeout: 5000 });
+            if (Array.isArray(listRes.data?.models)) {
+                const supported = listRes.data.models
+                    .filter((m: any) => 
+                        Array.isArray(m.supportedGenerationMethods) &&
+                        m.supportedGenerationMethods.includes('generateContent') &&
+                        !m.name.includes('-tts') &&
+                        !m.name.includes('-image') &&
+                        !m.name.includes('-transcribe') &&
+                        !m.name.includes('embedding')
+                    )
+                    .map((m: any) => m.name.replace(/^models\//, ''));
+                
+                const prioritized = [
+                    'gemini-3.5-flash-lite',
+                    'gemini-3-flash-preview',
+                    'gemini-3.5-flash',
+                    'gemini-flash-latest',
+                    'gemini-2.0-flash',
+                    'gemini-1.5-flash'
+                ];
+                const sorted = [
+                    ...prioritized.filter(p => supported.includes(p)),
+                    ...supported.filter(s => !prioritized.includes(s) && s.includes('flash')),
+                    ...supported.filter(s => !prioritized.includes(s) && !s.includes('flash'))
+                ];
+                if (sorted.length > 0) candidateModels = Array.from(new Set(sorted));
+            }
+        } catch {}
         
         let response: any;
         let lastAxiosError: any = null;
