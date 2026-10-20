@@ -12,6 +12,7 @@ export interface DjSourceInfo {
   type: 'library' | 'playlist' | 'liked';
   name?: string;
   playlistId?: string | number;
+  currentTrackIds?: string[];
 }
 
 const LOCAL_STORAGE_KEY = 'aura_gemini_api_key';
@@ -122,7 +123,7 @@ export async function generateDjMix(
       body: JSON.stringify({
         prompt,
         apiKey: activeKey || undefined,
-        candidateTrackIds: isPlaylistMode ? localSongs.map(s => s.id) : undefined,
+        candidateTrackIds: isPlaylistMode ? (sourceInfo.currentTrackIds || localSongs.map(s => s.id)) : undefined,
         playlistName: isPlaylistMode ? sourceInfo.name : undefined
       }),
     });
@@ -150,7 +151,7 @@ export async function generateDjMix(
     throw new Error('Configura tu API Key gratuita de Gemini para usar Aura DJ (en Google AI Studio puedes generarla gratis en 1 clic).');
   }
 
-  return generateDjMixClientSide(prompt, localSongs, activeKey, sourceInfo?.name);
+  return generateDjMixClientSide(prompt, localSongs, activeKey, sourceInfo);
 }
 
 /**
@@ -201,53 +202,84 @@ async function generateDjMixClientSide(
   prompt: string,
   localSongs: Song[],
   apiKey: string,
-  playlistName?: string
+  sourceInfo?: DjSourceInfo
 ): Promise<DjMixResult> {
   if (!localSongs || localSongs.length === 0) {
     throw new Error('No hay canciones en la lista seleccionada para mezclar.');
   }
 
-  const catalog = localSongs.slice(0, 300).map(s => ({
-    id: s.id,
-    title: s.title,
-    artist: s.artist,
-    album: s.album || ''
-  }));
+  const isPlaylistMode = !!(sourceInfo && sourceInfo.type !== 'library' && sourceInfo.name);
+  const playlistName = sourceInfo?.name || 'Playlist';
+  const currentIds = new Set((sourceInfo?.currentTrackIds || []).map(String));
 
-  const isPlaylistMode = !!(playlistName && playlistName.trim());
-  const systemInstruction = isPlaylistMode
-    ? `Eres "Aura DJ", un selector musical inteligente de una app de música.
-Tu tarea es seleccionar, reordenar o filtrar las canciones de la playlist existente "${playlistName}" según la petición del usuario.
-Tu respuesta debe ser EXCLUSIVAMENTE un bloque JSON válido estructurado así:
+  const currentTracks = isPlaylistMode && currentIds.size > 0
+    ? localSongs.filter(s => currentIds.has(String(s.id)))
+    : [];
+  const otherTracks = isPlaylistMode && currentIds.size > 0
+    ? localSongs.filter(s => !currentIds.has(String(s.id)))
+    : localSongs;
+
+  let systemInstruction = '';
+  if (isPlaylistMode) {
+    const plCatalog = currentTracks.slice(0, 300).map(s => `${s.id}|${s.title}|${s.artist}|${s.album || ''}`).join('\n');
+    const libCatalog = otherTracks.slice(0, 500).map(s => `${s.id}|${s.title}|${s.artist}|${s.album || ''}`).join('\n');
+
+    systemInstruction = `Eres "Aura DJ", un DJ musical y selector de élite de la app Aura Music.
+Tu misión es trabajar sobre la playlist existente "${playlistName}".
+PETICIÓN DEL USUARIO: "${prompt.trim()}"
+
+CANCIONES ACTUALES EN LA PLAYLIST "${playlistName}" (${currentTracks.length} canciones):
+${plCatalog || '(La playlist está vacía)'}
+
+OTRAS CANCIONES DISPONIBLES EN LA BIBLIOTECA (${otherTracks.length} canciones):
+${libCatalog}
+
+INSTRUCCIONES SEGÚN LO QUE PIDA EL USUARIO:
+1. EXPANDIR / AÑADIR MÁS / COMPLETAR / HACERLA MÁS LARGA:
+   Si el usuario pide expandir o añadir más temas (ej: "expande esta playlist de Green Day", "añade temas similares", "completa con más canciones"):
+   - Conserva las canciones actuales de la playlist que encajen.
+   - AÑADE nuevas canciones compatibles del apartado "OTRAS CANCIONES DISPONIBLES EN LA BIBLIOTECA" (por ejemplo, más canciones del mismo artista o estilo compatible).
+   - Genera una lista final ampliada y equilibrada (típicamente entre 15 y 45 canciones en total).
+2. REORDENAR / MEZCLAR / MEJORAR EL FLUJO:
+   Si el usuario pide reordenar o mejorar el flujo:
+   - Mantén las canciones de la playlist actual y ordénalas con una progresión armónica y de energía atractiva.
+3. FILTRAR:
+   Si el usuario pide descartar o filtrar (ej: "solo las acústicas", "quédate con las 5 más enérgicas"):
+   - Incluye únicamente las canciones de la playlist que cumplan con el filtro pedido.
+
+Responde ÚNICAMENTE con un JSON válido estructurado así:
 {
   "title": "${playlistName} (Aura DJ)",
-  "description": "Una frase corta que describa el flujo u orden aplicado a la playlist",
-  "vibeTags": ["tag1", "tag2", "tag3"],
-  "trackIds": ["id1", "id2", "id3", ...]
+  "description": "Una o dos frases explicando el flujo, expansión u orden aplicado a la playlist",
+  "vibeTags": ["Rock", "Mix", "Aura DJ"],
+  "trackIds": ["id1", "id2", "id3"]
 }
-REGLAS:
-- Si el usuario pide reordenar o mejorar el flujo, incluye todas las canciones de la playlist en el orden óptimo.
-- Si pide filtrar (ej: "solo las acústicas", "los 6 temas más rápidos"), incluye solo las canciones que encajen.
-- Solo utiliza IDs que existan en el catálogo de esta playlist. No inventes IDs.
-- Devuelve ÚNICAMENTE el bloque JSON, sin textos ni explicaciones fuera del JSON.`
-    : `Eres "Aura DJ", un selector musical inteligente de una app de música.
-Tu trabajo es responder EXCLUSIVAMENTE con un JSON válido estructurado así:
+Usa estrictamente las IDs numéricas de las canciones provistas. No inventes IDs.`;
+  } else {
+    const fullCatalog = localSongs.slice(0, 500).map(s => `${s.id}|${s.title}|${s.artist}|${s.album || ''}`).join('\n');
+
+    systemInstruction = `Eres "Aura DJ", un selector musical inteligente de una app de música.
+Tu trabajo es seleccionar las mejores canciones de la biblioteca del usuario para satisfacer su petición musical.
+PETICIÓN DEL USUARIO: "${prompt.trim()}"
+
+CATÁLOGO DISPONIBLE (Formato: ID|Título|Artista|Álbum):
+${fullCatalog}
+
+INSTRUCCIONES:
+- Selecciona entre 8 y 25 canciones del catálogo que mejor encajen con la vibra, estilo, género o energía solicitada.
+- Si la petición es específica y hay pocas exactas, amplía con temas de artistas similares o misma energía.
+- El orden debe tener una progresión de ritmo y atmósfera fluida (como una sesión de DJ real).
+- Devuelve ÚNICAMENTE un JSON válido estructurado así:
 {
   "title": "Nombre creativo de la sesión / mix (máx 5 palabras)",
-  "description": "Una frase corta evocadora y profesional que describa el flujo de la sesión",
+  "description": "Una o dos frases evocadoras que describan el flujo de la sesión",
   "vibeTags": ["tag1", "tag2", "tag3"],
-  "trackIds": ["id1", "id2", "id3", ...]
+  "trackIds": ["id1", "id2", "id3"]
 }
-REGLAS:
-- Selecciona entre 6 y 20 canciones del catálogo proporcionado que mejor encajen con la petición del usuario.
-- El orden debe tener una progresión de ritmo/atmósfera fluida (como una sesión de DJ real).
-- Solo utiliza IDs que existan en el catálogo. No inventes IDs.
-- Devuelve ÚNICAMENTE el bloque JSON, sin introducciones ni marcas de formato fuera del JSON.`;
+Solo utiliza IDs que existan en el catálogo. No inventes IDs.`;
+  }
 
-  const userContent = `PETICIÓN DEL USUARIO: "${prompt.trim()}"
-
-CATÁLOGO ${isPlaylistMode ? `DE LA PLAYLIST "${playlistName}"` : 'DISPONIBLE'}:
-${JSON.stringify(catalog)}`;
+  const userContent = `PETICIÓN DEL USUARIO: "${prompt.trim()}"`;
 
   const models = await getAvailableModels(apiKey);
   let lastError: any = null;
@@ -262,7 +294,7 @@ ${JSON.stringify(catalog)}`;
           contents: [{ parts: [{ text: `${systemInstruction}\n\n${userContent}` }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 1024,
+            maxOutputTokens: 2048,
             responseMimeType: 'application/json'
           }
         })
@@ -288,12 +320,14 @@ ${JSON.stringify(catalog)}`;
       const songMap = new Map(localSongs.map(s => [String(s.id), s]));
       const selectedTracks: Song[] = [];
 
-      if (Array.isArray(parsed.trackIds)) {
-        for (const tid of parsed.trackIds) {
-          const found = songMap.get(String(tid));
-          if (found && !selectedTracks.some(st => String(st.id) === String(found.id))) {
-            selectedTracks.push(found);
-          }
+      const returnedIds = Array.isArray(parsed.trackIds)
+        ? parsed.trackIds
+        : (Array.isArray(parsed.songIds) ? parsed.songIds : []);
+
+      for (const tid of returnedIds) {
+        const found = songMap.get(String(tid));
+        if (found && !selectedTracks.some(st => String(st.id) === String(found.id))) {
+          selectedTracks.push(found);
         }
       }
 

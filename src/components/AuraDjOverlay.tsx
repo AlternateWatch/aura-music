@@ -185,11 +185,13 @@ export function AuraDjOverlay({
     const textToUse = (customPrompt || prompt).trim();
     if (!textToUse) return;
 
-    const candidateSongs = getCandidateSongs();
-    if (candidateSongs.length === 0) {
-      setError('La lista seleccionada no tiene canciones disponibles para mezclar.');
+    if (!songs || songs.length === 0) {
+      setError('No hay canciones en tu biblioteca para mezclar.');
       return;
     }
+
+    const isPlMode = selectedSource !== 'all' && selectedSource !== 'liked';
+    const playlistSongs = isPlMode ? (playlistTracksCache[selectedSource] || []) : [];
 
     setError(null);
     setIsLoading(true);
@@ -201,10 +203,13 @@ export function AuraDjOverlay({
       const sourceInfo: DjSourceInfo = {
         type: selectedSource === 'all' ? 'library' : selectedSource === 'liked' ? 'liked' : 'playlist',
         name: getSourceName(),
-        playlistId: selectedSource
+        playlistId: selectedSource,
+        currentTrackIds: isPlMode 
+          ? playlistSongs.map(s => String(s.id)) 
+          : (selectedSource === 'liked' ? songs.filter(s => s.is_liked).map(s => String(s.id)) : undefined)
       };
 
-      const result = await generateDjMix(textToUse, candidateSongs, apiKey, token, sourceInfo);
+      const result = await generateDjMix(textToUse, songs, apiKey, token, sourceInfo);
       setMixResult(result);
     } catch (err: any) {
       setError(err.message || 'Error al conectar con Aura DJ.');
