@@ -3,15 +3,17 @@ import { EQ_FREQUENCIES, EQ_Q, bandType, autoPreampDb } from "./eqMath";
 import { LOUDNESS_WORKLET_NAME, LOUDNESS_WORKLET_SOURCE } from "./loudnessWorklet";
 import { LoudnessCache, SLOT_SECONDS, TrackAnalysis, msToLufs, IntegratedResult } from "./loudnessAnalysis";
 
-// Cadena de señal:
+// Cadena de señal Dual-Player (Gapless 0ms + Crossfade + Normalizador + EQ):
 //
-//   <audio> ─┬─────────────────────────────────────────────► medidor (K-weighting, solo lectura)
-//            └► norma ► preamp ► EQ (10 bandas) ► limitador ► volumen ► analizador ► salida
+//   Player A ──► sourceA ──► gainA ──┐
+//                                    ├──► preSum ──► norm ──► preamp ──► EQ (10 bandas) ──► limitador ──► volumen ──► analizador ──► salida
+//   Player B ──► sourceB ──► gainB ──┘     ▲
+//                                          └──► medidor (K-weighting, solo lectura)
 //
-// El medidor lee la señal ANTES de norma/EQ/volumen: así lo que se mide es
-// la canción, no lo que el usuario le haya hecho, y el resultado se puede
-// guardar y reutilizar. El volumen del usuario vive en el grafo (no en
-// audio.volume) por la misma razón.
+// El medidor lee la señal ANTES de norma/EQ/volumen.
+// Player A y Player B cuentan con sus propios nodos de ganancia independientes (gainA, gainB)
+// antes de la suma, permitiendo transiciones instantáneas 0 ms (Gapless) o fundidos (Crossfade)
+// manteniendo activos e ininterrumpidos el analizador de espectro, normalizador y ecualizador.
 
 export type GainSource = "off" | "cache" | "live" | "prior" | "waiting";
 
@@ -55,10 +57,6 @@ const CONFIDENT_SECONDS = 30;
 /** Se guarda en caché al analizar al menos este porcentaje de la canción. */
 const SAVE_COVERAGE = 0.8;
 
-// El DynamicsCompressorNode aplica una ganancia de compensación automática
-// (definida en la especificación de Web Audio) a TODA la señal. Como lo
-// usamos de limitador, la calculamos y la cancelamos para que sea
-// transparente por debajo del umbral.
 const LIMITER_THRESHOLD_DB = -1;
 const LIMITER_RATIO = 20;
 function limiterMakeupCompensation(): number {
@@ -76,8 +74,16 @@ export class AudioGraph {
   readonly ctx: AudioContext;
   readonly analyser: AnalyserNode;
 
-  private audio: HTMLAudioElement;
-  private source: MediaElementAudioSourceNode;
+  readonly audioA: HTMLAudioElement;
+  readonly audioB: HTMLAudioElement;
+  private sourceA: MediaElementAudioSourceNode;
+  private sourceB: MediaElementAudioSourceNode;
+  private gainA: GainNode;
+  private gainB: GainNode;
+  private preSum: GainNode;
+
+  private activePlayer: "A" | "B" = "A";
+
   private norm: GainNode;
   private preamp: GainNode;
   private filters: BiquadFilterNode[] = [];
@@ -87,14 +93,9 @@ export class AudioGraph {
   private meterInitStarted = false;
   private meterConnected = false;
   private meterState: AudioStatus["meter"] = "loading";
-  private fadeGain: GainNode;
-  private tailAudio: HTMLAudioElement;
-  private tailSource: MediaElementAudioSourceNode;
-  private tailGain: GainNode;
-  private tailTimer: ReturnType<typeof setTimeout> | null = null;
+  private fadeTimer: ReturnType<typeof setTimeout> | null = null;
   private nextPreparedSrc: string | null = null;
   private activeDspChainKey = "";
-
 
   private settings: AudioSettings = JSON.parse(JSON.stringify(DEFAULT_AUDIO_SETTINGS));
   private volume = 0.7;
@@ -123,14 +124,36 @@ export class AudioGraph {
   private onSeeked = () => { this.ignoreUntil = performance.now() + 300; };
   private onEnded = () => this.finalizeTrack();
 
-  constructor(audio: HTMLAudioElement) {
-    this.audio = audio;
+  constructor(primaryAudio: HTMLAudioElement, secondaryAudio?: HTMLAudioElement) {
+    this.audioA = primaryAudio;
+    this.audioB = secondaryAudio ?? new Audio();
+    this.audioB.crossOrigin = "anonymous";
+    this.audioB.preload = "auto";
 
     const Ctor = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new Ctor({ latencyHint: "playback" });
     const ctx = this.ctx;
 
-    this.source = ctx.createMediaElementSource(audio);
+    // Conexión Dual Player hacia el bus preSum
+    this.sourceA = ctx.createMediaElementSource(this.audioA);
+    this.sourceB = ctx.createMediaElementSource(this.audioB);
+
+    this.gainA = ctx.createGain();
+    this.gainA.gain.value = 1;
+
+    this.gainB = ctx.createGain();
+    this.gainB.gain.value = 0;
+
+    this.preSum = ctx.createGain();
+    this.preSum.gain.value = 1;
+
+    this.sourceA.connect(this.gainA);
+    this.gainA.connect(this.preSum);
+
+    this.sourceB.connect(this.gainB);
+    this.gainB.connect(this.preSum);
+
+    // Cadena DSP
     this.norm = ctx.createGain();
     this.preamp = ctx.createGain();
 
@@ -150,33 +173,21 @@ export class AudioGraph {
     this.limiter.attack.value = 0.001;
     this.limiter.release.value = 0.1;
 
-    this.fadeGain = ctx.createGain();
-    this.fadeGain.gain.value = 1;
-
     this.master = ctx.createGain();
     this.master.gain.value = this.volume;
 
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 64;
 
-    // Segundo reproductor para el solapamiento (cola saliente del crossfade)
-    this.tailAudio = new Audio();
-    this.tailAudio.crossOrigin = "anonymous";
-    this.tailAudio.preload = "metadata";
-    this.tailAudio.volume = 1;
-    this.tailSource = ctx.createMediaElementSource(this.tailAudio);
-    this.tailGain = ctx.createGain();
-    this.tailGain.gain.value = 0;
-    this.tailSource.connect(this.tailGain);
-    this.tailGain.connect(this.preamp);
-
     this.rebuildChain(false, false);
 
-    // El volumen pasa a ser un GainNode; el elemento va siempre a tope para
-    // que el medidor vea la señal real de la canción.
-    audio.volume = 1;
-    audio.addEventListener("seeked", this.onSeeked);
-    audio.addEventListener("ended", this.onEnded);
+    this.audioA.volume = 1;
+    this.audioB.volume = 1;
+
+    this.audioA.addEventListener("seeked", this.onSeeked);
+    this.audioA.addEventListener("ended", this.onEnded);
+    this.audioB.addEventListener("seeked", this.onSeeked);
+    this.audioB.addEventListener("ended", this.onEnded);
   }
 
   private rebuildChain(eqOn: boolean, normOn: boolean) {
@@ -186,12 +197,11 @@ export class AudioGraph {
 
     const useLimiter = eqOn || normOn;
     const allNodes: AudioNode[] = [
-      this.source,
+      this.preSum,
       this.norm,
       this.preamp,
       ...this.filters,
       this.limiter,
-      this.fadeGain,
       this.master,
       this.analyser,
     ];
@@ -206,9 +216,9 @@ export class AudioGraph {
     if (useLimiter) {
       chain.push(this.limiter);
     }
-    chain.push(this.fadeGain, this.master, this.analyser);
+    chain.push(this.master, this.analyser);
 
-    let node: AudioNode = this.source;
+    let node: AudioNode = this.preSum;
     for (const next of chain) {
       node.connect(next);
       node = next;
@@ -217,7 +227,7 @@ export class AudioGraph {
 
     if (this.meterNode && normOn) {
       try {
-        this.source.connect(this.meterNode);
+        this.preSum.connect(this.meterNode);
         this.meterConnected = true;
       } catch {}
     } else {
@@ -226,6 +236,154 @@ export class AudioGraph {
 
     const comp = useLimiter ? this.limiterComp : 1;
     this.master.gain.setTargetAtTime(this.volume * comp, this.ctx.currentTime, 0.015);
+  }
+
+  // ---- Dual-Player & Transiciones -----------------------------------------
+
+  getActiveAudio(): HTMLAudioElement {
+    return this.activePlayer === "A" ? this.audioA : this.audioB;
+  }
+
+  getStandbyAudio(): HTMLAudioElement {
+    return this.activePlayer === "A" ? this.audioB : this.audioA;
+  }
+
+  getActivePlayer(): "A" | "B" {
+    return this.activePlayer;
+  }
+
+  /** Compatibilidad hacia atrás */
+  get audio(): HTMLAudioElement {
+    return this.getActiveAudio();
+  }
+
+  get tailAudio(): HTMLAudioElement {
+    return this.getStandbyAudio();
+  }
+
+  /**
+   * Pre-buferiza el siguiente track en el reproductor standby de forma silenciosa.
+   */
+  prepareStandby(src: string) {
+    if (!src) return;
+    this.nextPreparedSrc = src;
+    const standby = this.getStandbyAudio();
+    if (standby.paused && standby.src !== src) {
+      standby.src = src;
+      standby.preload = "auto";
+      standby.load();
+    }
+  }
+
+  prepareTail(src: string) {
+    this.prepareStandby(src);
+  }
+
+  /**
+   * Transición Gapless real a 0 ms:
+   * Activa instantáneamente el reproductor standby ya cargado y apaga el saliente,
+   * con continuidad ininterrumpida de sample sin silencios.
+   */
+  triggerGaplessTransition(): "A" | "B" {
+    const from = this.activePlayer;
+    const to: "A" | "B" = from === "A" ? "B" : "A";
+    const now = this.ctx.currentTime;
+
+    const fromGain = from === "A" ? this.gainA : this.gainB;
+    const toGain = to === "A" ? this.gainA : this.gainB;
+    const toAudio = to === "A" ? this.audioA : this.audioB;
+    const fromAudio = from === "A" ? this.audioA : this.audioB;
+
+    toGain.gain.cancelScheduledValues(now);
+    toGain.gain.setValueAtTime(1, now);
+
+    fromGain.gain.cancelScheduledValues(now);
+    fromGain.gain.setValueAtTime(0, now);
+
+    void toAudio.play().catch(() => {});
+
+    fromAudio.pause();
+    fromAudio.currentTime = 0;
+
+    this.activePlayer = to;
+    return to;
+  }
+
+  /**
+   * Transición Crossfade solapada entre ambos reproductores.
+   */
+  triggerCrossfadeTransition(durationSec: number): "A" | "B" {
+    if (durationSec <= 0) return this.triggerGaplessTransition();
+
+    const from = this.activePlayer;
+    const to: "A" | "B" = from === "A" ? "B" : "A";
+    const now = this.ctx.currentTime;
+
+    const fromGain = from === "A" ? this.gainA : this.gainB;
+    const toGain = to === "A" ? this.gainA : this.gainB;
+    const toAudio = to === "A" ? this.audioA : this.audioB;
+    const fromAudio = from === "A" ? this.audioA : this.audioB;
+
+    if (this.fadeTimer) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = null;
+    }
+
+    toGain.gain.cancelScheduledValues(now);
+    toGain.gain.setValueAtTime(0.0001, now);
+    toGain.gain.linearRampToValueAtTime(1, now + durationSec);
+
+    fromGain.gain.cancelScheduledValues(now);
+    fromGain.gain.setValueAtTime(1, now);
+    fromGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+    void toAudio.play().catch(() => {});
+
+    this.fadeTimer = setTimeout(() => {
+      this.fadeTimer = null;
+      fromAudio.pause();
+      fromAudio.currentTime = 0;
+      const endNow = this.ctx.currentTime;
+      fromGain.gain.cancelScheduledValues(endNow);
+      fromGain.gain.setValueAtTime(0, endNow);
+      toGain.gain.cancelScheduledValues(endNow);
+      toGain.gain.setValueAtTime(1, endNow);
+    }, durationSec * 1000 + 100);
+
+    this.activePlayer = to;
+    return to;
+  }
+
+  startCrossfade(outgoingSrc: string, outgoingTime: number, durationSec: number) {
+    this.triggerCrossfadeTransition(durationSec);
+  }
+
+  resetGains(active: "A" | "B") {
+    this.activePlayer = active;
+    const now = this.ctx.currentTime;
+    if (active === "A") {
+      this.gainA.gain.cancelScheduledValues(now);
+      this.gainA.gain.setValueAtTime(1, now);
+      this.gainB.gain.cancelScheduledValues(now);
+      this.gainB.gain.setValueAtTime(0, now);
+    } else {
+      this.gainA.gain.cancelScheduledValues(now);
+      this.gainA.gain.setValueAtTime(0, now);
+      this.gainB.gain.cancelScheduledValues(now);
+      this.gainB.gain.setValueAtTime(1, now);
+    }
+  }
+
+  stopCrossfade() {
+    if (this.fadeTimer) {
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = null;
+    }
+    const standby = this.getStandbyAudio();
+    if (!standby.paused) {
+      standby.pause();
+    }
+    this.resetGains(this.activePlayer);
   }
 
   // ---- API pública --------------------------------------------------------
@@ -258,13 +416,13 @@ export class AudioGraph {
         void this.initMeter();
       } else if (this.meterNode && !this.meterConnected) {
         try {
-          this.source.connect(this.meterNode);
+          this.preSum.connect(this.meterNode);
           this.meterConnected = true;
         } catch {}
       }
     } else if (this.meterNode && this.meterConnected) {
       try {
-        this.source.disconnect(this.meterNode);
+        this.preSum.disconnect(this.meterNode);
       } catch {}
       this.meterConnected = false;
     }
@@ -285,77 +443,6 @@ export class AudioGraph {
     this.publish(true);
   }
 
-  /** Prepara la URL de la pista actual en el reproductor secundario para que el crossfade saliente sea instantáneo. */
-  prepareTail(src: string) {
-    if (!src) return;
-    this.nextPreparedSrc = src;
-    if (this.tailAudio.paused && this.tailAudio.src !== src) {
-      this.tailAudio.src = src;
-      this.tailAudio.load();
-    }
-  }
-
-  /** Inicia la transición solapada: la canción saliente suena en tailAudio desvaneciéndose mientras la entrante sube en fadeGain. */
-  startCrossfade(outgoingSrc: string, outgoingTime: number, durationSec: number) {
-    if (!outgoingSrc || durationSec <= 0) return;
-
-    if (this.tailTimer) {
-      clearTimeout(this.tailTimer);
-      this.tailTimer = null;
-    }
-
-    this.finalizeTrack();
-
-    const now = this.ctx.currentTime;
-    const startGain = dbToLin(this.appliedDb);
-
-    if (this.tailAudio.src !== outgoingSrc) {
-      this.tailAudio.src = outgoingSrc;
-    }
-    try {
-      this.tailAudio.currentTime = outgoingTime;
-    } catch {}
-
-    this.tailGain.gain.cancelScheduledValues(now);
-    this.tailGain.gain.setValueAtTime(startGain, now);
-    this.tailGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
-
-    void this.tailAudio.play().catch(() => {});
-
-    this.fadeGain.gain.cancelScheduledValues(now);
-    this.fadeGain.gain.setValueAtTime(0.0001, now);
-    this.fadeGain.gain.linearRampToValueAtTime(1, now + durationSec);
-
-    this.tailTimer = setTimeout(() => {
-      this.tailTimer = null;
-      this.tailAudio.pause();
-      const endNow = this.ctx.currentTime;
-      this.tailGain.gain.cancelScheduledValues(endNow);
-      this.tailGain.gain.setValueAtTime(0, endNow);
-      this.fadeGain.gain.cancelScheduledValues(endNow);
-      this.fadeGain.gain.setValueAtTime(1, endNow);
-      if (this.nextPreparedSrc && this.tailAudio.src !== this.nextPreparedSrc) {
-        this.tailAudio.src = this.nextPreparedSrc;
-        this.tailAudio.load();
-      }
-    }, durationSec * 1000 + 150);
-  }
-
-  stopCrossfade() {
-    if (this.tailTimer) {
-      clearTimeout(this.tailTimer);
-      this.tailTimer = null;
-    }
-    if (!this.tailAudio.paused) {
-      this.tailAudio.pause();
-    }
-    const now = this.ctx.currentTime;
-    this.tailGain.gain.cancelScheduledValues(now);
-    this.tailGain.gain.setValueAtTime(0, now);
-    this.fadeGain.gain.cancelScheduledValues(now);
-    this.fadeGain.gain.setValueAtTime(1, now);
-  }
-
   /** Nueva canción: se reinicia el análisis y se fija la ganancia inicial sin rampa. */
   beginTrack(id: string | null) {
     this.trackId = id;
@@ -370,7 +457,6 @@ export class AudioGraph {
     this.evaluate({ instant: true });
     this.publish(true);
   }
-
 
   setDuration(d: number) {
     this.duration = d;
@@ -408,12 +494,10 @@ export class AudioGraph {
         outputChannelCount: [1],
         channelCount: 2,
         channelCountMode: "explicit",
-        channelInterpretation: "speakers", // mono => se duplica a L y R, como al reproducirlo
+        channelInterpretation: "speakers",
       });
       node.port.onmessage = this.onBlock;
 
-      // El worklet solo se ejecuta si su salida llega al destino; lo
-      // conectamos a través de una ganancia 0 (silencio).
       const sink = this.ctx.createGain();
       sink.gain.value = 0;
       node.connect(sink);
@@ -422,7 +506,7 @@ export class AudioGraph {
       this.meterNode = node;
       if (this.settings.normalizer.enabled) {
         try {
-          this.source.connect(node);
+          this.preSum.connect(node);
           this.meterConnected = true;
         } catch {}
       }
@@ -438,7 +522,7 @@ export class AudioGraph {
     if (!this.settings.normalizer.enabled) return;
 
     const ms = e.data.ms;
-    const audio = this.audio;
+    const audio = this.getActiveAudio();
 
     this.ring[this.ringPos] = ms;
     this.ringPos = (this.ringPos + 1) % 4;
@@ -459,9 +543,7 @@ export class AudioGraph {
       this.momentary = Number.isFinite(l) ? l : null;
     }
 
-    // Solo se analiza mientras no tengamos el valor definitivo guardado.
     if (this.cachedLufs === null && this.trackId) {
-      // El bloque recién entregado cubre los 100 ms anteriores a currentTime.
       this.analysis.set(Math.round(audio.currentTime / SLOT_SECONDS) - 1, ms);
 
       const now = performance.now();
@@ -487,7 +569,6 @@ export class AudioGraph {
     this.cachedLufs = lufs;
   }
 
-  /** Al terminar la canción, si se oyó lo bastante, se guarda aunque no llegue al umbral. */
   private finalizeTrack() {
     if (this.cachedLufs !== null || !this.trackId) return;
     const res = this.analysis.integrated();
@@ -542,7 +623,6 @@ export class AudioGraph {
     }
     if (Math.abs(gainDb - this.appliedDb) < 0.1) return;
 
-    // Asimétrico: bajar rápido (evita picos fuertes), subir despacio (evita "bombeo").
     const tc = opts.tc ?? (gainDb < this.appliedDb ? 0.4 : 2.5);
     param.setTargetAtTime(dbToLin(gainDb), now, tc);
     this.appliedDb = gainDb;
@@ -572,24 +652,25 @@ export class AudioGraph {
   }
 
   dispose() {
-    this.audio.removeEventListener("seeked", this.onSeeked);
-    this.audio.removeEventListener("ended", this.onEnded);
+    this.audioA.removeEventListener("seeked", this.onSeeked);
+    this.audioA.removeEventListener("ended", this.onEnded);
+    this.audioB.removeEventListener("seeked", this.onSeeked);
+    this.audioB.removeEventListener("ended", this.onEnded);
+    if (this.fadeTimer) clearTimeout(this.fadeTimer);
     if (this.meterNode) this.meterNode.port.onmessage = null;
     this.listeners.clear();
     void this.ctx.close();
   }
 }
 
-// createMediaElementSource solo puede llamarse una vez por elemento; este
-// registro evita errores con StrictMode o recarga en caliente.
 const graphs = new WeakMap<HTMLAudioElement, AudioGraph>();
 
-export function getOrCreateGraph(audio: HTMLAudioElement): AudioGraph | null {
-  const existing = graphs.get(audio);
+export function getOrCreateGraph(primaryAudio: HTMLAudioElement, secondaryAudio?: HTMLAudioElement): AudioGraph | null {
+  const existing = graphs.get(primaryAudio);
   if (existing) return existing;
   try {
-    const g = new AudioGraph(audio);
-    graphs.set(audio, g);
+    const g = new AudioGraph(primaryAudio, secondaryAudio);
+    graphs.set(primaryAudio, g);
     return g;
   } catch (e) {
     console.error("Error al iniciar Web Audio API:", e);

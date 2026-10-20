@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
-import { X, SlidersHorizontal, Activity, RotateCcw, Radio } from "lucide-react";
+import { X, SlidersHorizontal, Activity, RotateCcw, Radio, Zap } from "lucide-react";
 import {
   AudioSettings,
   NORMALIZER_TARGETS,
@@ -389,6 +389,25 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* GAPLESS PLAYBACK */}
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Zap className="text-brand-primary" size={18} />
+                  <div>
+                    <p className="text-sm font-bold text-white leading-none">Gapless Playback</p>
+                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">0 ms · Sin silencios entre pistas continuas</p>
+                  </div>
+                </div>
+                <Toggle
+                  on={settings.gapless?.enabled ?? true}
+                  onClick={() => onChange({
+                    ...settings,
+                    gapless: { enabled: !(settings.gapless?.enabled ?? true) }
+                  })}
+                  label="Gapless Playback"
+                />
               </div>
 
               <div className="flex items-center justify-between gap-4">

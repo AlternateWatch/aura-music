@@ -29,6 +29,9 @@ export interface AudioSettings {
     enabled: boolean;
     duration: number;
   };
+  gapless: {
+    enabled: boolean;
+  };
   visualizer: {
     enabled: boolean;
   };
@@ -53,6 +56,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
     autoPreamp: true,
   },
   crossfade: { enabled: false, duration: 5 },
+  gapless: { enabled: true },
   visualizer: { enabled: true },
   autoplay: { enabled: true },
 };
@@ -90,6 +94,9 @@ export function loadAudioSettings(): AudioSettings {
       base.crossfade.enabled = !!p.crossfade.enabled;
       const dur = Number(p.crossfade.duration);
       if (Number.isFinite(dur) && dur >= 0 && dur <= 20) base.crossfade.duration = dur;
+    }
+    if (p?.gapless !== undefined) {
+      base.gapless = { enabled: p.gapless.enabled !== false };
     }
     if (p?.visualizer) {
       base.visualizer.enabled = !!p.visualizer.enabled;
