@@ -85,6 +85,15 @@ import {
   syncAlbumOffline,
   downloadSongOffline,
 } from "./utils/offlineDb";
+import {
+  useSongFuseIndex,
+  useAlbumFuseIndex,
+  useArtistFuseIndex,
+  searchSongsWithFuse,
+  searchAlbumsWithFuse,
+  searchArtistsWithFuse,
+  normalizeSearchText,
+} from "./utils/searchEngine";
 
 // HELPER: Extrae múltiples artistas separados por punto y coma (;)
 const parseArtists = (artistStr?: string | null): string[] => {
@@ -2122,6 +2131,85 @@ useEffect(() => {
     }
   };
 
+  // --- TODOS LOS ÁLBUMES DE LA BIBLIOTECA ---
+  const allAlbums = useMemo(() => {
+    const map = new Map<string, {
+      title: string;
+      artist: string;
+      coverUrl: string;
+      trackCount: number;
+      tracks: Song[];
+      formats: Set<string>;
+    }>();
+
+    songs.forEach(s => {
+      if (!s.album || !s.album.trim()) return;
+      const albumKey = s.album.trim();
+      if (!map.has(albumKey)) {
+        map.set(albumKey, {
+          title: albumKey,
+          artist: s.artist || 'Artista Desconocido',
+          coverUrl: s.coverUrl,
+          trackCount: 0,
+          tracks: [],
+          formats: new Set<string>()
+        });
+      }
+      const item = map.get(albumKey)!;
+      item.tracks.push(s);
+      item.trackCount++;
+      if (s.format) item.formats.add(s.format.toUpperCase());
+      if ((!item.coverUrl || item.coverUrl.includes('default-cover')) && s.coverUrl) {
+        item.coverUrl = s.coverUrl;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+  }, [songs]);
+
+  // --- TODOS LOS ARTISTAS DE LA BIBLIOTECA ---
+  const allArtists = useMemo(() => {
+    const map = new Map<string, {
+      name: string;
+      coverUrl: string;
+      trackCount: number;
+      albumCount: number;
+    }>();
+
+    songs.forEach(song => {
+      const artists = parseArtists(song.artist);
+      artists.forEach(artistName => {
+        if (!map.has(artistName)) {
+          map.set(artistName, {
+            name: artistName,
+            coverUrl: artistsMap[artistName]?.image_url || song.coverUrl,
+            trackCount: 0,
+            albumCount: 0
+          });
+        }
+      });
+    });
+
+    map.forEach((entry, artistName) => {
+      const artistTracks = songs.filter(s => parseArtists(s.artist).includes(artistName));
+      const albums = new Set(artistTracks.map(s => s.album).filter(Boolean));
+      entry.trackCount = artistTracks.length;
+      entry.albumCount = albums.size;
+      if (artistsMap[artistName]?.image_url) {
+        entry.coverUrl = artistsMap[artistName]?.image_url;
+      } else if (!entry.coverUrl && artistTracks[0]?.coverUrl) {
+        entry.coverUrl = artistTracks[0].coverUrl;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.trackCount - a.trackCount);
+  }, [songs, artistsMap]);
+
+  // ÍNDICES DIFUSOS CON FUSE.JS (BÚSQUEDA INSTANTÁNEA EN MEMORIA)
+  const songFuse = useSongFuseIndex(songs);
+  const albumFuse = useAlbumFuseIndex(allAlbums);
+  const artistFuse = useArtistFuseIndex(allArtists);
+
   // --- MEMORIZACIÓN DE LA BIBLIOTECA (ORDENADA POR PISTA) ---
   const flattenedSongs = useMemo(() => {
     if (selectedAlbumName) {
@@ -2156,13 +2244,7 @@ useEffect(() => {
     );
 
     if (searchQuery.trim().length > 0) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        s =>
-          s.title.toLowerCase().includes(q) ||
-          s.artist.toLowerCase().includes(q) ||
-          (s.album && s.album.toLowerCase().includes(q))
-      );
+      list = searchSongsWithFuse(songFuse, searchQuery, list);
     }
 
     if (activePlaylistId === 'liked') {
@@ -2171,23 +2253,27 @@ useEffect(() => {
       list = list.filter(s => offlineIds.has(String(s.id)));
     }
 
-    const sorted = [...list].sort((a, b) => {
-      if (sortBy === 'name') return a.title.localeCompare(b.title);
-      if (sortBy === 'album') {
-        const albumDiff = (a.album || '').localeCompare(b.album || '');
-        if (albumDiff !== 0) return albumDiff;
-        return (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999);
-      }
-      if (sortBy === 'artist') {
-        const artistDiff = a.artist.localeCompare(b.artist);
-        if (artistDiff !== 0) return artistDiff;
-        return (a.album || '').localeCompare(b.album || '');
-      }
-      return parseInt(a.id) - parseInt(b.id);
-    });
+    // Si el usuario está buscando y el orden es por defecto, conservar la relevancia calculada por Fuse
+    if (!searchQuery.trim() || sortBy !== 'first') {
+      const sorted = [...list].sort((a, b) => {
+        if (sortBy === 'name') return a.title.localeCompare(b.title);
+        if (sortBy === 'album') {
+          const albumDiff = (a.album || '').localeCompare(b.album || '');
+          if (albumDiff !== 0) return albumDiff;
+          return (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999);
+        }
+        if (sortBy === 'artist') {
+          const artistDiff = a.artist.localeCompare(b.artist);
+          if (artistDiff !== 0) return artistDiff;
+          return (a.album || '').localeCompare(b.album || '');
+        }
+        return parseInt(a.id) - parseInt(b.id);
+      });
+      return sorted;
+    }
 
-    return sorted;
-  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, offlineIds, selectedAlbumName, selectedArtistName, sortBy]);
+    return list;
+  }, [songs, formatFilter, searchQuery, activePlaylistId, likedIds, offlineIds, selectedAlbumName, selectedArtistName, sortBy, songFuse]);
 
   // ELEMENTOS PARA LA CUADRÍCULA
   const displayItems = useMemo(() => {
@@ -2197,47 +2283,52 @@ useEffect(() => {
     if (selectedAlbumName || selectedArtistName) return list;
 
     const items: any[] = [];
-    const groupedAlbums = new Set<string>();
-    const groupedArtists = new Set<string>();
-    const queryLower = searchQuery.trim().toLowerCase();
+    const q = searchQuery.trim();
 
-    // 1. ARTISTAS COINCIDENTES EN BÚSQUEDA
-    if (queryLower.length > 1) {
-      songs.forEach(song => {
-        const artists = parseArtists(song.artist);
+    // 1. SI HAY BÚSQUEDA ACTIVA: incluir tarjetas de artistas y álbumes relevantes al inicio
+    if (q.length > 0) {
+      const matchingArtists = searchArtistsWithFuse(artistFuse, q, allArtists);
+      const matchingAlbums = searchAlbumsWithFuse(albumFuse, q, allAlbums);
 
-        artists.forEach(individualArtist => {
-          if (
-            individualArtist.toLowerCase().includes(queryLower) &&
-            !groupedArtists.has(individualArtist)
-          ) {
-            const artistTracks = songs.filter(s => parseArtists(s.artist).includes(individualArtist));
-            const artistAlbums = new Set(artistTracks.map(s => s.album).filter(Boolean));
-            const customArtistPhoto = artistsMap[individualArtist]?.image_url;
-
-            items.push({
-              id: `artist-${individualArtist}`,
-              type: 'artist',
-              title: individualArtist,
-              artist: 'Artista Oficial',
-              coverUrl: customArtistPhoto || artistTracks[0]?.coverUrl,
-              trackCount: artistTracks.length,
-              albumCount: artistAlbums.size
-            });
-
-            groupedArtists.add(individualArtist);
-          }
+      // Mostrar hasta los mejores 4 artistas coincidentes
+      matchingArtists.slice(0, 4).forEach(art => {
+        items.push({
+          id: `artist-${art.name}`,
+          type: 'artist',
+          title: art.name,
+          artist: 'Artista Oficial',
+          coverUrl: art.coverUrl,
+          trackCount: art.trackCount,
+          albumCount: art.albumCount
         });
       });
+
+      // Mostrar hasta los mejores 4 álbumes coincidentes
+      matchingAlbums.slice(0, 4).forEach(alb => {
+        items.push({
+          id: `album-${alb.title}`,
+          type: 'album',
+          title: alb.title,
+          artist: alb.artist,
+          coverUrl: alb.coverUrl,
+          trackCount: alb.trackCount
+        });
+      });
+
+      // Añadir canciones coincidentes ordenadas por relevancia Fuse
+      list.forEach(song => {
+        items.push(song);
+      });
+
+      return items;
     }
 
-    // 2. AGRUPACIÓN Y BÚSQUEDA DE ÁLBUMES
+    // 2. MODO BIBLIOTECA NORMAL (SIN BÚSQUEDA)
+    const groupedAlbums = new Set<string>();
     list.forEach(song => {
       if (song.album && !groupedAlbums.has(song.album)) {
-        const albumMatchesSearch = queryLower.length > 0 && song.album.toLowerCase().includes(queryLower);
         const allAlbumTracks = songs.filter(s => s.album === song.album);
-
-        if (albumMatchesSearch || (queryLower.length === 0 && allAlbumTracks.length > 1)) {
+        if (allAlbumTracks.length > 1) {
           items.push({
             id: `album-${song.album}`,
             type: 'album',
@@ -2247,9 +2338,7 @@ useEffect(() => {
             trackCount: allAlbumTracks.length
           });
           groupedAlbums.add(song.album);
-        } else if (queryLower.length === 0) {
-          items.push(song);
-        } else if (!albumMatchesSearch) {
+        } else {
           items.push(song);
         }
       } else if (!song.album) {
@@ -2258,7 +2347,7 @@ useEffect(() => {
     });
 
     return items;
-  }, [flattenedSongs, songs, artistsMap, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
+  }, [flattenedSongs, songs, allArtists, allAlbums, artistFuse, albumFuse, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
 
   // PRECARGA DE LAS PRIMERAS CARÁTULAS DE LA REJILLA (solo una vez, al
   // arrancar la app) usando displayItems — el mismo array, en el mismo
@@ -2303,102 +2392,23 @@ useEffect(() => {
     return Array.from(map.values());
   }, [selectedArtistName, songs]);
 
-  // TODOS LOS ÁLBUMES DE LA BIBLIOTECA
-  const allAlbums = useMemo(() => {
-    const map = new Map<string, {
-      title: string;
-      artist: string;
-      coverUrl: string;
-      trackCount: number;
-      tracks: Song[];
-      formats: Set<string>;
-    }>();
-
-    songs.forEach(s => {
-      if (!s.album || !s.album.trim()) return;
-      const albumKey = s.album.trim();
-      if (!map.has(albumKey)) {
-        map.set(albumKey, {
-          title: albumKey,
-          artist: s.artist || 'Artista Desconocido',
-          coverUrl: s.coverUrl,
-          trackCount: 0,
-          tracks: [],
-          formats: new Set<string>()
-        });
-      }
-      const item = map.get(albumKey)!;
-      item.tracks.push(s);
-      item.trackCount++;
-      if (s.format) item.formats.add(s.format.toUpperCase());
-      if ((!item.coverUrl || item.coverUrl.includes('default-cover')) && s.coverUrl) {
-        item.coverUrl = s.coverUrl;
-      }
-    });
-
-    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
-  }, [songs]);
-
   // ÁLBUMES FILTRADOS POR BÚSQUEDA Y FORMATO
   const filteredAlbums = useMemo(() => {
     let list = allAlbums;
     if (formatFilter !== 'all') {
       list = list.filter(alb => alb.tracks.some(t => t.format === formatFilter));
     }
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length > 0) {
-      list = list.filter(alb => 
-        alb.title.toLowerCase().includes(q) || 
-        alb.artist.toLowerCase().includes(q)
-      );
+    if (searchQuery.trim().length > 0) {
+      list = searchAlbumsWithFuse(albumFuse, searchQuery, list);
     }
     return list;
-  }, [allAlbums, searchQuery, formatFilter]);
-
-  // TODOS LOS ARTISTAS DE LA BIBLIOTECA
-  const allArtists = useMemo(() => {
-    const map = new Map<string, {
-      name: string;
-      coverUrl: string;
-      trackCount: number;
-      albumCount: number;
-    }>();
-
-    songs.forEach(song => {
-      const artists = parseArtists(song.artist);
-      artists.forEach(artistName => {
-        if (!map.has(artistName)) {
-          map.set(artistName, {
-            name: artistName,
-            coverUrl: artistsMap[artistName]?.image_url || song.coverUrl,
-            trackCount: 0,
-            albumCount: 0
-          });
-        }
-      });
-    });
-
-    map.forEach((entry, artistName) => {
-      const artistTracks = songs.filter(s => parseArtists(s.artist).includes(artistName));
-      const albums = new Set(artistTracks.map(s => s.album).filter(Boolean));
-      entry.trackCount = artistTracks.length;
-      entry.albumCount = albums.size;
-      if (artistsMap[artistName]?.image_url) {
-        entry.coverUrl = artistsMap[artistName]?.image_url;
-      } else if (!entry.coverUrl && artistTracks[0]?.coverUrl) {
-        entry.coverUrl = artistTracks[0].coverUrl;
-      }
-    });
-
-    return Array.from(map.values()).sort((a, b) => b.trackCount - a.trackCount);
-  }, [songs, artistsMap]);
+  }, [allAlbums, searchQuery, formatFilter, albumFuse]);
 
   // ARTISTAS FILTRADOS POR BÚSQUEDA
   const filteredArtists = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return allArtists;
-    return allArtists.filter(art => art.name.toLowerCase().includes(q));
-  }, [allArtists, searchQuery]);
+    if (!searchQuery.trim()) return allArtists;
+    return searchArtistsWithFuse(artistFuse, searchQuery, allArtists);
+  }, [allArtists, searchQuery, artistFuse]);
 
   const getFlattenedSongs = () => flattenedSongs;
 
@@ -2828,14 +2838,27 @@ useEffect(() => {
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
               </div>
               <div className="flex-1 min-w-0 max-w-md ml-2 md:ml-8 relative -translate-x-[12px]">
-  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-  <input
-    value={searchQuery}
-    onChange={(e) => setSearchQuery(e.target.value)}
-    className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-3 md:pr-4 text-[10px] md:text-[11px] outline-none text-white focus:bg-white/10"
-    placeholder="Search..."
-  />
-</div>
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 pointer-events-none" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setSearchQuery('');
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-8 text-[10px] md:text-[11px] outline-none text-white focus:bg-white/10 focus:border-brand-primary/40 transition-all placeholder:text-white/30"
+                  placeholder="Buscar canciones, artistas, álbumes..."
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-white/40 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Borrar búsqueda (Esc)"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-3 md:gap-6">
               {token ? (
@@ -3886,7 +3909,7 @@ transition={{
                                           >
                                             <Music2 size={13} />
                                             <span>Canciones</span>
-                                            <span className="text-[9px] opacity-75">({songs.length})</span>
+                                            <span className="text-[9px] opacity-75">({searchQuery.trim() ? flattenedSongs.length : songs.length})</span>
                                           </button>
 
                                           <button
@@ -3900,7 +3923,7 @@ transition={{
                                           >
                                             <Disc size={13} />
                                             <span>Álbumes</span>
-                                            <span className="text-[9px] opacity-75">({allAlbums.length})</span>
+                                            <span className="text-[9px] opacity-75">({searchQuery.trim() ? filteredAlbums.length : allAlbums.length})</span>
                                           </button>
 
                                           <button
@@ -3914,7 +3937,7 @@ transition={{
                                           >
                                             <User size={13} />
                                             <span>Artistas</span>
-                                            <span className="text-[9px] opacity-75">({allArtists.length})</span>
+                                            <span className="text-[9px] opacity-75">({searchQuery.trim() ? filteredArtists.length : allArtists.length})</span>
                                           </button>
                                         </span>
                                       )
@@ -4124,6 +4147,12 @@ transition={{
                             </div>
                           </div>
                         ))}
+                        {filteredAlbums.length === 0 && (
+                          <div className="py-20 text-center col-span-full flex flex-col items-center justify-center gap-2 text-white/50">
+                            <Disc size={28} className="opacity-30" />
+                            <p className="text-sm font-semibold">No se encontraron álbumes {searchQuery.trim() ? `para "${searchQuery}"` : ''}</p>
+                          </div>
+                        )}
                       </div>
                     ) : activePlaylistId === 'all' && librarySection === 'artists' ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
@@ -4159,6 +4188,12 @@ transition={{
                             </div>
                           </div>
                         ))}
+                        {filteredArtists.length === 0 && (
+                          <div className="py-20 text-center col-span-full flex flex-col items-center justify-center gap-2 text-white/50">
+                            <User size={28} className="opacity-30" />
+                            <p className="text-sm font-semibold">No se encontraron artistas {searchQuery.trim() ? `para "${searchQuery}"` : ''}</p>
+                          </div>
+                        )}
                       </div>
                     ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8 w-full max-w-full">
@@ -4312,6 +4347,23 @@ transition={{
                                 )}
                             </div>
                         ))}
+                        {displayItems.length === 0 && (
+                          <div className="py-20 text-center col-span-full flex flex-col items-center justify-center gap-3 text-white/50">
+                            <Search size={32} className="opacity-30" />
+                            <p className="text-sm font-semibold">
+                              {searchQuery.trim() ? `No se encontraron resultados para "${searchQuery}"` : 'No hay canciones disponibles'}
+                            </p>
+                            {searchQuery.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => setSearchQuery('')}
+                                className="text-xs text-brand-primary underline hover:opacity-80 cursor-pointer"
+                              >
+                                Limpiar búsqueda
+                              </button>
+                            )}
+                          </div>
+                        )}
                     </div>
                     )}
                 </section>
