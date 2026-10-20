@@ -1117,6 +1117,36 @@ useEffect(() => {
         setSongs(mapped);
         setLikedIds(data.filter((s: any) => s.is_liked).map((s: any) => s.id.toString()));
 
+        // Sincronizar metadatos frescos (carátula, audio, título) en currentSong si proviene de caché antigua
+        setCurrentSong(prev => {
+          if (!prev) return prev;
+          const fresh = mapped.find((s: any) => String(s.id) === String(prev.id));
+          if (fresh && (fresh.coverUrl !== prev.coverUrl || fresh.audioUrl !== prev.audioUrl || fresh.title !== prev.title)) {
+            const merged = { ...prev, ...fresh };
+            try { localStorage.setItem('aura_last_song', JSON.stringify(merged)); } catch {}
+            return merged;
+          }
+          return prev;
+        });
+
+        // Sincronizar carátulas frescas en recentlyPlayed
+        setRecentlyPlayed(prev => {
+          if (!prev || prev.length === 0) return prev;
+          let changed = false;
+          const updated = prev.map(oldSong => {
+            const fresh = mapped.find((s: any) => String(s.id) === String(oldSong.id));
+            if (fresh && fresh.coverUrl !== oldSong.coverUrl) {
+              changed = true;
+              return { ...oldSong, ...fresh };
+            }
+            return oldSong;
+          });
+          if (changed) {
+            try { localStorage.setItem('aura_recent', JSON.stringify(updated)); } catch {}
+          }
+          return changed ? updated : prev;
+        });
+
         const allIndividualArtists = Array.from(new Set(
           data.flatMap((s: any) => parseArtists(s.artist))
         ));
@@ -1426,6 +1456,10 @@ useEffect(() => {
   ) => {
     if (!fromSocket && blockIfGuest()) return;
     if (currentSong?.id === song.id) {
+      if (song.coverUrl && song.coverUrl !== currentSong.coverUrl) {
+        setCurrentSong(prev => prev ? { ...prev, ...song } : song);
+        try { localStorage.setItem('aura_last_song', JSON.stringify({ ...currentSong, ...song })); } catch {}
+      }
       const nextState = !isPlaying;
       setIsPlaying(nextState);
       if (!fromSocket) {
@@ -3676,7 +3710,7 @@ transition={{
                           </div>
                       </div>
                     )}
-                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
+                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform bg-white/5"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl || DEFAULT_COVER} onError={(e) => { if (!e.currentTarget.src.includes('default-cover.jpg')) { e.currentTarget.src = DEFAULT_COVER; } }} className="w-full h-full object-cover" alt={song.title} /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
                 <div className="mt-auto pt-6">
                   <div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all">
