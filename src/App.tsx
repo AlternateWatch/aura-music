@@ -3104,8 +3104,8 @@ useEffect(() => {
                   <div className="relative hidden md:block">
                     <button
                       onClick={() => setIsDesktopMenuOpen(prev => !prev)}
-                      title="Más opciones"
-                      aria-label="Más opciones"
+                      title={isDesktopMenuOpen ? "Cerrar menú" : "Menú"}
+                      aria-label={isDesktopMenuOpen ? "Cerrar menú" : "Menú"}
                       className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer outline-none ${
                         isDesktopMenuOpen
                           ? 'bg-brand-primary text-black shadow-lg font-black'
@@ -3116,7 +3116,9 @@ useEffect(() => {
                               : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
                       }`}
                     >
-                      <MoreHorizontal size={17} />
+                      <span className="flex transition-transform duration-150" style={{ transform: isDesktopMenuOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                        {isDesktopMenuOpen ? <X size={18} /> : <Menu size={18} />}
+                      </span>
                       {sleepTimer.isActive && (
                         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                       )}
