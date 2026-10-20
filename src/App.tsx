@@ -1087,7 +1087,7 @@ useEffect(() => {
   const offlinePlaylistIds = useSyncExternalStore(subscribeOfflineStore, getOfflinePlaylistIdsSnapshot, getOfflinePlaylistIdsSnapshot);
   const playlistSyncProgress = useSyncExternalStore(subscribeOfflineStore, getPlaylistSyncProgressSnapshot, getPlaylistSyncProgressSnapshot);
 
-  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 4500) => {
+  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 12000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -1130,7 +1130,7 @@ useEffect(() => {
       }
       const activeToken = token || localStorage.getItem('aura_token');
       const endpoint = activePlaylistId === 'all' || activePlaylistId === 'liked' ? `/api/tracks?status=${showModeration ? 'pending' : 'approved'}` : `/api/playlists/${activePlaylistId}/tracks`;
-      const res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 5000);
+      const res = await fetchWithTimeout(`${API_BASE}${endpoint}`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -1179,23 +1179,15 @@ useEffect(() => {
           return changed ? updated : prev;
         });
 
-        const allIndividualArtists = Array.from(new Set(
-          data.flatMap((s: any) => parseArtists(s.artist))
-        ));
-
-        allIndividualArtists.forEach((artistName: any) => {
-          fetch(`${API_BASE}/api/artists/${encodeURIComponent(artistName)}`)
-            .then(r => r.json())
-            .then(artistData => {
-              if (artistData && (artistData.image_url || artistData.bio)) {
-                setArtistsMap(prev => ({
-                  ...prev,
-                  [artistName]: { bio: artistData.bio, image_url: artistData.image_url }
-                }));
-              }
-            })
-            .catch(() => {});
-        });
+        // Cargar todos los artistas en una sola petición ligera para no saturar conexiones ni bloquear imágenes
+        fetch(`${API_BASE}/api/artists`)
+          .then(r => r.ok ? r.json() : null)
+          .then(allArtists => {
+            if (allArtists && typeof allArtists === 'object') {
+              setArtistsMap(prev => ({ ...prev, ...allArtists }));
+            }
+          })
+          .catch(() => {});
       } else {
         await applyOfflineFallback();
       }
@@ -1224,7 +1216,7 @@ useEffect(() => {
       return;
     }
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 4500);
+      const res = await fetchWithTimeout(`${API_BASE}/api/playlists`, { headers: { 'Authorization': `Bearer ${activeToken}` } }, 12000);
       if (!res.ok) {
         const offlinePlaylists = await getAllOfflinePlaylists();
         if (offlinePlaylists.length > 0) {

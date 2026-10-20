@@ -816,6 +816,25 @@ app.delete('/api/tracks/:id', authenticateToken, async (req: any, res: Response)
 
 // --- ARTIST PROFILE & BIO ---
 
+// Obtener todos los artistas en una sola consulta para evitar saturar conexiones
+app.get('/api/artists', async (req: Request, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute('SELECT name, bio, image_url FROM artists');
+        const map: Record<string, { bio: string | null; image_url: string | null }> = {};
+        if (Array.isArray(rows)) {
+            for (const r of rows) {
+                if (r.name) {
+                    map[r.name] = { bio: r.bio || null, image_url: r.image_url || null };
+                }
+            }
+        }
+        res.json(map);
+    } catch (e) {
+        console.error("Error fetching all artists:", e);
+        res.status(500).json({ error: "Error fetching artists" });
+    }
+});
+
 app.get('/api/artists/:name', async (req: Request, res: Response) => {
 
     try {
