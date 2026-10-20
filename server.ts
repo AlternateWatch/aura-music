@@ -3330,7 +3330,7 @@ app.post('/api/ai/dj', async (req: any, res: Response) => {
 
     try {
         const [rows]: any = await pool.execute(
-            'SELECT id, title, artist, album, format, coverUrl, audioUrl, tabs_url, track_number, status, createdAt, updatedAt FROM tracks WHERE status = "approved"'
+            'SELECT * FROM tracks WHERE status = "approved"'
         );
 
         if (!rows || rows.length === 0) {
@@ -3518,11 +3518,22 @@ No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
             return res.status(404).json({ error: "NO_MATCHING_TRACKS", message: "No se encontraron canciones en tu biblioteca que coincidan con esa vibra." });
         }
 
+        const formattedTracks = orderedTracks.map((r: any) => ({
+            ...r,
+            id: r.id.toString(),
+            coverUrl: r.cover_path ? (r.cover_path.startsWith('http') ? r.cover_path : `https://aura.basildo.me${r.cover_path}`) : null,
+            audioUrl: r.file_path ? (r.file_path.startsWith('http') ? r.file_path : `https://aura.basildo.me${r.file_path}`) : null,
+            tabs_url: r.tabs_url,
+            track_number: r.track_number,
+            format: r.format,
+            video_url: r.video_url
+        }));
+
         res.json({
             title: parsed.title || "Aura DJ Mix",
             description: parsed.description || "Selección personalizada generada por Aura DJ.",
             vibeTags: Array.isArray(parsed.vibeTags) ? parsed.vibeTags : ["Aura DJ", "Mix"],
-            tracks: orderedTracks
+            tracks: formattedTracks
         });
 
     } catch (e: any) {

@@ -84,7 +84,29 @@ export function AuraDjOverlay({
     return 'all';
   });
   const [playlistTracksCache, setPlaylistTracksCache] = useState<Record<string, Song[]>>({});
+  const [fullLibrarySongs, setFullLibrarySongs] = useState<Song[]>([]);
   const [isLoadingSource, setIsLoadingSource] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetch(`${API_BASE}/api/tracks?status=approved`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if (!isMounted || !Array.isArray(data)) return;
+        const mapped = data.map((s: any) => ({
+          ...s,
+          id: s.id.toString(),
+          coverUrl: s.cover_path ? (s.cover_path.startsWith('http') ? s.cover_path : `${API_BASE}${s.cover_path}`) : s.coverUrl,
+          audioUrl: s.file_path ? (s.file_path.startsWith('http') ? s.file_path : `${API_BASE}${s.file_path}`) : s.audioUrl
+        }));
+        setFullLibrarySongs(mapped);
+      })
+      .catch(() => {});
+
+    return () => { isMounted = false; };
+  }, [token]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
@@ -185,7 +207,8 @@ export function AuraDjOverlay({
     const textToUse = (customPrompt || prompt).trim();
     if (!textToUse) return;
 
-    if (!songs || songs.length === 0) {
+    const libraryPool = fullLibrarySongs.length > 0 ? fullLibrarySongs : songs;
+    if (libraryPool.length === 0) {
       setError('No hay canciones en tu biblioteca para mezclar.');
       return;
     }
@@ -206,10 +229,10 @@ export function AuraDjOverlay({
         playlistId: selectedSource,
         currentTrackIds: isPlMode 
           ? playlistSongs.map(s => String(s.id)) 
-          : (selectedSource === 'liked' ? songs.filter(s => s.is_liked).map(s => String(s.id)) : undefined)
+          : (selectedSource === 'liked' ? libraryPool.filter(s => s.is_liked).map(s => String(s.id)) : undefined)
       };
 
-      const result = await generateDjMix(textToUse, songs, apiKey, token, sourceInfo);
+      const result = await generateDjMix(textToUse, libraryPool, apiKey, token, sourceInfo);
       setMixResult(result);
     } catch (err: any) {
       setError(err.message || 'Error al conectar con Aura DJ.');

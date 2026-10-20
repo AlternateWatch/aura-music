@@ -389,6 +389,7 @@ export default function App() {
   const [newEditCover, setNewEditCover] = useState<File | null>(null);
   const [newEditAnimatedCover, setNewEditAnimatedCover] = useState<File | null>(null);
   
+  const [allLibrarySongs, setAllLibrarySongs] = useState<Song[]>([]);
   const [trackToDelete, setTrackToDelete] = useState<string | null>(null);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState(false);
   const [editingPlaylist, setEditingPlaylist] = useState<any | null>(null);
@@ -1160,6 +1161,9 @@ useEffect(() => {
             video_url: s.video_url
         }));
         setSongs(mapped);
+        if (activePlaylistId === 'all') {
+          setAllLibrarySongs(mapped);
+        }
         setLikedIds(data.filter((s: any) => s.is_liked).map((s: any) => s.id.toString()));
 
         // Sincronizar metadatos frescos (carátula, audio, título) en currentSong si proviene de caché antigua
@@ -5247,7 +5251,7 @@ getCurrentTime={audioObj.getCurrentTime}
           {isAuraDjOpen && (
             <LazyAuraDjOverlay
               onClose={() => setIsAuraDjOpen(false)}
-              songs={songs}
+              songs={allLibrarySongs.length > 0 ? allLibrarySongs : songs}
               token={token}
               playlists={playlists}
               activePlaylistId={activePlaylistId}
