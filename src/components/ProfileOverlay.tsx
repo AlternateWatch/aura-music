@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { X, Shield, Calendar, Music, ListMusic, Loader2, Mail, Camera, Activity } from 'lucide-react';
 
+// En Android (Capacitor) el origen es https://localhost, así que las rutas relativas
+// como '/api/users/me' devolverían el index.html de la app en vez de la API.
+const API_BASE = "https://aura.basildo.me";
+const resolveUrl = (p?: string | null) =>
+  !p ? undefined : p.startsWith('/') ? `${API_BASE}${p}` : p;
+
 interface ProfileOverlayProps {
   onClose: () => void;
   token: string | null;
@@ -20,7 +26,7 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
 
   const fetchProfile = async () => {
     try {
-      const res = await fetch('/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/users/me`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!res.ok) throw new Error("Failed to fetch profile");
       const data = await res.json();
       setProfile(data);
@@ -37,7 +43,7 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
     const formData = new FormData();
     formData.append('profile_pic', file);
     try {
-      const res = await fetch('/api/users/profile-pic', {
+      const res = await fetch(`${API_BASE}/api/users/profile-pic`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -64,7 +70,7 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
                     <div className="relative group">
                         <div className="w-24 h-24 bg-gradient-to-br from-brand-primary to-purple-600 rounded-full flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(99,102,241,0.2)] overflow-hidden">
                             {profile?.profile_pic_path ? (
-                                <img src={profile.profile_pic_path} className="w-full h-full object-cover" />
+                                <img src={resolveUrl(profile.profile_pic_path)} className="w-full h-full object-cover" />
                             ) : (
                                 <span className="text-3xl font-black text-black uppercase">{profile?.username?.[0]}</span>
                             )}
