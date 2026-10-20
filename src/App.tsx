@@ -58,6 +58,7 @@ const LazyMusicUpload = lazy(() => import("./components/MusicUpload").then(m => 
 const LazySocialSidebar = lazy(() => import("./hooks/SocialSidebar").then(m => ({ default: m.SocialSidebar })));
 const LazyWrappedOverlay = lazy(() => import("./components/WrappedOverlay").then(m => ({ default: m.WrappedOverlay })));
 const LazySleepTimerOverlay = lazy(() => import("./components/SleepTimerOverlay").then(m => ({ default: m.SleepTimerOverlay })));
+const LazyAuraDjOverlay = lazy(() => import("./components/AuraDjOverlay").then(m => ({ default: m.AuraDjOverlay })));
 
 // MODULED IMPORTS AND HOOKS
 import { useAudioEngine } from "./hooks/useAudioEngine";
@@ -382,6 +383,7 @@ export default function App() {
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
+  const [isAuraDjOpen, setIsAuraDjOpen] = useState(false);
   const [isDesktopMenuOpen, setIsDesktopMenuOpen] = useState(false);
   const [heroImageError, setHeroImageError] = useState(false);
   const isGoingBackRef = useRef(false);
@@ -1547,6 +1549,15 @@ useEffect(() => {
         position: 0
       });
     }
+  };
+
+  // REPRODUCIR MEZCLA GENERADA POR AURA DJ
+  const handlePlayDjMix = (tracks: Song[]) => {
+    if (!tracks || tracks.length === 0) return;
+    setActiveQueue(tracks);
+    setManualQueueIds([]);
+    setRadioQueueIds(new Set());
+    handlePlaySong(tracks[0], false, 0, false, tracks);
   };
 
   // --- MOTOR DE RECOMENDACIÓN: RADIO INFINITA / AUTOPLAY ---
@@ -2862,7 +2873,17 @@ useEffect(() => {
             </div>
             <div className="flex items-center gap-3 md:gap-6">
               {token ? (
-                <div className="flex items-center gap-4 md:gap-5">
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                  {/* AURA DJ BUTTON */}
+                  <button
+                    onClick={() => setIsAuraDjOpen(true)}
+                    className="bg-gradient-to-r from-purple-600 via-pink-600 to-purple-600 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                    title="Aura DJ con Gemini AI"
+                  >
+                    <Sparkles size={13} className="fill-white" />
+                    <span>Aura DJ</span>
+                  </button>
+
                   {/* 1. UPLOAD BUTTON */}
                   <button
                     onClick={() => setShowUpload(true)}
@@ -2917,6 +2938,29 @@ useEffect(() => {
                                 </span>
                               )}
                             </div>
+
+                            {/* Aura DJ */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsDesktopMenuOpen(false);
+                                setIsAuraDjOpen(true);
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all text-left cursor-pointer group"
+                            >
+                              <div className="p-2 rounded-lg bg-purple-500/15 text-purple-300 group-hover:bg-purple-500/25 transition-colors">
+                                <Sparkles size={16} className="fill-purple-300" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-white flex items-center gap-2">
+                                  <span>Aura DJ (Gemini AI)</span>
+                                  <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/30 font-bold">NUEVO</span>
+                                </div>
+                                <div className="text-[10px] text-white/40 truncate">
+                                  Crea mezclas por lenguaje natural
+                                </div>
+                              </div>
+                            </button>
 
                             {/* Temporizador de apagado */}
                             <button
@@ -3634,7 +3678,24 @@ transition={{
                     )}
                     <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl} className="w-full h-full object-cover" /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
-                <div className="mt-auto pt-6"><div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all"><Palette size={18} className="text-brand-primary" /><span className="text-[10px] font-bold uppercase tracking-widest text-white/80">Aesthetic</span></div></div>
+                <div className="mt-auto pt-6 space-y-2">
+                  <div
+                    onClick={() => setIsAuraDjOpen(true)}
+                    className="p-4 rounded-[24px] border border-purple-500/30 bg-purple-950/20 cursor-pointer flex items-center gap-3.5 hover:bg-purple-900/30 transition-all group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center shrink-0 shadow-md shadow-purple-500/20 group-hover:scale-105 transition-transform">
+                      <Sparkles size={16} className="text-white fill-white" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-purple-200 block">Aura DJ</span>
+                      <span className="text-[9px] text-purple-300/60 block">Gemini AI</span>
+                    </div>
+                  </div>
+                  <div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all">
+                    <Palette size={18} className="text-brand-primary" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-white/80">Aesthetic</span>
+                  </div>
+                </div>
             </motion.aside>
           )}
         </AnimatePresence>
@@ -4617,6 +4678,22 @@ getCurrentTime={audioObj.getCurrentTime}
       <AnimatePresence>{sessionNotice && (<motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} onSendReaction={(messageId, reaction) => socketObj.emitReaction(messageId, reaction)} analyser={audioObj.analyser} active={isPlaying} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}>
+        <AnimatePresence>
+          {isAuraDjOpen && (
+            <LazyAuraDjOverlay
+              onClose={() => setIsAuraDjOpen(false)}
+              songs={songs}
+              token={token}
+              onPlayQueue={handlePlayDjMix}
+              onPlaylistCreated={() => {
+                loadPlaylists();
+                loadContent();
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </Suspense>
 
       {/* MODAL CREAR PLAYLIST */}
       <AnimatePresence>{isCreatePlaylistOpen && ( 

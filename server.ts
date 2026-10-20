@@ -2949,6 +2949,148 @@ app.post('/api/admin/sync-local-to-b2', authenticateToken, async (req: any, res:
     }
 });
 
+// ==========================================
+// AURA DJ - GENERADOR DE PLAYLISTS CON GEMINI
+// ==========================================
+app.post('/api/ai/dj', async (req: any, res: Response) => {
+    const { prompt, apiKey } = req.body;
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+        return res.status(400).json({ error: "PROMPT_REQUIRED", message: "Escribe qué tipo de música o ambiente deseas." });
+    }
+
+    const geminiKey = (apiKey && typeof apiKey === 'string' && apiKey.trim()) 
+        ? apiKey.trim() 
+        : process.env.GEMINI_API_KEY;
+
+    if (!geminiKey) {
+        return res.status(400).json({ 
+            error: "MISSING_API_KEY", 
+            message: "Se requiere una API Key de Gemini. Puedes configurarla en el servidor o introducirla en los ajustes de Aura DJ." 
+        });
+    }
+
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT id, title, artist, album, format, coverUrl, audioUrl, tabs_url, track_number, status, createdAt, updatedAt FROM tracks WHERE status = "approved"'
+        );
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "NO_TRACKS", message: "No hay canciones aprobadas en la biblioteca." });
+        }
+
+        // Compactar catálogo para minimizar tokens
+        const catalogList = rows.map((r: any) => `${r.id}|${r.title}|${r.artist}|${r.album || ''}`).join('\n');
+
+        const systemPrompt = `Eres "Aura DJ", un DJ musical y selector de élite.
+Tu misión es seleccionar las mejores canciones de la biblioteca del usuario para satisfacer su petición.
+PETICIÓN DEL USUARIO: "${prompt.trim()}"
+
+CATÁLOGO DISPONIBLE (Formato: ID|Título|Artista|Álbum):
+${catalogList}
+
+INSTRUCCIONES CRÍTICAS:
+1. Elige entre 8 y 25 canciones que mejor encajen con la vibra, estilo, género o energía solicitada.
+2. Si la petición es muy concreta y hay pocas canciones exactas, amplía con temas compatibles de artistas similares o misma energía.
+3. Ordena las canciones con progresión musical atractiva (un inicio que enganche, desarrollo, subida de energía/clímax, y un buen cierre).
+4. Devuelve ÚNICAMENTE un objeto JSON válido con este formato:
+{
+  "title": "Nombre creativo y atractivo para la mezcla",
+  "description": "Una o dos frases explicando por qué estas canciones crean la atmósfera perfecta",
+  "vibeTags": ["Rock", "Noche", "Energía"],
+  "songIds": [12, 45, 89]
+}
+No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
+
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+        
+        let response: any;
+        try {
+            response = await axios.post(
+                geminiUrl,
+                {
+                    contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        temperature: 0.7
+                    }
+                },
+                {
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: 20000
+                }
+            );
+        } catch (err: any) {
+            if (err.response?.status === 404 || err.response?.data?.error?.message?.includes('not found')) {
+                const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+                response = await axios.post(
+                    fallbackUrl,
+                    {
+                        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            temperature: 0.7
+                        }
+                    },
+                    {
+                        headers: { 'Content-Type': 'application/json' },
+                        timeout: 20000
+                    }
+                );
+            } else {
+                throw err;
+            }
+        }
+
+        const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+            return res.status(502).json({ error: "AI_EMPTY_RESPONSE", message: "Gemini no devolvió respuesta para esta consulta." });
+        }
+
+        let parsed: any;
+        try {
+            parsed = JSON.parse(rawText);
+        } catch {
+            return res.status(502).json({ error: "AI_PARSE_ERROR", message: "Error al procesar la respuesta del DJ." });
+        }
+
+        const songIdMap = new Map<string, any>();
+        rows.forEach((r: any) => songIdMap.set(String(r.id), r));
+
+        const orderedTracks: any[] = [];
+        const seenIds = new Set<string>();
+
+        if (Array.isArray(parsed.songIds)) {
+            parsed.songIds.forEach((sid: any) => {
+                const key = String(sid);
+                if (songIdMap.has(key) && !seenIds.has(key)) {
+                    orderedTracks.push(songIdMap.get(key));
+                    seenIds.add(key);
+                }
+            });
+        }
+
+        if (orderedTracks.length === 0) {
+            return res.status(404).json({ error: "NO_MATCHING_TRACKS", message: "No se encontraron canciones en tu biblioteca que coincidan con esa vibra." });
+        }
+
+        res.json({
+            title: parsed.title || "Aura DJ Mix",
+            description: parsed.description || "Selección personalizada generada por Aura DJ.",
+            vibeTags: Array.isArray(parsed.vibeTags) ? parsed.vibeTags : ["Aura DJ", "Mix"],
+            tracks: orderedTracks
+        });
+
+    } catch (e: any) {
+        console.error("Aura DJ error:", e.response?.data || e.message);
+        const errMsg = e.response?.data?.error?.message || e.message || "Error al conectar con Gemini";
+        const isAuthError = e.response?.status === 400 && errMsg.includes('API key');
+        res.status(500).json({ 
+            error: isAuthError ? "INVALID_API_KEY" : "AI_ERROR", 
+            message: isAuthError ? "La API Key de Gemini no es válida o ha caducado." : errMsg 
+        });
+    }
+});
+
 app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || /\.(jpg|jpeg|png|webp|gif|mp3|flac|wav|ogg|m4a)$/i.test(req.path)) {
