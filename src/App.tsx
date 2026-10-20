@@ -3258,7 +3258,7 @@ transition={{
   duration: 0.16,
   ease: "easeOut",
 }}
-        className={`fixed top-[5.5rem] left-3 right-3 z-[9999] md:hidden rounded-2xl border shadow-lg overflow-hidden will-change-transform ${
+        className={`fixed top-[5.25rem] left-3 right-3 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] max-h-[calc(100dvh-6.25rem-env(safe-area-inset-bottom,0px))] z-[9999] md:hidden rounded-2xl border shadow-2xl flex flex-col overflow-hidden will-change-transform ${
           activeTheme === "light"
             ? "bg-white border-black/10 text-black"
             : "bg-[#080808] border-white/10 text-white"
@@ -3267,7 +3267,7 @@ transition={{
 
         {/* CABECERA */}
         <div
-          className={`px-4 py-4 border-b ${
+          className={`shrink-0 px-4 py-4 border-b ${
             activeTheme === "light"
               ? "border-black/5"
               : "border-white/10"
@@ -3299,7 +3299,7 @@ transition={{
         </div>
 
         {/* CONTENIDO */}
-        <div className="max-h-[calc(100vh-7rem)] overflow-y-auto scrollbar-hide">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-6 [touch-action:pan-y] [-webkit-overflow-scrolling:touch]">
 
           {/* LIBRARY */}
           <button
@@ -3772,7 +3772,7 @@ transition={{
           )}
 
           {/* ESPACIO INFERIOR */}
-          <div className="h-2" />
+          <div className="h-6 shrink-0" />
 
         </div>
       </motion.div>
