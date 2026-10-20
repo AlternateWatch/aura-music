@@ -1,3 +1,4 @@
+import { API_BASE } from '../utils/api';
 
 export interface LyricLine {
   time: number;
@@ -23,7 +24,7 @@ class LyricsService {
       if (duration) params.append('duration', Math.round(duration).toString());
 
       const targetUrl = `${this.baseUrl}/get?${params.toString()}`;
-      const response = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+      const response = await fetch(`${API_BASE}/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       
       if (!response.ok) {
         // If specific get fails, try search
@@ -45,7 +46,7 @@ class LyricsService {
         q: `${artist} ${title}`
       });
       const targetUrl = `${this.baseUrl}/search?${params.toString()}`;
-      const response = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+      const response = await fetch(`${API_BASE}/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       
       if (!response.ok) return null;
       

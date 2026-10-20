@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Users, UserPlus, Music, Activity, MessageSquare, ArrowRight, Clock, Check, UserX, Search as SearchIcon, Radio, ArrowLeft, Send, MailPlus } from 'lucide-react';
 import { useFileUrl } from '../hooks/useFileUrl';
+import { API_BASE } from '../utils/api';
 
 interface Friend {
   id: string;
@@ -92,9 +93,9 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     if (!token) return;
     try {
       const [friendsRes, activityRes, requestsRes] = await Promise.all([
-        fetch('/api/social/friends', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/social/activity', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/social/requests', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/social/friends`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/social/activity`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/social/requests`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
       const friendsData = await friendsRes.json();
@@ -143,7 +144,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     setChatMessages([]);
     setChatLoading(true);
     try {
-      const res = await fetch(`/api/social/chat/${friend.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/social/chat/${friend.id}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setChatMessages(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -158,7 +159,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     if (!text || !activeChat) return;
     setChatInput('');
     try {
-      const res = await fetch('/api/social/chat', {
+      const res = await fetch(`${API_BASE}/api/social/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ receiverId: activeChat.id, message: text }),
@@ -184,7 +185,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/social/search?q=${encodeURIComponent(q)}`, {
+        const res = await fetch(`${API_BASE}/api/social/search?q=${encodeURIComponent(q)}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
@@ -205,7 +206,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
   const sendFriendRequest = async (friendId: string) => {
     setSendingTo(friendId);
     try {
-      await fetch('/api/social/friend-request', {
+      await fetch(`${API_BASE}/api/social/friend-request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ friendId })
@@ -235,7 +236,7 @@ export const SocialOverlay: React.FC<SocialOverlayProps> = ({ onClose, user, tok
     // Se quita de la lista al momento, sin esperar a la respuesta del servidor.
     setRequests(prev => prev.filter(r => r.id !== friendId));
     try {
-      await fetch('/api/social/friend-request/respond', {
+      await fetch(`${API_BASE}/api/social/friend-request/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ friendId, accept })

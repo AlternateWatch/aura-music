@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Upload as UploadIcon, FileText, CheckCircle2, AlertCircle, Loader2, Music, ArrowRight } from 'lucide-react';
+import { API_BASE } from '../utils/api';
 
 interface ImportedTrack {
   title: string;
@@ -80,7 +81,7 @@ export const PlaylistImportOverlay: React.FC<PlaylistImportOverlayProps> = ({ on
       formData.append('audio', file);
 
       try {
-        const res = await fetch('/api/tracks', {
+        const res = await fetch(`${API_BASE}/api/tracks`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
@@ -107,7 +108,7 @@ export const PlaylistImportOverlay: React.FC<PlaylistImportOverlayProps> = ({ on
   const finalizeImport = async () => {
     setIsFinalizing(true);
     try {
-      const res = await fetch('/api/playlists', {
+      const res = await fetch(`${API_BASE}/api/playlists`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

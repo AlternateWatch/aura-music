@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../utils/api';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -19,7 +20,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => 
     e.preventDefault();
     setError('');
     
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    const endpoint = isLogin ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/register`;
     const body = isLogin ? { email, password } : { username, email, password };
 
     try {

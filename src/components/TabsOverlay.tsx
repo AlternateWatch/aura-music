@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { X, Guitar, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
 import { type Song } from '../constants';
+import { API_BASE, DEFAULT_COVER } from '../utils/api';
 
 interface TabsOverlayProps {
   song: Song | null;
@@ -45,7 +46,7 @@ export const TabsOverlay: React.FC<TabsOverlayProps> = ({ song, onClose }) => {
       const cleanedArtist = cleanString(song.artist).toLowerCase();
       
       try {
-        const response = await fetch(`/api/proxy/tabs?pattern=${encodeURIComponent(cleanedTitle)}`);
+        const response = await fetch(`${API_BASE}/api/proxy/tabs?pattern=${encodeURIComponent(cleanedTitle)}`);
         const results = await response.json();
 
         if (results && results.length > 0) {
@@ -110,10 +111,10 @@ export const TabsOverlay: React.FC<TabsOverlayProps> = ({ song, onClose }) => {
             <div className="relative z-10">
                 <div className="w-24 h-24 mx-auto mb-8 rounded-3xl overflow-hidden shadow-2xl border border-white/10">
                     <img
-                      src={song.coverUrl || '/uploads/default-cover.jpg'}
+                      src={song.coverUrl || DEFAULT_COVER}
                       onError={(e) => {
                         if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                          e.currentTarget.src = '/uploads/default-cover.jpg';
+                          e.currentTarget.src = DEFAULT_COVER;
                         }
                       }}
                       className="w-full h-full object-cover"

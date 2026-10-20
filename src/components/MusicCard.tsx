@@ -15,6 +15,7 @@ import {
   downloadSongToDisk,
 } from '../utils/offlineDb';
 import { useFileUrl } from '../hooks/useFileUrl';
+import { DEFAULT_COVER } from '../utils/api';
 
 interface MusicCardProps {
   song: Song;
@@ -170,14 +171,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 cursor-pointer shrink-0 bg-white/5">
         <img
-          src={resolvedCoverUrl || song.coverUrl || '/uploads/default-cover.jpg'}
+          src={resolvedCoverUrl || song.coverUrl || DEFAULT_COVER}
           className={`w-full h-full object-cover transition-transform duration-700 ${isActive && isPlaying ? 'scale-110' : 'md:group-hover:scale-105'} ${coverLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
           alt={song.title}
           draggable={false}
           onLoad={() => setCoverLoaded(true)}
           onError={(e) => {
             if (!e.currentTarget.src.includes('default-cover.jpg')) {
-              e.currentTarget.src = '/uploads/default-cover.jpg';
+              e.currentTarget.src = DEFAULT_COVER;
             } else {
               setCoverLoaded(true);
             }

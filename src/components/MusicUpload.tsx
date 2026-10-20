@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { API_BASE } from '../utils/api';
 import {
   X, Upload as UploadIcon, Music, Image as ImageIcon,
   CheckCircle2, AlertCircle, Loader2, Disc, Search,
@@ -155,7 +156,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
-      const response = await fetch('/api/tracks', {
+      const response = await fetch(`${API_BASE}/api/tracks`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` },
         body: formData,
@@ -362,7 +363,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       const timeoutId = setTimeout(() => controller.abort(), 45000);
 
       try {
-        const response = await fetch('/api/tracks', {
+        const response = await fetch(`${API_BASE}/api/tracks`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` },
           body: formData,
@@ -390,7 +391,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
           setError(`${failMsg} Limpiando y cancelando las ${uploadedTrackIds.length} pistas anteriores...`);
           for (const id of uploadedTrackIds) {
             try {
-              await fetch(`/api/tracks/${id}`, {
+              await fetch(`${API_BASE}/api/tracks/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` }
               });

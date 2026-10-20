@@ -3,6 +3,7 @@ import { useAudioPlaybackTime } from '../hooks/useAudioEngine';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Music2, Loader2 } from 'lucide-react';
 import { type Song } from '../constants';
+import { DEFAULT_COVER } from '../utils/api';
 
 interface LyricsOverlayProps {
   isOpen: boolean;
@@ -127,10 +128,10 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       <div className="h-24 flex items-center justify-between px-10 shrink-0 border-b border-white/5">
         <div className="flex items-center gap-6">
           <img 
-            src={currentSong?.coverUrl || '/uploads/default-cover.jpg'} 
+            src={currentSong?.coverUrl || DEFAULT_COVER} 
             onError={(e) => {
               if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                e.currentTarget.src = '/uploads/default-cover.jpg';
+                e.currentTarget.src = DEFAULT_COVER;
               }
             }}
             className="w-12 h-12 rounded-lg shadow-2xl border border-white/10" 

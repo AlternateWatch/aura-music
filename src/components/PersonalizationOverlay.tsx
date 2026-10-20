@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Palette, Check, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { THEMES, type Theme } from '../constants/themes';
+import { API_BASE } from '../utils/api';
 
 // Re-exportados para no romper a nadie que ya los importe desde aquí.
 export { THEMES, type Theme };
@@ -27,7 +28,7 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
     const formData = new FormData();
     formData.append('custom_bg', file);
     try {
-      const res = await fetch('/api/users/custom-bg', {
+      const res = await fetch(`${API_BASE}/api/users/custom-bg`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData

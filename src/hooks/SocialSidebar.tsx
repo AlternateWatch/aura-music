@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { X, Search, Activity, UserPlus, Check, MessageCircle, UserMinus, ArrowLeft, Send, MailPlus, Users } from "lucide-react";
+import { API_BASE, resolveApiUrl } from '../utils/api';
 
 export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSenders, currentSession, onClose }: any) {
     const [search, setSearch] = useState("");
@@ -15,7 +16,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
 
     const loadSocial = async () => {
         try {
-            const res = await fetch('/api/social/friends', { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch(`${API_BASE}/api/social/friends`, { headers: { 'Authorization': `Bearer ${token}` } });
             const data = await res.json();
             if (res.ok) { setFriends(data.friends || []); setPending(data.pending || []); }
         } catch (e) { console.error("Social load failed", e); }
@@ -24,7 +25,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
     const fetchSearch = async (q: string) => {
         setIsSearching(true);
         try {
-            const res = await fetch(`/api/social/search?q=${q}`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await fetch(`${API_BASE}/api/social/search?q=${q}`, { headers: { 'Authorization': `Bearer ${token}` } });
             const data = await res.json();
             setResults(data || []);
         } catch(e) {}
@@ -46,13 +47,13 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
     const openChat = async (f: any) => {
         setActiveChat(f);
         setUnreadSenders((p: string[]) => p.filter(id => id !== String(f.id)));
-        const res = await fetch(`/api/social/chat/${f.id}`, { headers: { 'Authorization': `Bearer ${token}` } });
+        const res = await fetch(`${API_BASE}/api/social/chat/${f.id}`, { headers: { 'Authorization': `Bearer ${token}` } });
         setMessages(await res.json());
     };
 
     const sendMessage = async () => {
         if (!chatInput.trim() || !activeChat) return;
-        const res = await fetch('/api/social/chat', { method: "POST", headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ receiverId: activeChat.id, message: chatInput }) });
+        const res = await fetch(`${API_BASE}/api/social/chat`, { method: "POST", headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ receiverId: activeChat.id, message: chatInput }) });
         const msg = await res.json();
         setMessages(p => [...p, msg]);
         socket?.emit('send-private-message', { sender: user, receiverId: activeChat.id, message: chatInput });
@@ -83,7 +84,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
                                 {results.map(r => (
                                     <div key={r.id} className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
                                         <span className="text-xs font-bold">{r.username}</span>
-                                        <button onClick={async () => { await fetch('/api/social/request', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ receiverId: r.id }) }); alert("Sent"); fetchSearch(search); }} className="text-brand-primary hover:scale-110 transition-transform"><UserPlus size={16}/></button>
+                                        <button onClick={async () => { await fetch(`${API_BASE}/api/social/request`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ receiverId: r.id }) }); alert("Sent"); fetchSearch(search); }} className="text-brand-primary hover:scale-110 transition-transform"><UserPlus size={16}/></button>
                                     </div>
                                 ))}
                             </div>
@@ -96,7 +97,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
                             {pending.map(p => (
                                 <div key={p.id} className="bg-amber-500/10 p-3 rounded-xl flex justify-between border border-amber-500/20 items-center">
                                     <span className="text-xs font-bold">{p.username}</span>
-                                    <button onClick={async () => { await fetch('/api/social/accept', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ senderId: p.id }) }); loadSocial(); }} className="text-green-500 bg-white/5 p-1 rounded-lg"><Check size={16}/></button>
+                                    <button onClick={async () => { await fetch(`${API_BASE}/api/social/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ senderId: p.id }) }); loadSocial(); }} className="text-green-500 bg-white/5 p-1 rounded-lg"><Check size={16}/></button>
                                 </div>
                             ))}
                         </div>
@@ -108,7 +109,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
                             <div key={f.id} className="flex items-center justify-between group bg-white/[0.02] p-3 rounded-xl hover:bg-white/[0.04] transition-all relative">
                                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => openChat(f)}>
                                     <div className="w-8 h-8 rounded-full overflow-hidden bg-white/10 relative shrink-0">
-                                        {f.profile_pic_path ? <img src={f.profile_pic_path} className="w-full h-full object-cover"/> : <Users size={12} className="m-auto mt-2 opacity-20"/>}
+                                        {f.profile_pic_path ? <img src={resolveApiUrl(f.profile_pic_path)} className="w-full h-full object-cover"/> : <Users size={12} className="m-auto mt-2 opacity-20"/>}
                                         {unreadSenders.includes(String(f.id)) && <div className="absolute inset-0 bg-red-500/40 animate-pulse"/>}
                                     </div>
                                     <span className={`text-xs font-bold truncate ${unreadSenders.includes(String(f.id)) ? 'text-red-400 animate-pulse' : 'text-white/80'}`}>{f.username}</span>
@@ -116,7 +117,7 @@ export function SocialSidebar({ token, user, socket, unreadSenders, setUnreadSen
                                 <div className="flex gap-2 shrink-0">
                                     {currentSession && <button title="Invite" onClick={() => socket?.emit('send-session-invite', { senderName: user.username, receiverId: f.id, code: currentSession })} className="p-1.5 bg-brand-primary/10 rounded-full text-brand-primary"><MailPlus size={14}/></button>}
                                     <button onClick={() => openChat(f)} className="p-1.5 bg-white/5 rounded-full relative"><MessageCircle size={14}/>{unreadSenders.includes(String(f.id)) && <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-black" />}</button>
-                                    <button title="Remove" onClick={async () => { if(confirm("Remove?")) { await fetch(`/api/social/friend/${f.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); loadSocial(); } }} className="opacity-0 group-hover:opacity-100 text-red-500/50 hover:text-red-500 transition-all"><UserMinus size={14}/></button>
+                                    <button title="Remove" onClick={async () => { if(confirm("Remove?")) { await fetch(`${API_BASE}/api/social/friend/${f.id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); loadSocial(); } }} className="opacity-0 group-hover:opacity-100 text-red-500/50 hover:text-red-500 transition-all"><UserMinus size={14}/></button>
                                 </div>
                             </div>
                         )) : (
