@@ -96,14 +96,33 @@ export const cacheTop100Tracks = async (
             }
         }
 
-        // Limpiar del disco canciones viejas que hayan salido del Top 100
-        // (así el disco del VPS nunca supera ~800MB - 1GB)
+        // Limpiar del disco canciones y portadas viejas que hayan salido del Top 100
+        // (manteniendo el disco del servidor con lo mínimo estricto)
         try {
+            // Proteger avatares y fondos de usuarios activos
+            const [userMediaRows]: any = await pool.execute(`
+                SELECT profile_pic_path, custom_bg_path FROM users
+                WHERE profile_pic_path IS NOT NULL OR custom_bg_path IS NOT NULL
+            `).catch(() => [[]]);
+
+            const protectedFiles = new Set<string>(topFilenames);
+            if (Array.isArray(userMediaRows)) {
+                for (const u of userMediaRows) {
+                    if (u.profile_pic_path) protectedFiles.add(path.basename(u.profile_pic_path.split('?')[0]));
+                    if (u.custom_bg_path) protectedFiles.add(path.basename(u.custom_bg_path.split('?')[0]));
+                }
+            }
+
             const diskFiles = fs.readdirSync(uploadDir);
             for (const file of diskFiles) {
-                // Solo limpiar archivos de audio que no pertenezcan al Top 100 actual
+                if (file === '.' || file === '..' || file === 'thumbs') continue;
+                if (/^default[-_\s]?cover\./i.test(file)) continue;
+
                 const isAudio = /\.(mp3|flac|m4a|wav|ogg|aac)$/i.test(file);
-                if (isAudio && !topFilenames.has(file)) {
+                const isImage = /\.(jpe?g|png|webp|gif)$/i.test(file);
+
+                // Si es un audio o portada que ya no está en el Top 100 ni en archivos protegidos, purgar del disco
+                if ((isAudio || isImage) && !protectedFiles.has(file)) {
                     const filePath = path.join(uploadDir, file);
                     try {
                         fs.unlinkSync(filePath);
@@ -112,7 +131,7 @@ export const cacheTop100Tracks = async (
                 }
             }
         } catch (cleanupErr: any) {
-            console.warn('[CacheService] Aviso al limpiar canciones antiguas:', cleanupErr.message);
+            console.warn('[CacheService] Aviso al limpiar archivos antiguos:', cleanupErr.message);
         }
 
         stats.durationMs = Date.now() - startTime;
