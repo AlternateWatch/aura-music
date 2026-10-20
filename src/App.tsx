@@ -1887,93 +1887,6 @@ useEffect(() => {
   };
   handleSongEndedRef.current = handleSongEnded;
 
-  const getNextTrackInfo = useCallback((): { song: Song; resolveUrl: () => Promise<string | undefined> } | null => {
-    if (socketObj.isLoop) return null;
-    const pool = socketObj.isShuffle
-      ? socketObj.shuffledQueue
-      : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
-    if (pool.length === 0 || !currentSong) return null;
-
-    const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
-    const isAutoplay = audioSettings.autoplay?.enabled ?? true;
-    const isAtEnd = currentIndex >= pool.length - 1;
-
-    if (isAtEnd) {
-      if (isAutoplay) {
-        const radioTracks = generateRadioTracks(currentSong, pool);
-        if (radioTracks.length > 0) {
-          const nextSong = radioTracks[0];
-          return {
-            song: nextSong,
-            resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
-          };
-        }
-      }
-      if (playbackContext === 'playlist') return null;
-    }
-
-    const nextSong = currentIndex === -1 ? pool[0] : pool[(currentIndex + 1) % pool.length];
-    if (!nextSong || nextSong.id === currentSong.id) return null;
-
-    return {
-      song: nextSong,
-      resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
-    };
-  }, [socketObj.isShuffle, socketObj.shuffledQueue, socketObj.isLoop, activeQueue, getFlattenedSongs, currentSong, audioSettings.autoplay?.enabled, generateRadioTracks, playbackContext]);
-
-  getNextTrackInfoRef.current = getNextTrackInfo;
-
-  const handleGaplessNext = useCallback((nextSong: Song) => {
-    if (!nextSong) return;
-    if (socketObj.isLoop) return;
-    if (socketObj.currentSession && !socketObj.isLeader()) return;
-
-    setCurrentSong(nextSong);
-    setIsPlaying(true);
-    socketObj.setTrackId(nextSong.id);
-
-    try {
-      localStorage.setItem('aura_last_song', JSON.stringify(nextSong));
-    } catch (e) {}
-
-    setRecentlyPlayed(prev => {
-      const nextRecent = [nextSong, ...prev.filter(s => s.id !== nextSong.id)].slice(0, 4);
-      try {
-        localStorage.setItem('aura_recent', JSON.stringify(nextRecent));
-      } catch (e) {}
-      return nextRecent;
-    });
-
-    setManualQueueIds(prev => prev.filter(id => id !== nextSong.id));
-    setRadioQueueIds(prev => {
-      if (!prev.has(nextSong.id)) return prev;
-      const next = new Set(prev);
-      next.delete(nextSong.id);
-      return next;
-    });
-
-    const activeToken = token || localStorage.getItem('aura_token');
-    if (activeToken) {
-      fetch(`${API_BASE}/api/users/me/last-track`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
-        },
-        body: JSON.stringify({ trackId: nextSong.id })
-      }).catch(error => console.error("ERROR GUARDANDO LAST TRACK EN SERVIDOR:", error));
-    }
-
-    socketObj.emitCommand('play-track', {
-      id: nextSong.id,
-      song: nextSong,
-      queue: activeQueue,
-      position: 0
-    });
-  }, [socketObj, token, activeQueue]);
-
-  handleGaplessNextRef.current = handleGaplessNext;
-
   audioObj.onCrossfadeNextRef.current = (commitCrossfade: () => void) => {
     if (isMinigameActive || socketObj.isLoop) return;
     if (socketObj.currentSession && !socketObj.isLeader()) return;
@@ -2576,6 +2489,93 @@ useEffect(() => {
     if (socketObj.isShuffle) return socketObj.shuffledQueue;
     return activeQueue.length > 0 ? activeQueue : flattenedSongs;
   };
+
+  const getNextTrackInfo = useCallback((): { song: Song; resolveUrl: () => Promise<string | undefined> } | null => {
+    if (socketObj.isLoop) return null;
+    const pool = socketObj.isShuffle
+      ? socketObj.shuffledQueue
+      : (activeQueue.length > 0 ? activeQueue : flattenedSongs);
+    if (pool.length === 0 || !currentSong) return null;
+
+    const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
+    const isAutoplay = audioSettings.autoplay?.enabled ?? true;
+    const isAtEnd = currentIndex >= pool.length - 1;
+
+    if (isAtEnd) {
+      if (isAutoplay) {
+        const radioTracks = generateRadioTracks(currentSong, pool);
+        if (radioTracks.length > 0) {
+          const nextSong = radioTracks[0];
+          return {
+            song: nextSong,
+            resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
+          };
+        }
+      }
+      if (playbackContext === 'playlist') return null;
+    }
+
+    const nextSong = currentIndex === -1 ? pool[0] : pool[(currentIndex + 1) % pool.length];
+    if (!nextSong || nextSong.id === currentSong.id) return null;
+
+    return {
+      song: nextSong,
+      resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
+    };
+  }, [socketObj.isShuffle, socketObj.shuffledQueue, socketObj.isLoop, activeQueue, flattenedSongs, currentSong, audioSettings.autoplay?.enabled, generateRadioTracks, playbackContext]);
+
+  getNextTrackInfoRef.current = getNextTrackInfo;
+
+  const handleGaplessNext = useCallback((nextSong: Song) => {
+    if (!nextSong) return;
+    if (socketObj.isLoop) return;
+    if (socketObj.currentSession && !socketObj.isLeader()) return;
+
+    setCurrentSong(nextSong);
+    setIsPlaying(true);
+    socketObj.setTrackId(nextSong.id);
+
+    try {
+      localStorage.setItem('aura_last_song', JSON.stringify(nextSong));
+    } catch (e) {}
+
+    setRecentlyPlayed(prev => {
+      const nextRecent = [nextSong, ...prev.filter(s => s.id !== nextSong.id)].slice(0, 4);
+      try {
+        localStorage.setItem('aura_recent', JSON.stringify(nextRecent));
+      } catch (e) {}
+      return nextRecent;
+    });
+
+    setManualQueueIds(prev => prev.filter(id => id !== nextSong.id));
+    setRadioQueueIds(prev => {
+      if (!prev.has(nextSong.id)) return prev;
+      const next = new Set(prev);
+      next.delete(nextSong.id);
+      return next;
+    });
+
+    const activeToken = token || localStorage.getItem('aura_token');
+    if (activeToken) {
+      fetch(`${API_BASE}/api/users/me/last-track`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${activeToken}`
+        },
+        body: JSON.stringify({ trackId: nextSong.id })
+      }).catch(error => console.error("ERROR GUARDANDO LAST TRACK EN SERVIDOR:", error));
+    }
+
+    socketObj.emitCommand('play-track', {
+      id: nextSong.id,
+      song: nextSong,
+      queue: activeQueue,
+      position: 0
+    });
+  }, [socketObj, token, activeQueue]);
+
+  handleGaplessNextRef.current = handleGaplessNext;
 
   const currentThemeConfig = THEMES.find(t => t.id === activeTheme) || THEMES[0];
   const getThemeBg = () => activeTheme === 'light' ? '#ffffff' : '#050505';
