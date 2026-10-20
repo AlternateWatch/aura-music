@@ -462,6 +462,10 @@ useEffect(() => {
   const handlePlaySongRef = useRef<any>(null);
   const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
   const resolvedAnimatedCoverUrl = useFileUrl((currentSong as any)?.animated_cover_path || (currentSong as any)?.animatedCoverUrl);
+  const [tvVideoError, setTvVideoError] = useState(false);
+  useEffect(() => {
+    setTvVideoError(false);
+  }, [currentSong?.id, resolvedAnimatedCoverUrl]);
   const resolvedAudioUrl = useFileUrl(currentSong?.audioUrl);
   const resolvedCustomBg = useFileUrl(customBg);
   const resolvedProfilePic = useFileUrl(user?.profile_pic_path);
@@ -2253,7 +2257,7 @@ useEffect(() => {
       item.tracks.push(s);
       item.trackCount++;
       if (s.format) item.formats.add(s.format.toUpperCase());
-      if ((!item.coverUrl || item.coverUrl.includes('default-cover')) && s.coverUrl) {
+      if ((!item.coverUrl || item.coverUrl.includes('default-cover') || item.coverUrl.includes('default_cover')) && s.coverUrl) {
         item.coverUrl = s.coverUrl;
       }
     });
@@ -3862,7 +3866,7 @@ transition={{
                           </div>
                       </div>
                     )}
-                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform bg-white/5"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl || DEFAULT_COVER} onError={(e) => { if (!e.currentTarget.src.includes('default-cover.jpg')) { e.currentTarget.src = DEFAULT_COVER; } }} className="w-full h-full object-cover" alt={song.title} /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
+                    <div><h3 className="text-[10px] uppercase font-bold text-white/30 mb-6 tracking-widest flex items-center gap-2"><Clock size={12}/> History</h3><div className="space-y-4">{recentlyPlayed.map((song) => (<div key={song.id} className="flex items-center gap-4 group cursor-pointer" onClick={() => { if(isMinigameActive) handleMinigameGuess(song); else handlePlaySong(song); }}><div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10 group-hover:scale-105 transition-transform bg-white/5"><img src={getCachedOfflineBlobUrl(song.coverUrl) || song.coverUrl || DEFAULT_COVER} onError={(e) => { if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) { e.currentTarget.src = DEFAULT_COVER; } }} className="w-full h-full object-cover" alt={song.title} /></div><div className="overflow-hidden"><p className="text-[11px] font-bold tabular-nums truncate text-white">{song.title}</p></div></div>))}</div></div>
                 </div>
                 <div className="mt-auto pt-6">
                   <div onClick={() => setIsPersonalizationOpen(true)} className="p-5 rounded-[28px] border border-white/5 bg-white/5 cursor-pointer flex items-center gap-4 hover:bg-white/[0.08] transition-all">
@@ -3893,10 +3897,10 @@ transition={{
                   <div className="relative group/avatar w-36 h-36 md:w-48 md:h-48 rounded-full overflow-hidden shrink-0 border-2 border-brand-primary/40 shadow-[0_0_50px_rgba(99,102,241,0.2)] bg-white/5">
                     <img 
                       key={selectedArtistName}
-                      src={resolvedArtistImageUrl || getCachedOfflineBlobUrl(flattenedSongs[0]?.coverUrl) || flattenedSongs[0]?.coverUrl || '/default-cover.jpg'} 
+                      src={resolvedArtistImageUrl || getCachedOfflineBlobUrl(flattenedSongs[0]?.coverUrl) || flattenedSongs[0]?.coverUrl || DEFAULT_COVER} 
                       onError={(e) => {
-                        if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                          e.currentTarget.src = '/default-cover.jpg';
+                        if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                          e.currentTarget.src = DEFAULT_COVER;
                         }
                       }}
                       alt={selectedArtistName} 
@@ -4007,10 +4011,10 @@ transition={{
                         >
                           <div className="aspect-square rounded-2xl overflow-hidden mb-3 bg-white/5">
                             <img
-                              src={getCachedOfflineBlobUrl(alb.coverUrl) || alb.coverUrl || '/default-cover.jpg'}
+                              src={getCachedOfflineBlobUrl(alb.coverUrl) || alb.coverUrl || DEFAULT_COVER}
                               onError={(e) => {
-                                if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                  e.currentTarget.src = '/default-cover.jpg';
+                                if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                                  e.currentTarget.src = DEFAULT_COVER;
                                 }
                               }}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform"
@@ -4338,7 +4342,7 @@ transition={{
                                 srcSet={getResponsiveCoverSrcSet(alb.coverUrl)}
                                 sizes="(max-width: 640px) 48vw, (max-width: 1024px) 25vw, (max-width: 1536px) 20vw, 16vw"
                                 onError={(e) => {
-                                  if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                  if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                     e.currentTarget.src = DEFAULT_COVER;
                                   }
                                 }}
@@ -4403,7 +4407,7 @@ transition={{
                                 srcSet={getResponsiveCoverSrcSet(art.coverUrl)}
                                 sizes="(max-width: 640px) 100px, (max-width: 1024px) 120px, 150px"
                                 onError={(e) => {
-                                  if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                                  if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                     e.currentTarget.src = DEFAULT_COVER;
                                   }
                                 }}
@@ -4492,10 +4496,10 @@ transition={{
                                     >
                                       <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
                                         <img 
-                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || '/default-cover.jpg'} 
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || DEFAULT_COVER} 
                                           onError={(e) => {
-                                            if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                              e.currentTarget.src = '/default-cover.jpg';
+                                            if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                                              e.currentTarget.src = DEFAULT_COVER;
                                             }
                                           }}
                                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 pointer-events-none" 
@@ -4523,10 +4527,10 @@ transition={{
                                     <div onClick={() => setSelectedAlbumName(item.title)} className="min-w-0 overflow-hidden w-full group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
                                         <img
-                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || '/default-cover.jpg'}
+                                          src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || DEFAULT_COVER}
                                           onError={(e) => {
-                                            if (!e.currentTarget.src.includes('default-cover.jpg')) {
-                                              e.currentTarget.src = '/default-cover.jpg';
+                                            if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                                              e.currentTarget.src = DEFAULT_COVER;
                                             }
                                           }}
                                           className="w-full h-full object-cover transition-transform duration-700"
@@ -4617,7 +4621,7 @@ transition={{
                   <div className="relative group">
                     <div className="absolute -inset-20 blur-[120px] rounded-full animate-pulse transition-all duration-1000" style={{ backgroundColor: `${dynamicColor}33` }} />
                     <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] rounded-[60px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 bg-black">
-                      {resolvedAnimatedCoverUrl ? (
+                      {resolvedAnimatedCoverUrl && !tvVideoError ? (
                         isVideoUrl(resolvedAnimatedCoverUrl) ? (
                           <video
                             src={resolvedAnimatedCoverUrl}
@@ -4625,13 +4629,32 @@ transition={{
                             loop
                             muted
                             playsInline
+                            onError={() => setTvVideoError(true)}
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <img src={resolvedAnimatedCoverUrl} className="w-full h-full object-cover" alt="" />
+                          <img
+                            src={resolvedAnimatedCoverUrl}
+                            onError={(e) => {
+                              if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                                e.currentTarget.src = DEFAULT_COVER;
+                              }
+                            }}
+                            className="w-full h-full object-cover"
+                            alt=""
+                          />
                         )
                       ) : (
-                        <img src={resolvedCoverUrl || undefined} className="w-full h-full object-cover" alt="" />
+                        <img
+                          src={resolvedCoverUrl || DEFAULT_COVER}
+                          onError={(e) => {
+                            if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                              e.currentTarget.src = DEFAULT_COVER;
+                            }
+                          }}
+                          className="w-full h-full object-cover"
+                          alt=""
+                        />
                       )}
                     </div>
                   </div>

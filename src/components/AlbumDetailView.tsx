@@ -198,7 +198,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
 
   // Portada representativa del álbum
   const coverUrlCandidate = React.useMemo(() => {
-    const trackWithCover = sortedTracks.find(t => t.coverUrl && !t.coverUrl.includes('default-cover'));
+    const trackWithCover = sortedTracks.find(t => t.coverUrl && !t.coverUrl.includes('default-cover') && !t.coverUrl.includes('default_cover'));
     return trackWithCover?.coverUrl || sortedTracks[0]?.coverUrl || DEFAULT_COVER;
   }, [sortedTracks]);
 
@@ -256,8 +256,9 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
             sizes="(max-width: 640px) 176px, (max-width: 768px) 224px, 256px"
             alt={albumName}
             onError={(e) => {
-              if (!e.currentTarget.src.includes('default-cover.jpg')) {
+              if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                 e.currentTarget.src = DEFAULT_COVER;
+                e.currentTarget.removeAttribute('srcset');
               }
             }}
             className="w-full h-full object-cover"
@@ -664,6 +665,11 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                     <img
                       src={resolvedCover || DEFAULT_COVER}
                       alt={activeTrack.title}
+                      onError={(e) => {
+                        if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                          e.currentTarget.src = DEFAULT_COVER;
+                        }
+                      }}
                       className="w-11 h-11 rounded-xl object-cover bg-white/5 border border-white/10 shrink-0"
                     />
                     <div className="min-w-0 flex-1">

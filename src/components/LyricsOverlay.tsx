@@ -130,7 +130,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           <img 
             src={currentSong?.coverUrl || DEFAULT_COVER} 
             onError={(e) => {
-              if (!e.currentTarget.src.includes('default-cover.jpg')) {
+              if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                 e.currentTarget.src = DEFAULT_COVER;
               }
             }}

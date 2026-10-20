@@ -328,7 +328,7 @@ export function AuraDjOverlay({
                       alt={track.title}
                       className="w-10 h-10 rounded-lg object-cover bg-white/5 shrink-0"
                       onError={(e) => {
-                        if (!e.currentTarget.src.includes('default-cover')) {
+                        if (!e.currentTarget.src.includes('default_cover') && !e.currentTarget.src.includes('default-cover')) {
                           e.currentTarget.src = DEFAULT_COVER;
                         }
                       }}

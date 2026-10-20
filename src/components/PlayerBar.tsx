@@ -235,7 +235,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 className="w-full h-full object-cover"
                 alt={currentSong.title}
                 onError={(e) => {
-                  if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                  if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                     e.currentTarget.src = DEFAULT_COVER;
                     e.currentTarget.removeAttribute('srcset');
                   }
@@ -330,7 +330,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
               className="w-full h-full object-cover"
               alt={currentSong.title}
               onError={(e) => {
-                if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                   e.currentTarget.src = DEFAULT_COVER;
                   e.currentTarget.removeAttribute('srcset');
                 }

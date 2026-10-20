@@ -88,7 +88,7 @@ const QueueItem: React.FC<QueueItemProps> = ({ song, idx, total, isRadio, onPlay
           loading="lazy"
           decoding="async"
           onError={(e) => {
-            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+            if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
               e.currentTarget.src = DEFAULT_COVER;
             }
           }}
@@ -203,7 +203,7 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
                 <img
                   src={currentSong.coverUrl || DEFAULT_COVER}
                   onError={(e) => {
-                    if (!e.currentTarget.src.includes('default-cover.jpg')) {
+                    if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                       e.currentTarget.src = DEFAULT_COVER;
                     }
                   }}

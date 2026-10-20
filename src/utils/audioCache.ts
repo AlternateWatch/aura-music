@@ -46,6 +46,7 @@ export function registerAudioCacheSW(): Promise<ServiceWorkerRegistration | null
             window.location.href,
             "/",
             "/index.html",
+            "/default_cover.jpg",
             "/default-cover.jpg",
           ]);
           document.querySelectorAll<HTMLScriptElement>("script[src]").forEach((s) => {

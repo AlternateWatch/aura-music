@@ -2417,7 +2417,7 @@ const healTrackCoverToDisk = async (track: any, knownMissingInB2 = false): Promi
 
 // Localiza el archivo default-cover.jpg (o "default cover.jpg") en uploads
 const resolveDefaultCoverDiskPath = (): string | null => {
-    const candidates = ['default-cover.jpg', 'default cover.jpg', 'default_cover.jpg', 'default-cover.png', 'default-cover.webp'];
+    const candidates = ['default_cover.jpg', 'default-cover.jpg', 'default cover.jpg', 'default-cover.png', 'default-cover.webp'];
     const dirs = [
         uploadDir,
         path.join(ROOT_DIR, 'public', 'uploads'),
@@ -2596,13 +2596,25 @@ const healMissingCoversOnStartup = async () => {
 };
 
 // Soportar tanto /default-cover.jpg como /uploads/default-cover.jpg
-app.get(['/default-cover.jpg', '/uploads/default-cover.jpg', '/uploads/default%20cover.jpg'], (req, res, next) => {
+app.get(['/default_cover.jpg', '/default-cover.jpg', '/uploads/default_cover.jpg', '/uploads/default-cover.jpg', '/uploads/default%20cover.jpg'], async (req, res, next) => {
     const fallback = resolveDefaultCoverDiskPath();
     if (fallback && fs.existsSync(fallback)) {
         return res.sendFile(fallback);
     }
+    if (isB2Configured()) {
+        try {
+            const b2Obj = await getB2ObjectStream('default_cover.jpg');
+            if (b2Obj?.stream) {
+                res.setHeader('Content-Type', b2Obj.contentType || 'image/jpeg');
+                res.setHeader('Cache-Control', 'public, max-age=86400');
+                return b2Obj.stream.pipe(res);
+            }
+        } catch {}
+    }
     next();
 });
+
+
 
 // Endpoint de miniaturas responsivas para portadas:
 // Intercepta peticiones /uploads/:filename?w=... antes de que express.static devuelva el archivo original gigante.
@@ -2813,6 +2825,16 @@ app.use('/uploads', async (req, res) => {
         if (defaultCover && fs.existsSync(defaultCover)) {
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
             return res.sendFile(defaultCover);
+        }
+        if (isB2Configured()) {
+            try {
+                const b2Obj = await getB2ObjectStream('default_cover.jpg');
+                if (b2Obj?.stream) {
+                    res.setHeader('Content-Type', b2Obj.contentType || 'image/jpeg');
+                    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+                    return b2Obj.stream.pipe(res);
+                }
+            } catch {}
         }
     }
 

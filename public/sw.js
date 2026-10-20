@@ -25,6 +25,7 @@ const MAX_CACHED_TRACKS = 30;
 const CORE_SHELL_URLS = [
   "/",
   "/index.html",
+  "/default_cover.jpg",
   "/default-cover.jpg",
   "/manifest.json",
 ];

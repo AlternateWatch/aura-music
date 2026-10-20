@@ -3,7 +3,7 @@
 // apuntaría a la propia app en vez de al servidor. Usa siempre estas utilidades.
 export const API_BASE = "https://aura.basildo.me";
 
-export const DEFAULT_COVER = `${API_BASE}/uploads/default-cover.jpg`;
+export const DEFAULT_COVER = `${API_BASE}/uploads/default_cover.jpg`;
 
 /** Convierte una ruta relativa del backend (/uploads/x.jpg) en URL absoluta. */
 export const resolveApiUrl = (p?: string | null): string | undefined =>

@@ -521,7 +521,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
           draggable={false}
           onLoad={() => setCoverLoaded(true)}
           onError={(e) => {
-            if (!e.currentTarget.src.includes('default-cover.jpg')) {
+            if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
               e.currentTarget.src = DEFAULT_COVER;
               e.currentTarget.removeAttribute('srcset');
             } else {
