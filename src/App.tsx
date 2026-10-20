@@ -2857,7 +2857,7 @@ useEffect(() => {
                       aria-label="Más opciones"
                       className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer outline-none ${
                         isDesktopMenuOpen
-                          ? 'bg-brand-primary text-black shadow-lg scale-105'
+                          ? 'bg-brand-primary text-black shadow-lg font-black'
                           : sleepTimer.isActive
                             ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
                             : activeTheme === 'light'
@@ -3618,7 +3618,7 @@ transition={{
 
        <main
   ref={mainRef}
-  className={`flex-1 min-h-0 overflow-y-auto px-4 md:px-10 ${
+  className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full px-4 md:px-10 ${
     isDesktop 
       ? 'pt-[calc(9rem+env(safe-area-inset-top))]' 
       : Capacitor.isNativePlatform()
@@ -3874,13 +3874,13 @@ transition={{
                                       ? "PENDING QUEUE"
                                       : activePlaylistId === 'all'
                                       ? (
-                                        <span className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-2xl bg-white/5 border border-white/10 shrink-0 normal-case">
+                                        <span className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-2xl bg-white/5 border border-white/10 shrink-0 normal-case max-w-full overflow-x-auto scrollbar-hide">
                                           <button
                                             type="button"
                                             onClick={() => setLibrarySection('songs')}
-                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                            className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold tracking-normal shrink-0 transition-all flex items-center gap-1.5 cursor-pointer ${
                                               librarySection === 'songs'
-                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                ? 'bg-brand-primary text-black shadow-lg font-black'
                                                 : 'text-white/60 hover:text-white hover:bg-white/5'
                                             }`}
                                           >
@@ -3892,9 +3892,9 @@ transition={{
                                           <button
                                             type="button"
                                             onClick={() => setLibrarySection('albums')}
-                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                            className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold tracking-normal shrink-0 transition-all flex items-center gap-1.5 cursor-pointer ${
                                               librarySection === 'albums'
-                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                ? 'bg-brand-primary text-black shadow-lg font-black'
                                                 : 'text-white/60 hover:text-white hover:bg-white/5'
                                             }`}
                                           >
@@ -3906,9 +3906,9 @@ transition={{
                                           <button
                                             type="button"
                                             onClick={() => setLibrarySection('artists')}
-                                            className={`px-3 sm:px-4 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                                            className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold tracking-normal shrink-0 transition-all flex items-center gap-1.5 cursor-pointer ${
                                               librarySection === 'artists'
-                                                ? 'bg-brand-primary text-black shadow-lg scale-105'
+                                                ? 'bg-brand-primary text-black shadow-lg font-black'
                                                 : 'text-white/60 hover:text-white hover:bg-white/5'
                                             }`}
                                           >
@@ -4067,12 +4067,12 @@ transition={{
 
                     {/* RESPONSIVE GRID */}
                     {activePlaylistId === 'all' && librarySection === 'albums' ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-6 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
                         {filteredAlbums.map(alb => (
                           <div
                             key={alb.title}
                             onClick={() => setSelectedAlbumName(alb.title)}
-                            className="group p-3.5 sm:p-4 rounded-[28px] sm:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col justify-between shadow-lg"
+                            className="group p-3 sm:p-4 rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col justify-between shadow-lg min-w-0 overflow-hidden w-full"
                           >
                             <div className="aspect-square rounded-2xl overflow-hidden mb-3 relative bg-white/5 shadow-md">
                               <img
@@ -4126,18 +4126,18 @@ transition={{
                         ))}
                       </div>
                     ) : activePlaylistId === 'all' && librarySection === 'artists' ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-6 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
                         {filteredArtists.map(art => (
                           <div
                             key={art.name}
                             onClick={() => setSelectedArtistName(art.name)}
-                            className="group p-4 rounded-[28px] sm:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col items-center text-center shadow-lg"
+                            className="group p-3 sm:p-4 rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 hover:border-brand-primary/40 transition-all duration-300 flex flex-col items-center text-center shadow-lg min-w-0 overflow-hidden w-full"
                           >
-                            <div className="w-full aspect-square rounded-full overflow-hidden mb-3 relative bg-white/5 shadow-xl border border-white/10">
+                            <div className="w-20 h-20 sm:w-28 sm:h-28 aspect-square rounded-full overflow-hidden mb-2.5 sm:mb-3 relative bg-white/5 shadow-xl border border-white/10 shrink-0 mx-auto">
                               <img
                                 src={getCachedOfflineBlobUrl(art.coverUrl) || art.coverUrl || DEFAULT_COVER}
                                 srcSet={getResponsiveCoverSrcSet(art.coverUrl)}
-                                sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, (max-width: 1536px) 20vw, 16vw"
+                                sizes="(max-width: 640px) 100px, (max-width: 1024px) 120px, 150px"
                                 onError={(e) => {
                                   if (!e.currentTarget.src.includes('default-cover.jpg')) {
                                     e.currentTarget.src = DEFAULT_COVER;
@@ -4149,17 +4149,19 @@ transition={{
                                 alt={art.name}
                               />
                             </div>
-                            <h3 className="text-sm font-bold text-white truncate w-full" title={art.name}>
-                              {art.name}
-                            </h3>
-                            <p className="text-[10px] uppercase font-bold tracking-wider text-brand-primary mt-1">
-                              {art.albumCount} {art.albumCount === 1 ? 'Álbum' : 'Álbumes'} · {art.trackCount} {art.trackCount === 1 ? 'Pista' : 'Pistas'}
-                            </p>
+                            <div className="min-w-0 w-full overflow-hidden space-y-0.5">
+                              <h3 className="text-xs sm:text-sm font-bold text-white truncate w-full block px-1" title={art.name}>
+                                {art.name}
+                              </h3>
+                              <p className="text-[10px] sm:text-[11px] font-semibold text-brand-primary truncate w-full block px-1 tracking-normal" title={`${art.albumCount} álbumes · ${art.trackCount} pistas`}>
+                                {art.albumCount} {art.albumCount === 1 ? 'álbum' : 'álbumes'} · {art.trackCount} {art.trackCount === 1 ? 'pista' : 'pistas'}
+                              </p>
+                            </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8 w-full max-w-full">
                         {displayItems.map((item: any) => (
                             <div
                                 key={item.id}
@@ -4216,7 +4218,7 @@ transition={{
                                 {item.type === 'artist' ? (
                                     <div 
                                       onClick={() => setSelectedArtistName(item.title)} 
-                                      className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-300 flex flex-col justify-between shadow-lg"
+                                      className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all duration-300 flex flex-col justify-between shadow-lg min-w-0 overflow-hidden w-full"
                                     >
                                       <div className="w-full aspect-square rounded-full overflow-hidden mb-4 relative bg-white/5 shadow-2xl border border-white/10">
                                         <img 
@@ -4248,7 +4250,7 @@ transition={{
 
                                 /* 2. TARJETA DE ÁLBUM */
                                 ) : item.type === 'album' ? (
-                                    <div onClick={() => setSelectedAlbumName(item.title)} className="group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
+                                    <div onClick={() => setSelectedAlbumName(item.title)} className="min-w-0 overflow-hidden w-full group p-5 md:p-4 rounded-[32px] md:rounded-3xl cursor-pointer border border-white/5 bg-white/5 hover:bg-white/10 transition-all">
                                       <div className="aspect-square rounded-[24px] md:rounded-2xl overflow-hidden mb-4 relative">
                                         <img
                                           src={getCachedOfflineBlobUrl(item.coverUrl) || item.coverUrl || '/default-cover.jpg'}
@@ -4262,7 +4264,7 @@ transition={{
                                         />
                                       </div>
                                       <h3 className="text-xl md:text-sm font-bold truncate text-white">{item.title}</h3>
-                                      <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40">{item.trackCount} Tracks Found</p>
+                                      <p className="text-sm md:text-[10px] uppercase font-bold tracking-widest text-white/40 truncate">{item.trackCount} Tracks Found</p>
                                     </div>
 
                                 /* 3. TARJETA DE CANCIÓN */
