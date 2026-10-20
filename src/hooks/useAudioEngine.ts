@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "
 import { Song } from "../constants";
 import { AudioSettings } from "../audio/audioSettings";
 import { AudioGraph, IDLE_STATUS, getOrCreateGraph } from "../audio/audioGraph";
+import { playbackPriority } from "../utils/playbackPriority";
 
 export function useAudioPlaybackTime(
   getCurrentTime: () => number,
