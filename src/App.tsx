@@ -3106,18 +3106,18 @@ useEffect(() => {
                       onClick={() => setIsDesktopMenuOpen(prev => !prev)}
                       title={isDesktopMenuOpen ? "Cerrar menú" : "Menú"}
                       aria-label={isDesktopMenuOpen ? "Cerrar menú" : "Menú"}
-                      className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer outline-none ${
+                      className={`relative p-1.5 rounded-xl flex items-center justify-center transition-all cursor-pointer outline-none ${
                         isDesktopMenuOpen
-                          ? 'bg-brand-primary text-black shadow-lg font-black'
+                          ? 'text-brand-primary bg-brand-primary/10'
                           : sleepTimer.isActive
-                            ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                            ? 'text-amber-300 bg-amber-400/10'
                             : activeTheme === 'light'
-                              ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black'
-                              : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                              ? 'text-black/70 hover:text-black hover:bg-black/5'
+                              : 'text-white/70 hover:text-white hover:bg-white/10'
                       }`}
                     >
                       <span className="flex transition-transform duration-150" style={{ transform: isDesktopMenuOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                        {isDesktopMenuOpen ? <X size={18} /> : <Menu size={18} />}
+                        {isDesktopMenuOpen ? <X size={20} /> : <Menu size={20} />}
                       </span>
                       {sleepTimer.isActive && (
                         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
