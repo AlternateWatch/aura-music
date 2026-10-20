@@ -374,7 +374,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
           {sortedTracks.map((track, idx) => {
             const isCurrentTrack = currentSong?.id === track.id;
             const isTrackPlaying = isCurrentTrack && isPlaying;
-            const isLiked = likedIds.includes(track.id);
+            const isLiked = likedIds.some(id => String(id) === String(track.id));
             const isTrackOffline = offlineIds.has(String(track.id));
             const isTrackDownloading = downloadingIds.has(String(track.id));
             const trackNum = track.track_number ?? (idx + 1);
@@ -456,7 +456,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                     type="button"
                     onClick={() => {
                       hapticImpact('light');
-                      onToggleLike(track.id);
+                      onToggleLike(String(track.id));
                     }}
                     className={`p-2 rounded-full transition-colors cursor-pointer ${
                       isLiked ? 'text-red-500' : 'text-white/20 hover:text-white/60'
@@ -493,6 +493,147 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
             const activeTrack = sortedTracks.find(t => t.id === activeMenuSongId);
             if (!activeTrack) return null;
             const isSubmenuOpen = playlistSubmenuSongId === activeTrack.id;
+            const isTrackLiked = likedIds.some(id => String(id) === String(activeTrack.id));
+
+            const renderTrackActions = (isMobile: boolean) => {
+              const itemPadding = isMobile ? 'px-4 py-3 text-sm' : 'px-3 py-2 text-xs';
+              const iconSize = isMobile ? 18 : 14;
+
+              return (
+                <>
+                  {/* Like / Favoritos */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hapticImpact('light');
+                      onToggleLike(String(activeTrack.id));
+                      setActiveMenuSongId(null);
+                      setMenuPlacement(null);
+                    }}
+                    className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <Heart size={iconSize} fill={isTrackLiked ? "currentColor" : "none"} className={isTrackLiked ? "text-red-500" : ""} />
+                    <span>{isTrackLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+                  </button>
+
+                  {/* Reproducir siguiente */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPlayNext(activeTrack);
+                      handleTrackActionFeedback('next', activeTrack.id);
+                      setActiveMenuSongId(null);
+                      setMenuPlacement(null);
+                    }}
+                    className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+                  >
+                    {copiedNotification === activeTrack.id ? <Check size={iconSize} className="text-emerald-400" /> : <ListMusic size={iconSize} />}
+                    <span>Reproducir siguiente</span>
+                  </button>
+
+                  {/* Añadir a la cola */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAddToQueue(activeTrack);
+                      handleTrackActionFeedback('queue', activeTrack.id);
+                      setActiveMenuSongId(null);
+                      setMenuPlacement(null);
+                    }}
+                    className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <ListPlus size={iconSize} />
+                    <span>Añadir a la cola</span>
+                  </button>
+
+                  {/* Ver Tabs / Acordes */}
+                  {activeTrack.tabs_url && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenTabs(activeTrack);
+                        setActiveMenuSongId(null);
+                        setMenuPlacement(null);
+                      }}
+                      className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors cursor-pointer text-left`}
+                    >
+                      <Guitar size={iconSize} />
+                      <span>Ver Acordes / Tabs</span>
+                    </button>
+                  )}
+
+                  {/* Añadir a Playlist */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setPlaylistSubmenuSongId(isSubmenuOpen ? null : activeTrack.id)}
+                      className={`w-full flex items-center justify-between ${itemPadding} rounded-xl font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <ListPlus size={iconSize} />
+                        <span>Añadir a Playlist</span>
+                      </div>
+                      <span className="text-[10px] text-white/40">{isSubmenuOpen ? '▲' : '▼'}</span>
+                    </button>
+
+                    {isSubmenuOpen && (
+                      <div className={`${isMobile ? 'max-h-44' : 'max-h-32'} overflow-y-auto pl-6 pr-2 py-1 space-y-1 bg-black/40 rounded-xl my-1 border border-white/5`}>
+                        {playlists.length > 0 ? (
+                          playlists.map(p => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                onAddToPlaylist(activeTrack.id, p.id.toString());
+                                setActiveMenuSongId(null);
+                                setPlaylistSubmenuSongId(null);
+                                setMenuPlacement(null);
+                              }}
+                              className={`w-full text-left py-1.5 px-2 ${isMobile ? 'text-xs' : 'text-[11px]'} font-medium text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer truncate`}
+                            >
+                              {p.name}
+                            </button>
+                          ))
+                        ) : (
+                          <p className="py-2 text-[10px] text-white/30 text-center">No hay playlists</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Opciones de Moderación / Edición */}
+                  {(userRole === 'admin' || userRole === 'moderator') && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onEditSong(activeTrack);
+                          setActiveMenuSongId(null);
+                          setMenuPlacement(null);
+                        }}
+                        className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left border-t border-white/5 mt-1`}
+                      >
+                        <Edit2 size={iconSize} />
+                        <span>Editar metadatos</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteSong(activeTrack.id);
+                          setActiveMenuSongId(null);
+                          setMenuPlacement(null);
+                        }}
+                        className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer text-left`}
+                      >
+                        <Trash2 size={iconSize} />
+                        <span>Eliminar pista</span>
+                      </button>
+                    </>
+                  )}
+                </>
+              );
+            };
 
             return menuPlacement.isMobile ? (
               <div className="fixed inset-0 z-[600] flex flex-col justify-end">

@@ -1437,12 +1437,45 @@ useEffect(() => {
   };
 
   // --- LIKES ---
-  const handleToggleLike = async (songId: string) => {
+  const handleToggleLike = async (rawSongId: string | number) => {
+    const songId = String(rawSongId);
     const activeToken = token || localStorage.getItem('aura_token');
     if (!activeToken) return setIsAuthModalOpen(true);
-    const res = await fetch(`${API_BASE}/api/tracks/${songId}/like`, { method: 'POST', headers: { 'Authorization': `Bearer ${activeToken}` } });
-    if (res.ok) {
-        setLikedIds(prev => prev.includes(songId) ? prev.filter(id => id !== songId) : [...prev, songId]);
+
+    // Actualización optimista inmediata en la UI
+    const wasLiked = likedIds.some(id => String(id) === songId);
+    setLikedIds(prev =>
+      wasLiked
+        ? prev.filter(id => String(id) !== songId)
+        : [...prev.filter(id => String(id) !== songId), songId]
+    );
+
+    try {
+      const res = await fetch(`${API_BASE}/api/tracks/${songId}/like`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && typeof data.liked === 'boolean') {
+          setLikedIds(prev => {
+            const clean = prev.filter(id => String(id) !== songId);
+            return data.liked ? [...clean, songId] : clean;
+          });
+        }
+      } else {
+        // Revertir si falló
+        setLikedIds(prev => {
+          const clean = prev.filter(id => String(id) !== songId);
+          return wasLiked ? [...clean, songId] : clean;
+        });
+      }
+    } catch {
+      // Revertir en error de red
+      setLikedIds(prev => {
+        const clean = prev.filter(id => String(id) !== songId);
+        return wasLiked ? [...clean, songId] : clean;
+      });
     }
   };
 
@@ -4006,7 +4039,7 @@ transition={{
                         isPlaying={!isMinigameActive && currentSong?.id === song.id && isPlaying}
                         playlists={playlists}
                         userRole={userRole}
-                        isLiked={likedIds.includes(song.id)}
+                        isLiked={likedIds.some(id => String(id) === String(song.id))}
                         onToggleLike={() => handleToggleLike(song.id)}
                         onAddToPlaylist={(pid) => handleAddToPlaylist(song.id, pid)}
                         onOpenTabs={() => setTabsSong(song)} 
@@ -4516,7 +4549,7 @@ transition={{
                                         isPlaying={!isMinigameActive && currentSong?.id === item.id && isPlaying}
                                         playlists={playlists}
                                         userRole={userRole}
-                                        isLiked={likedIds.includes(item.id)}
+                                        isLiked={likedIds.some(id => String(id) === String(item.id))}
                                         onToggleLike={() => handleToggleLike(item.id)}
                                         onAddToPlaylist={(pid) => handleAddToPlaylist(item.id, pid)}
                                         onRemoveFromPlaylist={
