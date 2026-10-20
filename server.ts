@@ -2737,49 +2737,6 @@ app.use('/uploads', express.static(uploadDir));
 app.use('/uploads', express.static(path.join(ROOT_DIR, 'public', 'uploads')));
 app.use('/uploads', express.static(path.join(DIST_DIR, 'uploads')));
 
-// Cola de segundo plano con concurrencia 1 para cachear en disco local las canciones reproducidas desde B2
-// IMPORTANTE: Se retrasa 45 segundos para que la reproducción inicial del usuario nunca compita
-// por el ancho de banda de red ni por I/O con B2, erradicando los microcortes.
-const hotCacheInFlight = new Set<string>();
-let isWarmJobActive = false;
-const warmQueue: Array<{ filename: string; destPath: string }> = [];
-
-const processWarmQueue = async () => {
-    if (isWarmJobActive || warmQueue.length === 0) return;
-    isWarmJobActive = true;
-    const nextJob = warmQueue.shift();
-    if (nextJob) {
-        try {
-            if (!fs.existsSync(nextJob.destPath)) {
-                await downloadB2FileToDisk(nextJob.filename, nextJob.destPath);
-            }
-        } catch {} finally {
-            hotCacheInFlight.delete(nextJob.filename);
-        }
-    }
-    isWarmJobActive = false;
-    if (warmQueue.length > 0) {
-        setTimeout(processWarmQueue, 5000);
-    }
-};
-
-const warmAudioToLocalDisk = (filename: string) => {
-    if (!isB2Configured() || !/\.(mp3|flac|m4a|wav|ogg|aac)$/i.test(filename)) return;
-    if (hotCacheInFlight.has(filename)) return;
-    const destPath = path.join(uploadDir, filename);
-    if (fs.existsSync(destPath)) return;
-
-    hotCacheInFlight.add(filename);
-    setTimeout(() => {
-        if (!fs.existsSync(destPath)) {
-            warmQueue.push({ filename, destPath });
-            processWarmQueue();
-        } else {
-            hotCacheInFlight.delete(filename);
-        }
-    }, 45000);
-};
-
 // Si un archivo en /uploads no existe en disco local, servir desde Backblaze B2 con soporte de Range (streaming)
 app.use('/uploads', async (req, res) => {
     const requestedFile = path.basename(decodeURIComponent(req.path.split('?')[0]));
@@ -2822,9 +2779,6 @@ app.use('/uploads', async (req, res) => {
                     if (!res.headersSent) res.status(500).end();
                     else { try { res.end(); } catch {} }
                 });
-
-                // Cachear en disco local en segundo plano para que los siguientes Range requests vayan a 0ms
-                warmAudioToLocalDisk(requestedFile);
 
                 return b2Obj.stream.pipe(res);
             }

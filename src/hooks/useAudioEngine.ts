@@ -189,7 +189,7 @@ export function useAudioEngine(
       // funciones estén desactivadas), así que el contexto tiene que estar
       // en marcha o no se oiría nada.
       const graph = graphRef.current;
-      if (graph) {
+      if (graph && graph.ctx.state !== "running") {
         try {
           await graph.resume();
         } catch (e) {
@@ -197,7 +197,7 @@ export function useAudioEngine(
         }
       }
 
-      if (isPlaying) {
+      if (isPlaying && audio.paused) {
         try {
           await audio.play();
         } catch (e: any) {
@@ -247,9 +247,13 @@ export function useAudioEngine(
       audio.addEventListener("error", errorHandler, { once: true });
     } else {
       if (isPlaying) {
-        startPlayback();
+        if (audio.paused) {
+          startPlayback();
+        }
       } else {
-        audio.pause();
+        if (!audio.paused) {
+          audio.pause();
+        }
         graphRef.current?.stopCrossfade();
       }
     }

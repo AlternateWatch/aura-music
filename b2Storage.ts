@@ -7,6 +7,9 @@ import {
     ListObjectsV2Command
 // @ts-ignore
 } from '@aws-sdk/client-s3';
+// @ts-ignore
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import https from 'https';
 import { Readable } from 'stream';
 import path from 'path';
 import fs from 'fs';
@@ -59,6 +62,14 @@ export const getB2Client = (): S3Client => {
         endpoint = `https://${endpoint}`;
     }
 
+    const httpsAgent = new https.Agent({
+        keepAlive: true,
+        keepAliveMsecs: 60000,
+        maxSockets: 64,
+        maxFreeSockets: 32,
+        timeout: 30000
+    });
+
     cachedClient = new S3Client({
         endpoint,
         region: process.env.B2_REGION || 'us-east-005',
@@ -66,6 +77,9 @@ export const getB2Client = (): S3Client => {
             accessKeyId: process.env.B2_KEY_ID || '',
             secretAccessKey: process.env.B2_APPLICATION_KEY || '',
         },
+        requestHandler: new NodeHttpHandler({
+            httpsAgent
+        })
     });
 
     return cachedClient;

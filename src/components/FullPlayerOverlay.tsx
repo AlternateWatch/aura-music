@@ -98,6 +98,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
   const coverTouchRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const [coverSwipeOffset, setCoverSwipeOffset] = useState(0);
+  const animatedVideoRef = useRef<HTMLVideoElement>(null);
 
   const handleCoverTouchStart = (e: React.TouchEvent) => {
     const touch = e.touches[0];
@@ -184,6 +185,13 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
   const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
   const coverSrc = resolvedCoverUrl || resolveMediaUrl(currentSong.coverUrl) || '/default-cover.jpg';
 
+  useEffect(() => {
+    if (isVideo && animatedVideoRef.current) {
+      animatedVideoRef.current.muted = true;
+      animatedVideoRef.current.play().catch(() => {});
+    }
+  }, [animUrl, isVideo]);
+
   return (
     <motion.div 
       initial={{ y: '100%' }} 
@@ -262,12 +270,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
               {animUrl ? (
                 isVideo ? (
                   <video
-                    ref={(el) => {
-                      if (el) {
-                        el.muted = true;
-                        el.play().catch(() => {});
-                      }
-                    }}
+                    ref={animatedVideoRef}
                     key={animUrl}
                     src={animUrl}
                     poster={coverSrc}
