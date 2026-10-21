@@ -22,6 +22,73 @@ export interface EqSettings {
   autoPreamp: boolean;
 }
 
+export type PlaybackPresetId = "normal" | "nightcore" | "slowed" | "speedup" | "custom";
+
+export interface PlaybackRateSettings {
+  rate: number;          // 0.5 a 2.0 (default 1.0)
+  preservePitch: boolean;// true = preserva tono vocal; false = shift natural (Nightcore/Slowed)
+  reverbWet: number;     // 0.0 a 1.0 (reverberación de sala; 0 = seco)
+  preset: PlaybackPresetId;
+}
+
+export interface PlaybackPresetDef {
+  id: PlaybackPresetId;
+  label: string;
+  icon: string;
+  rate: number;
+  preservePitch: boolean;
+  reverbWet: number;
+  description: string;
+}
+
+export const PLAYBACK_PRESETS: PlaybackPresetDef[] = [
+  {
+    id: "normal",
+    label: "Normal",
+    icon: "🎵",
+    rate: 1.0,
+    preservePitch: true,
+    reverbWet: 0.0,
+    description: "Velocidad estándar 1.0x sin alteraciones",
+  },
+  {
+    id: "nightcore",
+    label: "Nightcore",
+    icon: "⚡",
+    rate: 1.25,
+    preservePitch: false,
+    reverbWet: 0.05,
+    description: "1.25x velocidad acelerada con tono agudo natural y energía",
+  },
+  {
+    id: "slowed",
+    label: "Slowed & Reverb",
+    icon: "🌙",
+    rate: 0.85,
+    preservePitch: false,
+    reverbWet: 0.35,
+    description: "0.85x tempo relajado con tono grave y reverberación espacial",
+  },
+  {
+    id: "speedup",
+    label: "Speed Up",
+    icon: "⏩",
+    rate: 1.15,
+    preservePitch: true,
+    reverbWet: 0.0,
+    description: "1.15x más rápido manteniendo el tono de voz original",
+  },
+  {
+    id: "custom",
+    label: "Personalizado",
+    icon: "🎚️",
+    rate: 1.0,
+    preservePitch: true,
+    reverbWet: 0.0,
+    description: "Ajuste libre de velocidad, tono y reverberación",
+  },
+];
+
 export interface AudioSettings {
   normalizer: NormalizerSettings;
   eq: EqSettings;
@@ -35,6 +102,7 @@ export interface AudioSettings {
   visualizer: {
     enabled: boolean;
   };
+  playbackRate: PlaybackRateSettings;
   autoplay?: {
     enabled: boolean;
   };
@@ -58,6 +126,12 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   crossfade: { enabled: false, duration: 5 },
   gapless: { enabled: true },
   visualizer: { enabled: true },
+  playbackRate: {
+    rate: 1.0,
+    preservePitch: true,
+    reverbWet: 0.0,
+    preset: "normal",
+  },
   autoplay: { enabled: true },
 };
 
@@ -100,6 +174,16 @@ export function loadAudioSettings(): AudioSettings {
     }
     if (p?.visualizer) {
       base.visualizer.enabled = !!p.visualizer.enabled;
+    }
+    if (p?.playbackRate) {
+      const r = Number(p.playbackRate.rate);
+      if (Number.isFinite(r) && r >= 0.5 && r <= 2.0) base.playbackRate.rate = r;
+      base.playbackRate.preservePitch = p.playbackRate.preservePitch !== false;
+      const w = Number(p.playbackRate.reverbWet);
+      if (Number.isFinite(w) && w >= 0 && w <= 1) base.playbackRate.reverbWet = w;
+      if (typeof p.playbackRate.preset === 'string') {
+        base.playbackRate.preset = p.playbackRate.preset as PlaybackPresetId;
+      }
     }
     if (p?.autoplay !== undefined) {
       base.autoplay = { enabled: p.autoplay.enabled !== false };

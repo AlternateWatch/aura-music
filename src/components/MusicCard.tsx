@@ -7,7 +7,7 @@ import {
   Disc, User
 } from 'lucide-react';
 import { type Song } from '../constants';
-import { hapticImpact } from '../utils/haptics';
+import { hapticImpact, hapticSuccess, hapticWarning } from '../utils/haptics';
 import {
   subscribeOfflineStore,
   getOfflineIdsSnapshot,
@@ -256,7 +256,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         {/* 1. LIKE / FAVORITOS */}
         <button
           type="button"
-          onClick={() => { hapticImpact('light'); onToggleLike(); closeMenu(); }}
+          onClick={() => { if (!isLiked) { void hapticSuccess(); } else { void hapticImpact('light'); } onToggleLike(); closeMenu(); }}
           className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
         >
           <Heart size={iconSize} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
@@ -467,7 +467,7 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         {userRole === 'admin' && (
           <button
             type="button"
-            onClick={() => { hapticImpact('heavy'); onDelete(); closeMenu(); }}
+            onClick={() => { void hapticWarning(); onDelete(); closeMenu(); }}
             className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer text-left`}
           >
             <Trash2 size={iconSize} />

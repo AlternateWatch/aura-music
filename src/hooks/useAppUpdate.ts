@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { API_BASE } from '../utils/api';
 
-export const CURRENT_APP_VERSION = "1.0.4";
+export const CURRENT_APP_VERSION = "1.0.5";
 
 export interface AppUpdateHistoryItem {
   version: string;

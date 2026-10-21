@@ -18,7 +18,8 @@ import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
 import { useFileUrl } from "../hooks/useFileUrl";
 import { motion } from "motion/react";
-import { hapticImpact } from "../utils/haptics";
+import { hapticImpact, hapticSuccess } from "../utils/haptics";
+import type { AudioSettings } from "../audio/audioSettings";
 
 interface PlayerBarProps {
   currentSong: Song;
@@ -48,6 +49,7 @@ interface PlayerBarProps {
   mobilePlayerStyle?: "floating" | "classic" | "minimal" | "card";
   isLiked?: boolean;
   onToggleLike?: () => void;
+  audioSettings?: AudioSettings;
 }
 
 export function PlayerBar({
@@ -76,6 +78,7 @@ export function PlayerBar({
   mobilePlayerStyle,
   isLiked,
   onToggleLike,
+  audioSettings,
 }: PlayerBarProps) {
 
   const currentMobileStyle = mobilePlayerStyle || (typeof window !== "undefined" ? (localStorage.getItem("aura_mobile_player_style") as any) : null) || "floating";
@@ -405,7 +408,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 {onToggleLike && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); hapticImpact("light"); onToggleLike(); }}
+                    onClick={(e) => { e.stopPropagation(); if (!isLiked) { void hapticSuccess(); } else { void hapticImpact("light"); } onToggleLike(); }}
                     className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-red-400 active:scale-90 transition-transform cursor-pointer outline-none"
                     title={isLiked ? "Quitar de Favoritos" : "Añadir a Favoritos"}
                   >
@@ -714,15 +717,24 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             <Mic2 size={18} />
           </button>
           <button
-            title="Equalizer & normalizer"
-            aria-label="Equalizer & normalizer"
+            title="Ajustes de audio, velocidad y efectos"
+            aria-label="Ajustes de audio, velocidad y efectos"
             onClick={(e) => {
               e.stopPropagation();
               onOpenAudioSettings();
             }}
-            className="text-white/30 hover:text-brand-primary transition-all hover:scale-110 shrink-0 outline-none"
+            className={`transition-all hover:scale-110 shrink-0 outline-none flex items-center gap-1.5 ${
+              ((audioSettings?.playbackRate?.rate ?? 1.0) !== 1.0 || (audioSettings?.playbackRate?.reverbWet ?? 0) > 0)
+                ? 'text-brand-primary'
+                : 'text-white/30 hover:text-brand-primary'
+            }`}
           >
             <SlidersHorizontal size={18} />
+            {((audioSettings?.playbackRate?.rate ?? 1.0) !== 1.0 || (audioSettings?.playbackRate?.reverbWet ?? 0) > 0) && (
+              <span className="hidden xl:inline text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-full bg-brand-primary/20 text-brand-primary border border-brand-primary/30">
+                {audioSettings?.playbackRate?.preset === 'nightcore' ? '⚡ NC' : audioSettings?.playbackRate?.preset === 'slowed' ? '🌙 SL' : `${audioSettings?.playbackRate?.rate}x`}
+              </span>
+            )}
           </button>
 
           <div className="hidden lg:flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/5 group shrink-0">

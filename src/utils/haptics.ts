@@ -13,7 +13,6 @@ type ImpactLevel = "light" | "medium" | "heavy";
 export async function hapticImpact(style: ImpactLevel = "light"): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
-    // Respetar preferencia de personalización del usuario
     if (typeof window !== "undefined" && localStorage.getItem("aura_haptics_enabled") === "false") {
       return;
     }
@@ -25,7 +24,45 @@ export async function hapticImpact(style: ImpactLevel = "light"): Promise<void> 
     };
     await Haptics.impact({ style: styleMap[style] });
   } catch (e) {
-    // Sin plugin, sin soporte del dispositivo, o cualquier otro fallo:
-    // no hacemos nada. Nunca debe interrumpir la acción real del usuario.
+    // Fail silently
+  }
+}
+
+export async function hapticSuccess(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    if (typeof window !== "undefined" && localStorage.getItem("aura_haptics_enabled") === "false") {
+      return;
+    }
+    const { Haptics, NotificationType } = await import("@capacitor/haptics");
+    await Haptics.notification({ type: NotificationType.Success });
+  } catch {
+    await hapticImpact("light");
+  }
+}
+
+export async function hapticWarning(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    if (typeof window !== "undefined" && localStorage.getItem("aura_haptics_enabled") === "false") {
+      return;
+    }
+    const { Haptics, NotificationType } = await import("@capacitor/haptics");
+    await Haptics.notification({ type: NotificationType.Warning });
+  } catch {
+    await hapticImpact("medium");
+  }
+}
+
+export async function hapticSelection(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    if (typeof window !== "undefined" && localStorage.getItem("aura_haptics_enabled") === "false") {
+      return;
+    }
+    const { Haptics } = await import("@capacitor/haptics");
+    await Haptics.selectionChanged();
+  } catch {
+    await hapticImpact("light");
   }
 }

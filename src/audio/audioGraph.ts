@@ -70,6 +70,22 @@ const dbToLin = (db: number) => Math.pow(10, db / 20);
 
 const sharedCache = new LoudnessCache();
 
+function createImpulseResponse(ctx: AudioContext, duration = 2.5, decay = 2.2): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const impulse = ctx.createBuffer(2, length, sampleRate);
+  const left = impulse.getChannelData(0);
+  const right = impulse.getChannelData(1);
+
+  for (let i = 0; i < length; i++) {
+    const n = i / length;
+    const env = Math.pow(1 - n, decay);
+    left[i] = (Math.random() * 2 - 1) * env;
+    right[i] = (Math.random() * 2 - 1) * env;
+  }
+  return impulse;
+}
+
 export class AudioGraph {
   readonly ctx: AudioContext;
   readonly analyser: AnalyserNode;
@@ -89,6 +105,10 @@ export class AudioGraph {
   private filters: BiquadFilterNode[] = [];
   private limiter: DynamicsCompressorNode;
   private master: GainNode;
+  private convolver: ConvolverNode;
+  private reverbWetGain: GainNode;
+  private reverbDryGain: GainNode;
+  private reverbMerge: GainNode;
   private meterNode: AudioWorkletNode | null = null;
   private meterInitStarted = false;
   private meterConnected = false;
@@ -300,6 +320,12 @@ export class AudioGraph {
     fromGain.gain.cancelScheduledValues(now);
     fromGain.gain.setValueAtTime(0, now);
 
+    const rate = this.settings.playbackRate?.rate ?? 1.0;
+    const preservesPitch = this.settings.playbackRate?.preservePitch !== false;
+    if (toAudio.playbackRate !== rate) toAudio.playbackRate = rate;
+    (toAudio as any).preservesPitch = preservesPitch;
+    (toAudio as any).mozPreservesPitch = preservesPitch;
+    (toAudio as any).webkitPreservesPitch = preservesPitch;
     void toAudio.play().catch(() => {});
 
     fromAudio.pause();

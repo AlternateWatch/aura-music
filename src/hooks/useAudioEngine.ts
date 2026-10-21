@@ -57,6 +57,7 @@ export function useAudioEngine(
     settings.eq.enabled ||
     settings.crossfade.enabled ||
     (settings.gapless?.enabled ?? true) ||
+    (settings.playbackRate?.reverbWet ?? 0) > 0 ||
     visualizerActive;
 
   const currentTimeRef = useRef(0);
@@ -331,6 +332,18 @@ export function useAudioEngine(
   }, [needsGraph, ensureGraph]);
 
   useEffect(() => {
+    const rate = settings.playbackRate?.rate ?? 1.0;
+    const preservesPitch = settings.playbackRate?.preservePitch !== false;
+
+    [primaryAudioRef.current, secondaryAudioRef.current].forEach(a => {
+      if (a) {
+        if (a.playbackRate !== rate) a.playbackRate = rate;
+        (a as any).preservesPitch = preservesPitch;
+        (a as any).mozPreservesPitch = preservesPitch;
+        (a as any).webkitPreservesPitch = preservesPitch;
+      }
+    });
+
     graphRef.current?.applySettings(settings);
   }, [settings, graphVersion]);
 

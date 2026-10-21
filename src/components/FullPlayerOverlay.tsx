@@ -11,6 +11,7 @@ import { type Song } from '../constants';
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
 import { useFileUrl } from "../hooks/useFileUrl";
 import { hapticImpact } from "../utils/haptics";
+import type { AudioSettings } from "../audio/audioSettings";
 
 interface FullPlayerOverlayProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ interface FullPlayerOverlayProps {
   onOpenMinigameLobby: () => void;
   ambientGlow?: 'off' | 'soft' | 'vibrant';
   ambientGlowColor?: string;
+  audioSettings?: AudioSettings;
 }
 
 const isVideoUrl = (url?: string | null) => {
@@ -366,9 +368,37 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                     <input type="range" min="0" max={duration || 0} step="0.1" value={liveCurrentTime} onChange={(e) => onSeek(parseFloat(e.target.value))} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 outline-none" />
                     <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 bg-white rounded-full shadow-2xl scale-0 group-hover:scale-100 transition-transform pointer-events-none z-10" style={{ left: `calc(${Math.min(100, Math.max(0, progress))}% - 8px)` }} />
                 </div>
-                <div className="flex justify-between mt-3 md:mt-4 text-[10px] md:text-[11px] font-bold font-mono text-white/40 tracking-widest pointer-events-none">
-                  <span>{formatTime(liveCurrentTime)}</span>
-                  <span>{formatTime(duration)}</span>
+                <div className="flex justify-between items-center mt-3 md:mt-4 text-[10px] md:text-[11px] font-bold font-mono text-white/40 tracking-widest">
+                  <span className="pointer-events-none">{formatTime(liveCurrentTime)}</span>
+                  
+                  {/* Píldora de velocidad y preset rápido */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hapticImpact('light');
+                      onOpenAudioSettings();
+                    }}
+                    className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all flex items-center gap-1 cursor-pointer border ${
+                      ((audioSettings?.playbackRate?.rate ?? 1.0) !== 1.0 || (audioSettings?.playbackRate?.reverbWet ?? 0) > 0)
+                        ? 'bg-brand-primary/20 text-brand-primary border-brand-primary/40 shadow-sm shadow-brand-primary/20'
+                        : 'text-white/40 border-white/5 hover:text-white hover:bg-white/5'
+                    }`}
+                    title="Ajustes de velocidad, Nightcore y Slowed & Reverb"
+                  >
+                    <span>
+                      {audioSettings?.playbackRate?.preset === 'nightcore'
+                        ? '⚡ Nightcore'
+                        : audioSettings?.playbackRate?.preset === 'slowed'
+                        ? '🌙 Slowed'
+                        : audioSettings?.playbackRate?.preset === 'speedup'
+                        ? '⏩ Speed Up'
+                        : (audioSettings?.playbackRate?.rate && audioSettings.playbackRate.rate !== 1.0)
+                        ? `${audioSettings.playbackRate.rate.toFixed(2)}x`
+                        : '1.0x'}
+                    </span>
+                  </button>
+
+                  <span className="pointer-events-none">{formatTime(duration)}</span>
                 </div>
               </div>
 

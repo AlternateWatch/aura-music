@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
-import { X, SlidersHorizontal, Activity, RotateCcw, Radio, Zap } from "lucide-react";
+import { X, SlidersHorizontal, Activity, RotateCcw, Radio, Zap, Gauge, Sparkles } from "lucide-react";
+import { hapticImpact, hapticSelection } from "../utils/haptics";
 import {
   AudioSettings,
   NORMALIZER_TARGETS,
+  PLAYBACK_PRESETS,
 } from "../audio/audioSettings";
 import {
   EQ_BAND_COUNT,
@@ -430,6 +432,191 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                   })}
                   label="Autoplay"
                 />
+              </div>
+            </div>
+          </section>
+
+          {/* MODO Y VELOCIDAD DE REPRODUCCIÓN (NIGHTCORE / SLOWED & REVERB) */}
+          <section className="p-6 bg-white/[0.02] border border-white/5 rounded-[24px]">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-3">
+                <Gauge className="text-brand-primary" size={18} />
+                <div>
+                  <p className="text-sm font-bold text-white leading-none">Velocidad y Efectos Especiales</p>
+                  <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">
+                    Nightcore · Slowed & Reverb · Speed Up
+                  </p>
+                </div>
+              </div>
+              {(settings.playbackRate?.rate !== 1.0 || (settings.playbackRate?.reverbWet ?? 0) > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticImpact('light');
+                    onChange({
+                      ...settings,
+                      playbackRate: {
+                        rate: 1.0,
+                        preservePitch: true,
+                        reverbWet: 0.0,
+                        preset: "normal"
+                      }
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider text-brand-primary bg-brand-primary/10 border border-brand-primary/20 hover:bg-brand-primary/20 transition-colors cursor-pointer"
+                >
+                  Restablecer (1.0x)
+                </button>
+              )}
+            </div>
+
+            {/* Presets rápidos */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
+              {PLAYBACK_PRESETS.filter(p => p.id !== 'custom').map((preset) => {
+                const isActive = settings.playbackRate?.preset === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => {
+                      hapticImpact('medium');
+                      onChange({
+                        ...settings,
+                        playbackRate: {
+                          rate: preset.rate,
+                          preservePitch: preset.preservePitch,
+                          reverbWet: preset.reverbWet,
+                          preset: preset.id,
+                        }
+                      });
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                      isActive
+                        ? "bg-brand-primary/15 border-brand-primary text-white shadow-lg shadow-brand-primary/10"
+                        : "bg-white/[0.03] border-white/5 text-white/60 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-base">{preset.icon}</span>
+                      <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${isActive ? 'bg-brand-primary text-black font-black' : 'bg-white/10 text-white/60'}`}>
+                        {preset.rate.toFixed(2)}x
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-white">{preset.label}</p>
+                      <p className="text-[9px] text-white/40 line-clamp-1 mt-0.5">{preset.description}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Deslizador de Velocidad */}
+            <div className="pt-2 border-t border-white/5">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+                  Velocidad de reproducción
+                </span>
+                <span className="text-xs font-mono font-bold text-brand-primary">
+                  {(settings.playbackRate?.rate ?? 1.0).toFixed(2)}x
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.5}
+                max={2.0}
+                step={0.05}
+                value={settings.playbackRate?.rate ?? 1.0}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value) || 1.0;
+                  onChange({
+                    ...settings,
+                    playbackRate: {
+                      ...(settings.playbackRate ?? { preservePitch: true, reverbWet: 0.0 }),
+                      rate: val,
+                      preset: "custom"
+                    }
+                  });
+                }}
+                className="w-full mt-2 accent-brand-primary cursor-pointer"
+                style={{ accentColor: "var(--color-brand-primary, #F27D26)" }}
+              />
+              <div className="flex justify-between text-[9px] font-mono text-white/25 mt-1">
+                <span>0.50x</span>
+                <span>0.85x</span>
+                <span className="text-white/50 font-bold">1.00x</span>
+                <span>1.25x</span>
+                <span>2.00x</span>
+              </div>
+            </div>
+
+            {/* Toggle de Preservar Tono (Pitch Lock) */}
+            <div className="flex items-center justify-between gap-4 mt-5 pt-4 border-t border-white/5">
+              <div>
+                <p className="text-sm font-bold text-white leading-none">Preservar Tono Original (Pitch Lock)</p>
+                <p className="text-[9px] text-white/30 mt-1 max-w-sm">
+                  {settings.playbackRate?.preservePitch !== false
+                    ? "Activado: Acelera o frena el tempo sin alterar la afinación ni las voces."
+                    : "Desactivado: El tono sube o baja naturalmente con la velocidad (efecto Nightcore o Slowed clásico)."}
+                </p>
+              </div>
+              <Toggle
+                on={settings.playbackRate?.preservePitch !== false}
+                onClick={() => {
+                  hapticImpact('light');
+                  onChange({
+                    ...settings,
+                    playbackRate: {
+                      ...(settings.playbackRate ?? { rate: 1.0, reverbWet: 0.0 }),
+                      preservePitch: !(settings.playbackRate?.preservePitch !== false),
+                      preset: "custom"
+                    }
+                  });
+                }}
+                label="Preservar tono vocal"
+              />
+            </div>
+
+            {/* Deslizador de Reverberación Espacial */}
+            <div className="mt-5 pt-4 border-t border-white/5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+                    Reverberación de Sala (Spatial Reverb)
+                  </span>
+                  <p className="text-[9px] text-white/30 mt-0.5">
+                    Añade un espacio inmersivo y aire etéreo a las canciones.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-brand-primary">
+                  {Math.round((settings.playbackRate?.reverbWet ?? 0) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings.playbackRate?.reverbWet ?? 0}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value) || 0;
+                  onChange({
+                    ...settings,
+                    playbackRate: {
+                      ...(settings.playbackRate ?? { rate: 1.0, preservePitch: true }),
+                      reverbWet: val,
+                      preset: "custom"
+                    }
+                  });
+                }}
+                className="w-full mt-2 accent-brand-primary cursor-pointer"
+                style={{ accentColor: "var(--color-brand-primary, #F27D26)" }}
+              />
+              <div className="flex justify-between text-[9px] font-mono text-white/25 mt-1">
+                <span>0% (Seco)</span>
+                <span>35% (Slowed)</span>
+                <span>70% (Inmersivo)</span>
+                <span>100% (Catedral)</span>
               </div>
             </div>
           </section>

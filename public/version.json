@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.4",
-  "versionCode": 5,
-  "releaseNotes": "• Selector responsivo de 1 a 3 columnas para explorar canciones y álbumes en móvil.\n• Reactividad total al tono de acento: Aura DJ (botones, degradados y avatares), divisor de 0 dB en ecualizador, deslizador de preamp, crossfade e icono de moderación.\n• APK nativa optimizada y ligera (~6.6 MB).",
+  "latestVersion": "1.0.5",
+  "versionCode": 6,
+  "releaseNotes": "• Control de velocidad y efectos de audio especiales: Presets instantáneos para Nightcore (1.25x + High Pitch), Slowed & Reverb (0.85x + Spatial Reverb), Speed Up (1.15x) y Modo Normal.\n• Deslizador continuo de velocidad (0.50x a 2.00x) y control de bloqueo de tono (Pitch Lock).\n• Reverberación de sala inmersiva por convolución en tiempo real con Web Audio.\n• Acceso rápido al modo de audio desde el Full Player y la barra de reproducción.\n• Sistema de vibración háptica contextual refinada (éxito en favoritos, advertencias en borrado y selección táctil).",
   "history": [
+    {
+      "version": "1.0.5",
+      "versionCode": 6,
+      "notes": "• Control de velocidad y efectos de audio especiales: Presets instantáneos para Nightcore (1.25x + High Pitch), Slowed & Reverb (0.85x + Spatial Reverb), Speed Up (1.15x) y Modo Normal.\n• Deslizador continuo de velocidad (0.50x a 2.00x) y control de bloqueo de tono (Pitch Lock).\n• Reverberación de sala inmersiva por convolución en tiempo real con Web Audio.\n• Acceso rápido al modo de audio desde el Full Player y la barra de reproducción.\n• Sistema de vibración háptica contextual refinada (éxito en favoritos, advertencias en borrado y selección táctil)."
+    },
     {
       "version": "1.0.4",
       "versionCode": 5,
@@ -30,7 +35,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.4",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.5",
   "mandatory": false,
-  "publishedAt": "2026-10-21T10:45:00.000Z"
+  "publishedAt": "2026-10-21T11:25:00.000Z"
 }
