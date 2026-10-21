@@ -26,6 +26,7 @@ interface UseMediaSessionParams {
   onPrevious: () => void;
   onSeekTo: (seconds: number) => void;
   isNativePlatform: boolean;
+  playbackRate?: number;
 }
 
 const isSupported = () =>
@@ -42,6 +43,7 @@ export function useMediaSession({
   onPrevious,
   onSeekTo,
   isNativePlatform,
+  playbackRate = 1.0,
 }: UseMediaSessionParams) {
   // Metadatos + action handlers. Se re-registran cuando cambian los
   // callbacks (next/prev/seek dependen de la cola activa) para que
@@ -136,7 +138,7 @@ export function useMediaSession({
         navigator.mediaSession.setPositionState({
           duration,
           position: Math.max(0, position),
-          playbackRate: 1,
+          playbackRate: playbackRate && Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1,
         });
       } catch {
         // Ignorable: pasa si duration/position quedan inconsistentes
@@ -147,5 +149,5 @@ export function useMediaSession({
     syncPosition();
     const unsubscribe = subscribeToTime(syncPosition);
     return unsubscribe;
-  }, [currentSong?.id, duration, getCurrentTime, subscribeToTime, isNativePlatform]);
+  }, [currentSong?.id, duration, getCurrentTime, subscribeToTime, isNativePlatform, playbackRate]);
 }

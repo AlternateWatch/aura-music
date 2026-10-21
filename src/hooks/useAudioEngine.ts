@@ -4,6 +4,18 @@ import { AudioSettings } from "../audio/audioSettings";
 import { AudioGraph, IDLE_STATUS, getOrCreateGraph } from "../audio/audioGraph";
 import { playbackPriority } from "../utils/playbackPriority";
 
+function isSameAudioSource(elementSrc: string | null | undefined, targetUrl: string | null | undefined): boolean {
+  if (!elementSrc || !targetUrl) return false;
+  if (elementSrc === targetUrl) return true;
+  try {
+    const elUrl = new URL(elementSrc, window.location.href).href;
+    const tgUrl = new URL(targetUrl, window.location.href).href;
+    return elUrl === tgUrl;
+  } catch {
+    return elementSrc.endsWith(targetUrl) || targetUrl.endsWith(elementSrc);
+  }
+}
+
 export function useAudioPlaybackTime(
   getCurrentTime: () => number,
   subscribeToTime: (listener: () => void) => () => void
@@ -66,8 +78,44 @@ export function useAudioEngine(
   const durationRef = useRef(0);
 
   const standbyPreloadedForSongRef = useRef<string | null>(null);
+  const standbyPreloadedTrackRef = useRef<{ id: string; url: string } | null>(null);
   const transitionTriggeredForSongRef = useRef<string | null>(null);
   const nextTrackCandidateRef = useRef<Song | null>(null);
+
+  const applyPlaybackRate = useCallback((a: HTMLAudioElement | null) => {
+    if (!a) return;
+    const rate = settingsRef.current.playbackRate?.rate ?? 1.0;
+    const preservesPitch = settingsRef.current.playbackRate?.preservePitch !== false;
+
+    a.defaultPlaybackRate = rate;
+    if (Math.abs(a.playbackRate - rate) > 0.001) {
+      a.playbackRate = rate;
+    }
+    (a as any).preservesPitch = preservesPitch;
+    (a as any).mozPreservesPitch = preservesPitch;
+    (a as any).webkitPreservesPitch = preservesPitch;
+  }, []);
+
+  const isStandbyReadyForSong = useCallback((standbyAudio: HTMLAudioElement | null, targetSong: Song | null): boolean => {
+    if (!standbyAudio || !targetSong) return false;
+    const preloaded = standbyPreloadedTrackRef.current;
+    if (!preloaded || preloaded.id !== targetSong.id) return false;
+    if (!isSameAudioSource(standbyAudio.src, preloaded.url)) return false;
+    if (standbyAudio.readyState < 3) return false; // Al menos HAVE_FUTURE_DATA
+    if (standbyAudio.error) return false;
+    return true;
+  }, []);
+
+  const clearStandbyPlayer = useCallback(() => {
+    standbyPreloadedForSongRef.current = null;
+    standbyPreloadedTrackRef.current = null;
+    const g = graphRef.current;
+    const standby = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
+    if (standby) {
+      if (!standby.paused) standby.pause();
+      try { standby.currentTime = 0; } catch {}
+    }
+  }, []);
 
   const [duration, setDurationState] = useState(0);
 
@@ -158,16 +206,19 @@ export function useAudioEngine(
         const nextInfo = getNextTrackRef.current?.();
         if (nextInfo && nextInfo.song && nextInfo.song.id !== songId) {
           nextTrackCandidateRef.current = nextInfo.song;
+          const candidateSongId = nextInfo.song.id;
           void nextInfo.resolveUrl().then((url) => {
-            if (url && standbyPreloadedForSongRef.current === songId) {
+            if (url && songIdRef.current === songId && nextTrackCandidateRef.current?.id === candidateSongId) {
+              standbyPreloadedTrackRef.current = { id: candidateSongId, url };
               const g = graphRef.current;
               if (g) {
                 g.prepareStandby(url);
               } else {
                 const standby = activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
-                if (standby && standby.paused && standby.src !== url) {
+                if (standby && standby.paused && !isSameAudioSource(standby.src, url)) {
                   standby.src = url;
                   standby.preload = "auto";
+                  applyPlaybackRate(standby);
                   standby.load();
                 }
               }
@@ -183,8 +234,8 @@ export function useAudioEngine(
           const nextSong = nextTrackCandidateRef.current;
           const g = ensureGraph();
           const standbyAudio = g?.getStandbyAudio();
-          // Solo si el siguiente track está realmente buferizado en standby
-          if (nextSong && onGaplessNextRef.current && standbyAudio && standbyAudio.readyState >= 2) {
+          // Verificación estricta: sólo disparar si standby tiene cargada ESTA misma canción y datos listos
+          if (nextSong && onGaplessNextRef.current && isStandbyReadyForSong(standbyAudio, nextSong)) {
             transitionTriggeredForSongRef.current = songId;
             loadedSongIdRef.current = nextSong.id;
             g.triggerCrossfadeTransition(cf.duration);
@@ -199,14 +250,14 @@ export function useAudioEngine(
           }
         }
       } else if (gapless) {
-        // Gapless 0 ms: disparar cuando resten menos de 80 ms para sample exacto sin gap (soporta velocidades aceleradas)
+        // Gapless 0 ms: disparar cuando resten menos de 80 ms para sample exacto sin gap
         const isGaplessPoint = time > 5 && time >= dur * 0.7 && remaining <= 0.08 && remaining >= -0.5;
         if (isGaplessPoint && transitionTriggeredForSongRef.current !== songId) {
           const nextSong = nextTrackCandidateRef.current;
           const g = graphRef.current;
           const standbyAudio = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
-          // Solo si el siguiente track está listo para reproducir
-          if (nextSong && onGaplessNextRef.current && standbyAudio && standbyAudio.readyState >= 2) {
+          // Verificación estricta: sólo disparar si standby tiene cargada ESTA misma canción y datos listos
+          if (nextSong && onGaplessNextRef.current && isStandbyReadyForSong(standbyAudio, nextSong)) {
             transitionTriggeredForSongRef.current = songId;
             loadedSongIdRef.current = nextSong.id;
             if (g) {
@@ -222,12 +273,7 @@ export function useAudioEngine(
               if (toAudio) {
                 audioRef.current = toAudio;
                 toAudio.volume = volumeRef.current;
-                const rate = settingsRef.current.playbackRate?.rate ?? 1.0;
-                const preservesPitch = settingsRef.current.playbackRate?.preservePitch !== false;
-                if (toAudio.playbackRate !== rate) toAudio.playbackRate = rate;
-                (toAudio as any).preservesPitch = preservesPitch;
-                (toAudio as any).mozPreservesPitch = preservesPitch;
-                (toAudio as any).webkitPreservesPitch = preservesPitch;
+                applyPlaybackRate(toAudio);
                 void toAudio.play().catch(() => {});
               }
               if (fromAudio) {
@@ -245,7 +291,7 @@ export function useAudioEngine(
         }
       }
     }
-  }, [ensureGraph, setDuration]);
+  }, [ensureGraph, isStandbyReadyForSong, applyPlaybackRate, setDuration]);
 
   const handleLoadedMetadata = useCallback((d: number) => {
     if (Number.isFinite(d)) {
@@ -257,61 +303,59 @@ export function useAudioEngine(
     if (activePlayerRef.current !== player) return;
     const songId = songIdRef.current;
 
-    // Si la transición ya se disparó anticipadamente (0 ms gapless o crossfade), no duplicar
-    if (transitionTriggeredForSongRef.current === songId) return;
+    // Si la transición ya se disparó y cambió la canción, no duplicar
+    if (transitionTriggeredForSongRef.current === songId && loadedSongIdRef.current !== songId) {
+      return;
+    }
 
     const cf = settingsRef.current.crossfade;
     const gapless = settingsRef.current.gapless?.enabled ?? true;
+    const nextSong = nextTrackCandidateRef.current;
+    const g = graphRef.current;
+    const standbyAudio = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
 
-    if (nextTrackCandidateRef.current && onGaplessNextRef.current && (gapless || (cf.enabled && cf.duration > 0))) {
-      const nextSong = nextTrackCandidateRef.current;
-      const g = graphRef.current;
-      const standbyAudio = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
-      if (standbyAudio && standbyAudio.readyState >= 2) {
-        transitionTriggeredForSongRef.current = songId;
-        loadedSongIdRef.current = nextSong.id;
-        if (cf.enabled && cf.duration > 0 && g) {
-          g.triggerCrossfadeTransition(cf.duration);
-          activePlayerRef.current = g.getActivePlayer();
-          audioRef.current = g.getActiveAudio();
-        } else if (g) {
-          g.triggerGaplessTransition();
-          activePlayerRef.current = g.getActivePlayer();
-          audioRef.current = g.getActiveAudio();
-        } else {
-          const from = activePlayerRef.current;
-          const to: "A" | "B" = from === "A" ? "B" : "A";
-          const fromAudio = from === "A" ? primaryAudioRef.current : secondaryAudioRef.current;
-          const toAudio = to === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
-          activePlayerRef.current = to;
-          if (toAudio) {
-            audioRef.current = toAudio;
-            toAudio.volume = volumeRef.current;
-            const rate = settingsRef.current.playbackRate?.rate ?? 1.0;
-            const preservesPitch = settingsRef.current.playbackRate?.preservePitch !== false;
-            if (toAudio.playbackRate !== rate) toAudio.playbackRate = rate;
-            (toAudio as any).preservesPitch = preservesPitch;
-            (toAudio as any).mozPreservesPitch = preservesPitch;
-            (toAudio as any).webkitPreservesPitch = preservesPitch;
-            void toAudio.play().catch(() => {});
-          }
-          if (fromAudio) {
-            fromAudio.pause();
-            fromAudio.currentTime = 0;
-          }
+    if (nextSong && onGaplessNextRef.current && (gapless || (cf.enabled && cf.duration > 0)) && isStandbyReadyForSong(standbyAudio, nextSong)) {
+      transitionTriggeredForSongRef.current = songId;
+      loadedSongIdRef.current = nextSong.id;
+      if (cf.enabled && cf.duration > 0 && g) {
+        g.triggerCrossfadeTransition(cf.duration);
+        activePlayerRef.current = g.getActivePlayer();
+        audioRef.current = g.getActiveAudio();
+      } else if (g) {
+        g.triggerGaplessTransition();
+        activePlayerRef.current = g.getActivePlayer();
+        audioRef.current = g.getActiveAudio();
+      } else {
+        const from = activePlayerRef.current;
+        const to: "A" | "B" = from === "A" ? "B" : "A";
+        const fromAudio = from === "A" ? primaryAudioRef.current : secondaryAudioRef.current;
+        const toAudio = to === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
+        activePlayerRef.current = to;
+        if (toAudio) {
+          audioRef.current = toAudio;
+          toAudio.volume = volumeRef.current;
+          applyPlaybackRate(toAudio);
+          void toAudio.play().catch(() => {});
         }
-        const newAudio = audioRef.current;
-        const newDur = (newAudio && Number.isFinite(newAudio.duration) && newAudio.duration > 0)
-          ? newAudio.duration
-          : (nextSong.duration || 0);
-        setDuration(newDur);
-        onGaplessNextRef.current(nextSong);
-        return;
+        if (fromAudio) {
+          fromAudio.pause();
+          fromAudio.currentTime = 0;
+        }
       }
+      const newAudio = audioRef.current;
+      const newDur = (newAudio && Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+        ? newAudio.duration
+        : (nextSong.duration || 0);
+      setDuration(newDur);
+      onGaplessNextRef.current(nextSong);
+      return;
     }
 
+    // Standby no estaba listo o era de otra pista: avance estándar e impecable
+    transitionTriggeredForSongRef.current = null;
+    clearStandbyPlayer();
     onSongEndedRef.current?.();
-  }, [ensureGraph, setDuration]);
+  }, [clearStandbyPlayer, isStandbyReadyForSong, applyPlaybackRate, setDuration]);
 
   // Enlazar los eventos nativos de ambos elementos de audio
   useEffect(() => {
@@ -332,13 +376,36 @@ export function useAudioEngine(
     const onEndA = () => { if (activePlayerRef.current === "A") handleEnded("A"); };
     const onEndB = () => { if (activePlayerRef.current === "B") handleEnded("B"); };
 
-    const onWaiting = () => playbackPriority.setBuffering(true);
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const onWaiting = () => {
+      playbackPriority.setBuffering(true);
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        const cur = audioRef.current;
+        if (cur && !cur.paused) {
+          void cur.play().catch(() => {});
+        }
+      }, 2500);
+    };
+
     const onPlaying = () => {
+      if (stallTimer) {
+        clearTimeout(stallTimer);
+        stallTimer = null;
+      }
       playbackPriority.setBuffering(false);
       playbackPriority.reportPlaybackState(true, audioRef.current);
+      if (graphRef.current && graphRef.current.ctx.state === "suspended") {
+        void graphRef.current.resume().catch(() => {});
+      }
     };
     const onPause = () => playbackPriority.reportPlaybackState(false, audioRef.current);
     const onCanPlay = () => playbackPriority.setBuffering(false);
+
+    const onAudioError = (e: Event) => {
+      const el = e.target as HTMLAudioElement;
+      console.warn("[AudioEngine] Error en elemento de audio:", el.error?.message || el.error?.code);
+    };
 
     a1.addEventListener("timeupdate", onTimeA);
     a2.addEventListener("timeupdate", onTimeB);
@@ -348,16 +415,17 @@ export function useAudioEngine(
     a2.addEventListener("ended", onEndB);
     a1.addEventListener("waiting", onWaiting);
     a2.addEventListener("waiting", onWaiting);
-    // Note: stalled is fired when browser intentionally pauses socket read when buffer is full.
-    // Do NOT attach onWaiting to stalled as it causes false buffer lockups on mobile.
     a1.addEventListener("playing", onPlaying);
     a2.addEventListener("playing", onPlaying);
     a1.addEventListener("pause", onPause);
     a2.addEventListener("pause", onPause);
     a1.addEventListener("canplay", onCanPlay);
     a2.addEventListener("canplay", onCanPlay);
+    a1.addEventListener("error", onAudioError);
+    a2.addEventListener("error", onAudioError);
 
     return () => {
+      if (stallTimer) clearTimeout(stallTimer);
       a1.removeEventListener("timeupdate", onTimeA);
       a2.removeEventListener("timeupdate", onTimeB);
       a1.removeEventListener("loadedmetadata", onMetaA);
@@ -372,6 +440,8 @@ export function useAudioEngine(
       a2.removeEventListener("pause", onPause);
       a1.removeEventListener("canplay", onCanPlay);
       a2.removeEventListener("canplay", onCanPlay);
+      a1.removeEventListener("error", onAudioError);
+      a2.removeEventListener("error", onAudioError);
     };
   }, [handleTimeUpdate, handleLoadedMetadata, handleEnded]);
 
@@ -384,16 +454,8 @@ export function useAudioEngine(
   }, [needsGraph, ensureGraph]);
 
   useEffect(() => {
-    const rate = settings.playbackRate?.rate ?? 1.0;
-    const preservesPitch = settings.playbackRate?.preservePitch !== false;
-
     [primaryAudioRef.current, secondaryAudioRef.current].forEach(a => {
-      if (a) {
-        if (Math.abs(a.playbackRate - rate) > 0.001) a.playbackRate = rate;
-        (a as any).preservesPitch = preservesPitch;
-        (a as any).mozPreservesPitch = preservesPitch;
-        (a as any).webkitPreservesPitch = preservesPitch;
-      }
+      if (a) applyPlaybackRate(a);
     });
 
     graphRef.current?.applySettings(settings);
@@ -404,7 +466,8 @@ export function useAudioEngine(
     settings.eq,
     settings.normalizer,
     settings.crossfade,
-    graphVersion
+    graphVersion,
+    applyPlaybackRate
   ]);
 
   useEffect(() => {
@@ -424,7 +487,7 @@ export function useAudioEngine(
     const id = currentSong?.id ?? null;
     songIdRef.current = id;
     if (loadedSongIdRef.current !== id) {
-      standbyPreloadedForSongRef.current = null;
+      clearStandbyPlayer();
       transitionTriggeredForSongRef.current = null;
       nextTrackCandidateRef.current = null;
       const initialDur = (currentSong && Number.isFinite(currentSong.duration) && currentSong.duration > 0)
@@ -440,7 +503,45 @@ export function useAudioEngine(
     if (audio && audio.readyState >= 1 && Number.isFinite(audio.duration) && loadedSongIdRef.current === id) {
       graph.setDuration(audio.duration);
     }
-  }, [currentSong?.id, currentSong?.duration, setDuration]);
+  }, [currentSong?.id, currentSong?.duration, setDuration, clearStandbyPlayer]);
+
+  // Auto-recuperación ante cortes esporádicos de red
+  const retryCountRef = useRef(0);
+  const lastRetryTimeRef = useRef(0);
+
+  const handlePlaybackError = useCallback((el: HTMLAudioElement) => {
+    const song = currentSong;
+    const url = resolvedAudioUrl;
+    if (!song || !url || !isPlaying) return;
+
+    const now = Date.now();
+    if (now - lastRetryTimeRef.current > 15000) {
+      retryCountRef.current = 0;
+    }
+    lastRetryTimeRef.current = now;
+
+    if (retryCountRef.current < 3) {
+      retryCountRef.current += 1;
+      const saveTime = Math.max(0, el.currentTime - 0.2);
+      console.warn(`[AudioEngine] Auto-recuperando audio tras corte (intento ${retryCountRef.current}/3) en ${saveTime.toFixed(1)}s`);
+
+      setTimeout(() => {
+        if (audioRef.current === el && isPlaying) {
+          el.pause();
+          el.src = url;
+          applyPlaybackRate(el);
+          el.load();
+          const onRecoverCanPlay = () => {
+            el.removeEventListener("canplay", onRecoverCanPlay);
+            try { el.currentTime = saveTime; } catch {}
+            applyPlaybackRate(el);
+            void el.play().catch(() => {});
+          };
+          el.addEventListener("canplay", onRecoverCanPlay, { once: true });
+        }
+      }, 400);
+    }
+  }, [currentSong, resolvedAudioUrl, isPlaying, applyPlaybackRate]);
 
   // Carga y reproducción controlada
   useEffect(() => {
@@ -455,6 +556,7 @@ export function useAudioEngine(
     }
 
     let canPlayHandler: (() => void) | null = null;
+    let errorHandler: (() => void) | null = null;
 
     const startPlayback = async () => {
       if (needsGraph) ensureGraph();
@@ -467,6 +569,8 @@ export function useAudioEngine(
           console.error("Error resuming AudioContext:", e);
         }
       }
+
+      applyPlaybackRate(audio);
 
       if (isPlaying && audio.paused) {
         try {
@@ -483,15 +587,14 @@ export function useAudioEngine(
     };
 
     const isDifferentSong = loadedSongIdRef.current !== currentSong.id;
-    const needsNewTrackLoad = isDifferentSong || !audio.src;
-
-    let errorHandler: (() => void) | null = null;
+    const isDifferentUrl = !isSameAudioSource(audio.src, resolvedAudioUrl);
+    const needsNewTrackLoad = isDifferentSong || isDifferentUrl;
 
     if (needsNewTrackLoad) {
       loadedSongIdRef.current = currentSong.id;
-      standbyPreloadedForSongRef.current = null;
       transitionTriggeredForSongRef.current = null;
       nextTrackCandidateRef.current = null;
+      clearStandbyPlayer();
 
       const songDur = (Number.isFinite(currentSong.duration) && currentSong.duration > 0)
         ? currentSong.duration
@@ -506,10 +609,12 @@ export function useAudioEngine(
         graphRef.current.resetGains(activePlayerRef.current);
       }
 
+      applyPlaybackRate(audio);
       audio.src = resolvedAudioUrl;
       audio.load();
 
       canPlayHandler = () => {
+        applyPlaybackRate(audio);
         if (pendingSeekRef.current !== null) {
           try { audio.currentTime = pendingSeekRef.current; } catch (e) {}
           pendingSeekRef.current = null;
@@ -522,13 +627,15 @@ export function useAudioEngine(
       };
 
       errorHandler = () => {
-        console.warn("Error en reproducción de audio, reseteando referencia de canción:", audio.error);
+        console.warn("Error cargando pista de audio, reseteando referencia:", audio.error);
         loadedSongIdRef.current = null;
+        handlePlaybackError(audio);
       };
 
       audio.addEventListener("canplay", canPlayHandler);
       audio.addEventListener("error", errorHandler, { once: true });
     } else {
+      applyPlaybackRate(audio);
       if (isPlaying) {
         if (audio.paused) {
           startPlayback();
@@ -554,6 +661,12 @@ export function useAudioEngine(
     isPlaying,
     resolvedAudioUrl,
     setIsPlaying,
+    clearStandbyPlayer,
+    applyPlaybackRate,
+    handlePlaybackError,
+    needsGraph,
+    ensureGraph,
+    setDuration,
   ]);
 
   const subscribeToTime = useCallback((listener: () => void) => {

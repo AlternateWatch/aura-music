@@ -61,11 +61,22 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         this.callback = callback;
     }
 
+    private float playbackSpeed = 1.0f;
+
+    public void setPlaybackSpeed(float speed) {
+        if (speed <= 0f) speed = 1.0f;
+        if (Math.abs(this.playbackSpeed - speed) < 0.01f) return;
+        this.currentPositionMs = getExtrapolatedPositionMs();
+        this.positionUpdateRealtimeMs = android.os.SystemClock.elapsedRealtime();
+        this.playbackSpeed = speed;
+        invalidateState();
+    }
+
     private long getExtrapolatedPositionMs() {
         long pos = currentPositionMs;
         if (playing) {
             long elapsed = Math.max(0L, android.os.SystemClock.elapsedRealtime() - positionUpdateRealtimeMs);
-            pos += elapsed;
+            pos += Math.round(elapsed * (double) playbackSpeed);
         }
         if (durationMs > 0) {
             pos = Math.min(pos, durationMs);
@@ -312,7 +323,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
 
                         .setContentPositionMs(
                                 playing && currentMediaItem != null
-                                        ? PositionSupplier.getExtrapolating(getExtrapolatedPositionMs(), 1.0f)
+                                        ? PositionSupplier.getExtrapolating(getExtrapolatedPositionMs(), playbackSpeed)
                                         : PositionSupplier.getConstant(getExtrapolatedPositionMs())
                         )
 

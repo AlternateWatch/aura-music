@@ -2895,6 +2895,7 @@ useEffect(() => {
       }
     },
     isNativePlatform: Capacitor.isNativePlatform(),
+    playbackRate: audioSettings.playbackRate?.rate ?? 1.0,
   });
 
   // Los 3 botones del thumbnail toolbar en el preview de la ventana de
@@ -3101,6 +3102,12 @@ useEffect(() => {
 ]);
 
 useEffect(() => {
+  if (!Capacitor.isNativePlatform()) return;
+  const speed = audioSettings.playbackRate?.rate ?? 1.0;
+  AuraMedia.setPlaybackSpeed?.({ speed }).catch(() => {});
+}, [audioSettings.playbackRate?.rate]);
+
+useEffect(() => {
   if (!Capacitor.isNativePlatform()) {
     return;
   }
@@ -3116,10 +3123,11 @@ useEffect(() => {
     const currentTime = audioObj.getCurrentTime();
     const positionMs = Math.max(0, Math.round(currentTime * 1000));
     const now = performance.now();
+    const speed = audioSettings.playbackRate?.rate ?? 1.0;
 
     if (lastSentPosMs >= 0) {
       const elapsedWallMs = now - lastSentWallMs;
-      const expectedPosMs = lastSentPosMs + elapsedWallMs;
+      const expectedPosMs = lastSentPosMs + Math.round(elapsedWallMs * speed);
       const isSeekJump = Math.abs(positionMs - expectedPosMs) > 1500;
       if (!isSeekJump && elapsedWallMs < 15000) {
         return;

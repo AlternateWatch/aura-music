@@ -34,6 +34,10 @@ export interface AuraMediaPlugin {
     durationMs: number;
   }): Promise<void>;
 
+  setPlaybackSpeed?(options: {
+    speed: number;
+  }): Promise<void>;
+
   openExternalUrl?(options: {
     url: string;
   }): Promise<void>;

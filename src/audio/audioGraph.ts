@@ -222,6 +222,16 @@ export class AudioGraph {
     this.audioA.addEventListener("ended", this.onEnded);
     this.audioB.addEventListener("seeked", this.onSeeked);
     this.audioB.addEventListener("ended", this.onEnded);
+
+    // Auto-resumir AudioContext si el sistema operativo o WebView lo suspende en segundo plano
+    this.ctx.onstatechange = () => {
+      if (this.ctx.state === "suspended") {
+        const active = this.getActiveAudio();
+        if (active && !active.paused) {
+          void this.ctx.resume().catch(() => {});
+        }
+      }
+    };
   }
 
   private rebuildChain(eqOn: boolean, normOn: boolean) {
@@ -322,6 +332,14 @@ export class AudioGraph {
     if (!src) return;
     this.nextPreparedSrc = src;
     const standby = this.getStandbyAudio();
+    const rate = this.settings.playbackRate?.rate ?? 1.0;
+    const preservesPitch = this.settings.playbackRate?.preservePitch !== false;
+    standby.defaultPlaybackRate = rate;
+    standby.playbackRate = rate;
+    (standby as any).preservesPitch = preservesPitch;
+    (standby as any).mozPreservesPitch = preservesPitch;
+    (standby as any).webkitPreservesPitch = preservesPitch;
+
     if (standby.paused && standby.src !== src) {
       standby.src = src;
       standby.preload = "auto";
@@ -400,6 +418,14 @@ export class AudioGraph {
     fromGain.gain.setValueAtTime(1, now);
     fromGain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
 
+    const rate = this.settings.playbackRate?.rate ?? 1.0;
+    const preservesPitch = this.settings.playbackRate?.preservePitch !== false;
+    toAudio.defaultPlaybackRate = rate;
+    if (Math.abs(toAudio.playbackRate - rate) > 0.001) toAudio.playbackRate = rate;
+    (toAudio as any).preservesPitch = preservesPitch;
+    (toAudio as any).mozPreservesPitch = preservesPitch;
+    (toAudio as any).webkitPreservesPitch = preservesPitch;
+
     void toAudio.play().catch(() => {});
 
     this.fadeTimer = setTimeout(() => {
@@ -449,6 +475,7 @@ export class AudioGraph {
     if (!standby.paused) {
       standby.pause();
     }
+    try { standby.currentTime = 0; } catch {}
     this.resetGains(this.activePlayer);
   }
 

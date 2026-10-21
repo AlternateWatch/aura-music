@@ -574,6 +574,16 @@ public class AuraMediaService extends MediaSessionService {
         });
     }
 
+    public void setPlaybackSpeed(
+            float speed
+    ) {
+        mainHandler.post(() -> {
+            if (player != null) {
+                player.setPlaybackSpeed(speed);
+            }
+        });
+    }
+
     @Nullable
     @Override
     public MediaSession onGetSession(

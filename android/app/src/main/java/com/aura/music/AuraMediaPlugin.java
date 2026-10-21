@@ -364,6 +364,21 @@ public class AuraMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setPlaybackSpeed(PluginCall call) {
+        Double speedValue = call.getDouble("speed", 1.0);
+        float speed = speedValue != null ? speedValue.floatValue() : 1.0f;
+
+        AuraMediaService service =
+                AuraMediaService.getInstance();
+
+        if (service != null) {
+            service.setPlaybackSpeed(speed);
+        }
+
+        call.resolve();
+    }
+
+    @PluginMethod
     public void openExternalUrl(PluginCall call) {
         String urlString = call.getString("url");
         if (urlString == null || urlString.isEmpty()) {
