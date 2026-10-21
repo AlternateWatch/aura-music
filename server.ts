@@ -685,7 +685,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
     <span class="badge">Aura Music v${version} (Android)</span>
     <h1>Descarga Oficial APK</h1>
     <p class="desc">La última versión con panel de personalización avanzado, estilos de reproductor y mayor velocidad.</p>
-    <a href="/download/aura-latest.apk" class="btn" id="dlBtn" download="aura-latest.apk">
+    <a href="/download/aura-latest.apk?v=${version}" class="btn" id="dlBtn" download="aura-latest.apk">
       <span>⬇️ Descargar APK (6.6 MB)</span>
     </a>
     <p class="auto-notice" id="timerNotice">La descarga comenzará automáticamente en 2 segundos...</p>
@@ -710,7 +710,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
     setTimeout(function() {
       var n = document.getElementById('timerNotice');
       if (n) n.innerText = 'Si la descarga no ha comenzado, pulsa el botón naranja arriba.';
-      window.location.href = '/download/aura-latest.apk';
+      window.location.href = '/download/aura-latest.apk?v=' + encodeURIComponent('${version}');
     }, 1500);
   </script>
 </body>
@@ -722,7 +722,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
 });
 
 // 2.1 Descarga directa del archivo binario APK
-app.get(['/download/aura-latest.apk', '/download/app-release.apk', '/api/app/download'], async (req: Request, res: Response) => {
+app.get(['/download/aura-latest.apk', '/download/aura-v:ver.apk', '/download/app-release.apk', '/api/app/download'], async (req: Request, res: Response) => {
     try {
         const apkCandidates = [
             path.join(uploadDir, 'aura-latest.apk'),
