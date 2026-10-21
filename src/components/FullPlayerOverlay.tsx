@@ -206,8 +206,21 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
     (currentSong as any)?.animated_cover_path ||
     (currentSong as any)?.animatedCoverUrl
   );
-  const isNative = Capacitor.isNativePlatform();
-  const isVideo = !isNative && (isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path));
+  const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
+  const setVideoNode = (node: HTMLVideoElement | null) => {
+    (animatedVideoRef as any).current = node;
+    if (node) {
+      node.defaultMuted = true;
+      node.muted = true;
+      node.volume = 0;
+      node.playsInline = true;
+      try {
+        (node as any).disableRemotePlayback = true;
+        (node as any).disablePictureInPicture = true;
+      } catch {}
+      node.play().catch(() => {});
+    }
+  };
   const coverSrc = resolvedCoverUrl || resolveMediaUrl(currentSong.coverUrl) || DEFAULT_COVER;
 
   const [videoError, setVideoError] = useState(false);
@@ -307,7 +320,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             >
               {animUrl && !videoError && isVideo ? (
                 <video
-                  ref={animatedVideoRef}
+                  ref={setVideoNode}
                   key={animUrl}
                   src={animUrl}
                   poster={coverSrc}

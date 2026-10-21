@@ -5139,7 +5139,7 @@ transition={{
                     <div className="absolute -inset-20 blur-[120px] rounded-full animate-pulse transition-all duration-1000" style={{ backgroundColor: `${dynamicColor}33` }} />
                     <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] rounded-[60px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 bg-black">
                       {resolvedAnimatedCoverUrl && !tvVideoError ? (
-                        (isVideoUrl(resolvedAnimatedCoverUrl) && !Capacitor.isNativePlatform()) ? (
+                        isVideoUrl(resolvedAnimatedCoverUrl) ? (
                           <video
                             src={resolvedAnimatedCoverUrl}
                             autoPlay

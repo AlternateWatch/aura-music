@@ -63,6 +63,8 @@ export function useAudioEngine(
   onSongEndedRef.current = onSongEnded;
   getNextTrackRef.current = getNextTrack;
   onGaplessNextRef.current = onGaplessNext;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
   const needsGraph =
     settings.normalizer.enabled ||
@@ -428,7 +430,17 @@ export function useAudioEngine(
         void graphRef.current.resume().catch(() => {});
       }
     };
-    const onPause = () => playbackPriority.reportPlaybackState(false, audioRef.current);
+    const onPause = (e: Event) => {
+      playbackPriority.reportPlaybackState(false, audioRef.current);
+      const el = e.target as HTMLAudioElement;
+      if (el === audioRef.current && isPlayingRef.current) {
+        setTimeout(() => {
+          if (isPlayingRef.current && el.paused && audioRef.current === el) {
+            void el.play().catch(() => {});
+          }
+        }, 120);
+      }
+    };
     const onCanPlay = (e: Event) => {
       playbackPriority.setBuffering(false);
       const el = e.target as HTMLAudioElement;
