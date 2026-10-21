@@ -12,6 +12,7 @@ import {
   Maximize2,
   MonitorPlay,
   SlidersHorizontal,
+  Heart,
 } from "lucide-react";
 import { type Song } from "../constants";
 import { useAudioPlaybackTime } from "../hooks/useAudioEngine";
@@ -44,6 +45,9 @@ interface PlayerBarProps {
   onToggleFocusMode: () => void;
   isFocusMode: boolean;
   activeTheme: string;
+  mobilePlayerStyle?: "floating" | "classic" | "minimal" | "card";
+  isLiked?: boolean;
+  onToggleLike?: () => void;
 }
 
 export function PlayerBar({
@@ -69,7 +73,12 @@ export function PlayerBar({
   onToggleFocusMode,
   isFocusMode,
   activeTheme,
+  mobilePlayerStyle,
+  isLiked,
+  onToggleLike,
 }: PlayerBarProps) {
+
+  const currentMobileStyle = mobilePlayerStyle || (typeof window !== "undefined" ? (localStorage.getItem("aura_mobile_player_style") as any) : null) || "floating";
 
   const liveCurrentTime = useAudioPlaybackTime(
   getCurrentTime,
