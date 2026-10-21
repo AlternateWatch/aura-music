@@ -58,16 +58,28 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
       }
     }
 
-    // En navegador web convencional o fallback
+    // En navegador web convencional o fallback:
+    // Abrir una ventana/pestaña limpia primero o descargar directamente sin congelar el hilo UI
     try {
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = 'aura-latest.apk';
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isMobile) {
+        // En móviles web, window.open o asignar directamente a window.location evita que el navegador descarte el evento
+        const w = window.open(downloadUrl, '_blank');
+        if (!w || w.closed || typeof w.closed === 'undefined') {
+          window.location.assign(downloadUrl);
+        }
+      } else {
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = 'aura-latest.apk';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          try { document.body.removeChild(link); } catch {}
+        }, 100);
+      }
     } catch {
       window.location.href = downloadUrl;
     }

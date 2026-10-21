@@ -594,7 +594,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Descargar Aura Music para Android</title>
-  <meta http-equiv="refresh" content="2;url=/download/aura-latest.apk">
+  
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -744,10 +744,18 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
   </div>
   <script>
     setTimeout(function() {
-      var n = document.getElementById('timerNotice');
-      if (n) n.innerText = 'Si la descarga no ha comenzado, pulsa el botón naranja arriba.';
-      window.location.href = '/download/aura-latest.apk?v=' + encodeURIComponent('${version}');
-    }, 1500);
+      try {
+        var n = document.getElementById('timerNotice');
+        if (n) n.innerText = 'Iniciando descarga... Si no aparece, pulsa el botón naranja.';
+        var ifr = document.createElement('iframe');
+        ifr.style.display = 'none';
+        ifr.src = '/download/aura-latest.apk?v=' + encodeURIComponent('${version}');
+        document.body.appendChild(ifr);
+      } catch (e) {
+        var n2 = document.getElementById('timerNotice');
+        if (n2) n2.innerText = 'Pulsa el botón naranja arriba para descargar.';
+      }
+    }, 500);
   </script>
 </body>
 </html>`;
