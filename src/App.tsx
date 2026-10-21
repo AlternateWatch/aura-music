@@ -3258,6 +3258,7 @@ useEffect(() => {
               {token ? (
                 <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                   {/* AURA DJ BUTTON */}
+                  {isAiEnabled && (
                   <button
                     onClick={() => setIsAuraDjOpen(true)}
                     className="relative overflow-hidden bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-orange-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-inset ring-white/25 [background-clip:border-box] [background-origin:border-box]"
@@ -3266,6 +3267,7 @@ useEffect(() => {
                     <Sparkles size={13} className="fill-white" />
                     <span>Aura DJ</span>
                   </button>
+                  )}
 
                   {/* 1. UPLOAD BUTTON */}
                   <button
@@ -3325,6 +3327,7 @@ useEffect(() => {
                             </div>
 
                             {/* Aura DJ */}
+                            {isAiEnabled && (
                             <button
                               type="button"
                               onClick={() => {
@@ -3346,6 +3349,7 @@ useEffect(() => {
                                 </div>
                               </div>
                             </button>
+                            )}
 
                             {/* Temporizador de apagado */}
                             <button
@@ -4447,6 +4451,7 @@ transition={{
                                   <span>Aleatorio</span>
                                 </button>
 
+                                {isAiEnabled && (
                                 <button
                                   onClick={() => setIsAuraDjOpen(true)}
                                   className="px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-amber-500/20 via-[#F27D26]/20 to-rose-500/20 text-brand-primary border border-brand-primary/40 hover:bg-brand-primary/20 shadow-md"
@@ -4454,6 +4459,7 @@ transition={{
                                   <Sparkles size={12} className="fill-brand-primary" />
                                   <span>Aura DJ</span>
                                 </button>
+                                )}
 
                                 {(() => {
                                   const plDownloaded = songs.filter(s => offlineIds.has(String(s.id))).length;
@@ -4664,7 +4670,7 @@ transition={{
                                           );
                                         })()
                                       )}
-                                      {currentPlaylist && !showModeration && (
+                                      {currentPlaylist && !showModeration && isAiEnabled && (
                                         <button
                                           onClick={() => setIsAuraDjOpen(true)}
                                           title={`Aura DJ: mezclar o reordenar "${currentPlaylist.name}"`}
@@ -5399,7 +5405,7 @@ getCurrentTime={audioObj.getCurrentTime}
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}>
         <AnimatePresence>
-          {isAuraDjOpen && (
+          {isAiEnabled && isAuraDjOpen && (
             <LazyAuraDjOverlay
               onClose={() => setIsAuraDjOpen(false)}
               songs={allLibrarySongs.length > 0 ? allLibrarySongs : songs}
