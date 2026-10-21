@@ -7,7 +7,7 @@ import { AlbumDetailView } from "./components/AlbumDetailView";
 import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl, resolveApiUrl } from "./utils/api";
 import { Visualizer } from "./components/Visualizer";
 import { type Song, type Playlist } from "./constants";
-import { THEMES } from "./constants/themes";
+import { THEMES, type MobilePlayerStyle } from "./constants/themes";
 import { useFileUrl, resolveFileUrl } from "./hooks/useFileUrl";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import {
@@ -401,6 +401,33 @@ export default function App() {
   const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isPersonalizationOpen, setIsPersonalizationOpen] = useState(false);
+  const [mobilePlayerStyle, setMobilePlayerStyle] = useState<MobilePlayerStyle>(() => {
+    return (localStorage.getItem('aura_mobile_player_style') as MobilePlayerStyle) || 'floating';
+  });
+  const [isAiEnabled, setIsAiEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('aura_enable_ai');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [bgOpacity, setBgOpacity] = useState<number>(() => {
+    const saved = localStorage.getItem('aura_bg_opacity');
+    return saved ? parseInt(saved, 10) : 50;
+  });
+  const [ambientGlow, setAmbientGlow] = useState<'off' | 'soft' | 'vibrant'>(() => {
+    return (localStorage.getItem('aura_ambient_glow') as any) || 'soft';
+  });
+  const [accentColor, setAccentColor] = useState<string>(() => {
+    return localStorage.getItem('aura_accent_color') || '#F27D26';
+  });
+  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('aura_haptics_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  useEffect(() => {
+    if (accentColor && typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--brand-primary', accentColor);
+    }
+  }, [accentColor]);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
   const [tabsSong, setTabsSong] = useState<Song | null>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
@@ -3084,7 +3111,7 @@ useEffect(() => {
       
       <Background color={getThemeBg()} />
       {activeTheme === 'custom' && resolvedCustomBg && (
-          <div className="absolute inset-0 pointer-events-none transition-opacity duration-1000 z-[1]" style={{ backgroundImage: `url(${resolvedCustomBg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5 }} />
+          <div className="absolute inset-0 pointer-events-none transition-opacity duration-1000 z-[1]" style={{ backgroundImage: `url(${resolvedCustomBg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: bgOpacity / 100 }} />
       )}
 
       <AnimatePresence>
@@ -5208,7 +5235,66 @@ getCurrentTime={audioObj.getCurrentTime}
       )}</AnimatePresence>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
-      <Suspense fallback={null}><AnimatePresence>{isPersonalizationOpen && <LazyPersonalizationOverlay token={token} activeTheme={activeTheme} onThemeSelect={(id: string) => { setActiveTheme(id); localStorage.setItem('aura_theme', id); }} onBackgroundUpload={(url: string) => {setCustomBg(url);}} onClose={() => setIsPersonalizationOpen(false)} />}</AnimatePresence></Suspense>
+      <Suspense fallback={null}>
+        <AnimatePresence>
+          {isPersonalizationOpen && (
+            <LazyPersonalizationOverlay
+              token={token}
+              activeTheme={activeTheme}
+              onThemeSelect={(id: string) => {
+                setActiveTheme(id);
+                localStorage.setItem('aura_theme', id);
+              }}
+              customBg={customBg}
+              onBackgroundUpload={(url: string) => {
+                setCustomBg(url);
+              }}
+              onRemoveBackground={() => {
+                setCustomBg(null);
+                if (activeTheme === 'custom') {
+                  setActiveTheme('dark');
+                  localStorage.setItem('aura_theme', 'dark');
+                }
+              }}
+              isAiEnabled={isAiEnabled}
+              onToggleAi={(val: boolean) => {
+                setIsAiEnabled(val);
+                localStorage.setItem('aura_enable_ai', String(val));
+              }}
+              isVisualizerEnabled={audioSettings.visualizer.enabled}
+              onToggleVisualizer={(val: boolean) => {
+                updateAudioSettings({ ...audioSettings, visualizer: { ...audioSettings.visualizer, enabled: val } });
+              }}
+              mobilePlayerStyle={mobilePlayerStyle}
+              onSelectMobilePlayerStyle={(style: MobilePlayerStyle) => {
+                setMobilePlayerStyle(style);
+                localStorage.setItem('aura_mobile_player_style', style);
+              }}
+              bgOpacity={bgOpacity}
+              onChangeBgOpacity={(val: number) => {
+                setBgOpacity(val);
+                localStorage.setItem('aura_bg_opacity', String(val));
+              }}
+              ambientGlow={ambientGlow}
+              onChangeAmbientGlow={(glow) => {
+                setAmbientGlow(glow);
+                localStorage.setItem('aura_ambient_glow', glow);
+              }}
+              accentColor={accentColor}
+              onChangeAccentColor={(hex: string) => {
+                setAccentColor(hex);
+                localStorage.setItem('aura_accent_color', hex);
+              }}
+              hapticsEnabled={hapticsEnabled}
+              onToggleHaptics={(val: boolean) => {
+                setHapticsEnabled(val);
+                localStorage.setItem('aura_haptics_enabled', String(val));
+              }}
+              onClose={() => setIsPersonalizationOpen(false)}
+            />
+          )}
+        </AnimatePresence>
+      </Suspense>
       <Suspense fallback={null}><AnimatePresence>{isAudioSettingsOpen && (
         <LazyAudioSettingsOverlay
           onClose={() => setIsAudioSettingsOpen(false)}

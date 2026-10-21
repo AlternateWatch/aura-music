@@ -13,6 +13,10 @@ type ImpactLevel = "light" | "medium" | "heavy";
 export async function hapticImpact(style: ImpactLevel = "light"): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
+    // Respetar preferencia de personalización del usuario
+    if (typeof window !== "undefined" && localStorage.getItem("aura_haptics_enabled") === "false") {
+      return;
+    }
     const { Haptics, ImpactStyle } = await import("@capacitor/haptics");
     const styleMap: Record<ImpactLevel, any> = {
       light: ImpactStyle.Light,

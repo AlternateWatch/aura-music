@@ -214,10 +214,16 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
       `}</style>
 
       {/* Background Ambient Glow */}
-      <div 
-        className="fixed inset-0 opacity-40 blur-[140px] pointer-events-none transition-all duration-1000"
-        style={{ background: `radial-gradient(circle at center, #6366f1 0%, transparent 80%)` }}
-      />
+      {(typeof window !== 'undefined' ? (localStorage.getItem('aura_ambient_glow') || 'soft') : 'soft') !== 'off' && (
+        <div 
+          className={`fixed inset-0 pointer-events-none transition-all duration-1000 ${
+            (typeof window !== 'undefined' ? localStorage.getItem('aura_ambient_glow') : null) === 'vibrant'
+              ? 'opacity-60 blur-[110px]'
+              : 'opacity-35 blur-[140px]'
+          }`}
+          style={{ background: `radial-gradient(circle at 50% 35%, rgba(242,125,38,0.35) 0%, rgba(249,115,22,0.15) 45%, transparent 80%)` }}
+        />
+      )}
 
       {/* Contenedor principal que fluye completo */}
       <div className="flex flex-col min-h-full w-full relative z-10">

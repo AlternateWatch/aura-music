@@ -410,20 +410,7 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Activity className="text-brand-primary" size={18} />
-                  <div>
-                    <p className="text-sm font-bold text-white leading-none">Visualizer</p>
-                    <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">Reactive frequency waves</p>
-                  </div>
-                </div>
-                <Toggle
-                  on={settings.visualizer.enabled}
-                  onClick={() => onChange({ ...settings, visualizer: { ...settings.visualizer, enabled: !settings.visualizer.enabled } })}
-                  label="Visualizer"
-                />
-              </div>
+
 
               {/* AUTOPLAY / RADIO INFINITA */}
               <div className="flex items-center justify-between gap-4">
