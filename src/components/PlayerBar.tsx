@@ -180,7 +180,9 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 };
 
   const progressValue = isDragging ? localProgress : liveCurrentTime;
-  const progressPercent = ((progressValue || 0) / (duration || 1)) * 100;
+  const progressPercent = (duration > 0 && Number.isFinite(duration))
+    ? Math.min(100, Math.max(0, ((progressValue || 0) / duration) * 100))
+    : 0;
 
   const glassClasses =
     activeTheme === "light"

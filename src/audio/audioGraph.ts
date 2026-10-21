@@ -378,8 +378,6 @@ export class AudioGraph {
     (toAudio as any).preservesPitch = preservesPitch;
     (toAudio as any).mozPreservesPitch = preservesPitch;
     (toAudio as any).webkitPreservesPitch = preservesPitch;
-    void toAudio.play().catch(() => {});
-
     const playPromise = toAudio.play();
     if (playPromise !== undefined) {
       playPromise.catch(() => {});

@@ -190,7 +190,9 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
 
   if (!isOpen || !currentSong) return null;
 
-  const progress = (liveCurrentTime / (duration || 1)) * 100;
+  const progress = (duration > 0 && Number.isFinite(duration))
+    ? Math.min(100, Math.max(0, (liveCurrentTime / duration) * 100))
+    : 0;
 
   const formatTime = (time: number) => {
     if (!Number.isFinite(time) || time < 0) return "0:00";

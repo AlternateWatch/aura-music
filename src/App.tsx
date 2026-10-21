@@ -1888,17 +1888,11 @@ useEffect(() => {
     if (pool.length === 0) return;
 
     if (socketObj.isLoop && currentSong) {
-      if (audioObj.audioRef.current) {
-        audioObj.audioRef.current.currentTime = 0;
-
-        try {
-          await audioObj.audioRef.current.play();
-        } catch (error) {
-          console.error(
-            'Error reiniciando canción en loop:',
-            error
-          );
-        }
+      audioObj.seek(0);
+      try {
+        await audioObj.audioRef.current?.play();
+      } catch (error) {
+        console.error('Error reiniciando canción en loop:', error);
       }
 
       setIsPlaying(true);
@@ -1932,10 +1926,8 @@ useEffect(() => {
         try { localStorage.removeItem('aura_last_song'); } catch (e) {}
         setActiveQueue([]);
         socketObj.setShuffledQueue([]);
-        if (audioObj.audioRef.current) {
-          audioObj.audioRef.current.pause();
-          audioObj.audioRef.current.currentTime = 0;
-        }
+        if (audioObj.audioRef.current) { audioObj.audioRef.current.pause(); }
+audioObj.seek(0);
         socketObj.emitCommand('toggle-play', { isPlaying: false });
         return;
       }
@@ -1961,7 +1953,7 @@ useEffect(() => {
     const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
 
     if (audioObj.getCurrentTime() > 3) {
-      if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = 0;
+      audioObj.seek(0);
       return;
     }
 
@@ -2890,9 +2882,7 @@ useEffect(() => {
     onNext: handleNext,
     onPrevious: handlePrevious,
     onSeekTo: (seconds) => {
-      if (audioObj.audioRef.current) {
-        audioObj.audioRef.current.currentTime = seconds;
-      }
+      audioObj.seek(seconds);
     },
     isNativePlatform: Capacitor.isNativePlatform(),
     playbackRate: audioSettings.playbackRate?.rate ?? 1.0,
@@ -2984,10 +2974,7 @@ useEffect(() => {
             return;
           }
 
-          if (audioObj.audioRef.current) {
-            audioObj.audioRef.current.currentTime =
-              positionMs / 1000;
-          }
+          audioObj.seek(positionMs / 1000);
         }
       );
 
@@ -5270,10 +5257,8 @@ transition={{
                   if (minigameAudioRef.current && t <= 10) minigameAudioRef.current.currentTime = t;
                 } else {
                   if (blockIfGuest()) return;
-                  if (audioObj.audioRef.current) {
-                    audioObj.audioRef.current.currentTime = t;
-                    socketObj.emitCommand("seek", { time: t });
-                  }
+                  audioObj.seek(t);
+                  socketObj.emitCommand("seek", { time: t });
                 }
               }}
               onVolumeChange={setVolume}
@@ -5297,12 +5282,10 @@ transition={{
       <Suspense fallback={null}><LazyMinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} /></Suspense>
       <Suspense fallback={null}><AnimatePresence>{tabsSong && <LazyTabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
-  subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => { if(audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t; }} />}</AnimatePresence></Suspense>
+  subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => audioObj.seek(t)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} liveCurrentTime={audioObj.getCurrentTime()} subscribeToTime={audioObj.subscribeToTime}
 getCurrentTime={audioObj.getCurrentTime}
- onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => {
-          if (audioObj.audioRef.current) audioObj.audioRef.current.currentTime = t;
-      }} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} audioSettings={audioSettings} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+ onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => audioObj.seek(t)} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} audioSettings={audioSettings} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
