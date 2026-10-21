@@ -502,14 +502,22 @@ export function useAudioEngine(
   useEffect(() => {
     if (!isPlaying) return;
     let timer: ReturnType<typeof setInterval> | null = null;
-    timer = setInterval(() => {
-      const a = audioRef.current;
-      if (a && !a.paused && Number.isFinite(a.currentTime)) {
-        handleTimeUpdate(a.currentTime);
-      }
-    }, 150);
+    const startTicker = () => {
+      if (timer) clearInterval(timer);
+      const intervalMs = (typeof document !== "undefined" && document.hidden) ? 500 : 150;
+      timer = setInterval(() => {
+        const a = audioRef.current;
+        if (a && !a.paused && Number.isFinite(a.currentTime)) {
+          handleTimeUpdate(a.currentTime);
+        }
+      }, intervalMs);
+    };
+    startTicker();
+    const onVis = () => startTicker();
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [isPlaying, handleTimeUpdate]);
 

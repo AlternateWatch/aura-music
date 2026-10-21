@@ -23,8 +23,9 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
-            'vendor-ui': ['motion', 'lucide-react'],
-            'vendor-data': ['socket.io-client', 'dexie'],
+            'vendor-motion': ['motion', 'motion/react'],
+            'vendor-icons': ['lucide-react'],
+            'vendor-data': ['socket.io-client', 'dexie', 'fuse.js'],
           },
         },
       },

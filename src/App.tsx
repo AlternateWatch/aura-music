@@ -3118,6 +3118,9 @@ useEffect(() => {
       const elapsedWallMs = now - lastSentWallMs;
       const expectedPosMs = lastSentPosMs + Math.round(elapsedWallMs * speed);
       const isSeekJump = Math.abs(positionMs - expectedPosMs) > 1500;
+      if (isSeekJump && elapsedWallMs < 150) {
+        return;
+      }
       if (!isSeekJump && elapsedWallMs < 15000) {
         return;
       }
