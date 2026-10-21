@@ -10,6 +10,7 @@ import {
   THEMES, 
   MOBILE_PLAYER_OPTIONS, 
   ACCENT_COLORS,
+  FULLPLAYER_GLOW_COLORS,
   type Theme, 
   type MobilePlayerStyle 
 } from '../constants/themes';
@@ -51,6 +52,10 @@ interface PersonalizationOverlayProps {
   accentColor: string;
   onChangeAccentColor: (hex: string) => void;
 
+  // Glow color
+  ambientGlowColor: string;
+  onChangeAmbientGlowColor: (color: string) => void;
+
   // Columnas catálogo móvil
   mobileColumns: 1 | 2 | 3;
   onChangeMobileColumns: (cols: 1 | 2 | 3) => void;
@@ -80,6 +85,8 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
   onChangeAmbientGlow,
   accentColor,
   onChangeAccentColor,
+  ambientGlowColor,
+  onChangeAmbientGlowColor,
   mobileColumns,
   onChangeMobileColumns,
   hapticsEnabled,
@@ -356,6 +363,19 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
                       </button>
                     );
                   })}
+
+                  {/* Selector de color libre */}
+                  <label className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/5 cursor-pointer text-white/60 transition-all">
+                    <input
+                      type="color"
+                      value={accentColor.startsWith('#') ? accentColor : '#F27D26'}
+                      onChange={(e) => {
+                        onChangeAccentColor(e.target.value);
+                      }}
+                      className="w-4 h-4 rounded-full border-0 p-0 bg-transparent cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-white">Color Libre</span>
+                  </label>
                 </div>
               </div>
 
@@ -568,6 +588,60 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
                     );
                   })}
                 </div>
+
+                {/* SELECTOR DE COLOR DEL RESPLANDOR (Cuando no está apagado) */}
+                {ambientGlow !== 'off' && (
+                  <div className="pt-3 border-t border-white/5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-white/80">Color del Resplandor:</span>
+                      <span className="text-[10px] text-brand-primary font-mono font-bold">
+                        {FULLPLAYER_GLOW_COLORS.find(c => c.hex.toLowerCase() === ambientGlowColor.toLowerCase())?.name || 'Personalizado'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {FULLPLAYER_GLOW_COLORS.map((gColor) => {
+                        const isSelected = ambientGlowColor.toLowerCase() === gColor.hex.toLowerCase();
+                        return (
+                          <button
+                            key={gColor.id}
+                            type="button"
+                            onClick={() => {
+                              hapticImpact('light');
+                              onChangeAmbientGlowColor(gColor.hex);
+                            }}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'border-brand-primary bg-white/10 text-white shadow'
+                                : 'border-white/5 bg-white/[0.02] hover:bg-white/5 text-white/60'
+                            }`}
+                            title={gColor.name}
+                          >
+                            <div
+                              className="w-3.5 h-3.5 rounded-full ring-1 ring-white/20 shadow-sm"
+                              style={{ backgroundColor: gColor.hex }}
+                            />
+                            <span className="text-[11px] font-medium text-white">{gColor.name}</span>
+                            {isSelected && <Check size={12} className="text-brand-primary ml-0.5" />}
+                          </button>
+                        );
+                      })}
+
+                      {/* Color libre */}
+                      <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/5 cursor-pointer text-white/60 transition-all">
+                        <input
+                          type="color"
+                          value={ambientGlowColor.startsWith('#') ? ambientGlowColor : '#6366f1'}
+                          onChange={(e) => {
+                            onChangeAmbientGlowColor(e.target.value);
+                          }}
+                          className="w-3.5 h-3.5 rounded-full border-0 p-0 bg-transparent cursor-pointer"
+                        />
+                        <span className="text-[11px] font-medium text-white">Color Libre</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
 
             </div>

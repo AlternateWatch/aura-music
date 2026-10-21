@@ -68,10 +68,27 @@ export interface AccentColorOption {
 
 export const ACCENT_COLORS: AccentColorOption[] = [
   { id: 'aura', name: 'Aura Naranja', hex: '#F27D26' },
+  { id: 'indigo', name: 'Azul Índigo', hex: '#6366f1' },
   { id: 'amber', name: 'Ámbar Solar', hex: '#f59e0b' },
   { id: 'emerald', name: 'Esmeralda', hex: '#10b981' },
   { id: 'cyan', name: 'Cian Neón', hex: '#06b6d4' },
   { id: 'purple', name: 'Púrpura', hex: '#a855f7' },
   { id: 'rose', name: 'Rosa Fucsia', hex: '#ec4899' },
   { id: 'white', name: 'Blanco Puro', hex: '#ffffff' },
+];
+
+export interface GlowColorOption {
+  id: string;
+  name: string;
+  hex: string;
+}
+
+export const FULLPLAYER_GLOW_COLORS: GlowColorOption[] = [
+  { id: 'indigo', name: 'Azul Índigo (Original)', hex: '#6366f1' },
+  { id: 'aura', name: 'Naranja Aura', hex: '#F27D26' },
+  { id: 'purple', name: 'Violeta Neón', hex: '#a855f7' },
+  { id: 'cyan', name: 'Cian Cósmico', hex: '#06b6d4' },
+  { id: 'emerald', name: 'Esmeralda', hex: '#10b981' },
+  { id: 'rose', name: 'Rosa Neón', hex: '#ec4899' },
+  { id: 'amber', name: 'Ámbar Cálido', hex: '#f59e0b' },
 ];

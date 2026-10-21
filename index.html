@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Aura.</title>
     <link rel="icon" type="image/svg+xml" href="/Aura logo.ico" />
+    <script>
+      try {
+        const acc = localStorage.getItem('aura_accent_color');
+        if (acc) {
+          document.documentElement.style.setProperty('--brand-primary', acc);
+          document.documentElement.style.setProperty('--color-brand-primary', acc);
+          const style = document.createElement('style');
+          style.id = 'aura-accent-override';
+          style.textContent = `
+            :root, html, body {
+              --brand-primary: ${acc} !important;
+              --color-brand-primary: ${acc} !important;
+            }
+            .text-brand-primary { color: ${acc} !important; }
+            .bg-brand-primary { background-color: ${acc} !important; }
+            .border-brand-primary { border-color: ${acc} !important; }
+            .fill-brand-primary { fill: ${acc} !important; }
+            .ring-brand-primary { --tw-ring-color: ${acc} !important; }
+            .accent-brand-primary { accent-color: ${acc} !important; }
+          `;
+          document.head.appendChild(style);
+        }
+      } catch(e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

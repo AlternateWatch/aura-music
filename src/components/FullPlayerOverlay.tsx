@@ -36,7 +36,9 @@ interface FullPlayerOverlayProps {
   onToggleQueue: () => void;
   onOpenAudioSettings: () => void;
   activeTheme: string;
-  onOpenMinigameLobby: () => void; 
+  onOpenMinigameLobby: () => void;
+  ambientGlow?: 'off' | 'soft' | 'vibrant';
+  ambientGlowColor?: string;
 }
 
 const isVideoUrl = (url?: string | null) => {
@@ -89,7 +91,23 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
   onOpenMinigameLobby,
   getCurrentTime,
   subscribeToTime,
+  ambientGlow,
+  ambientGlowColor,
 } = props;
+
+  const hexToRgba = (hex: string, alpha: number) => {
+    let c = (hex || '#6366f1').replace('#', '').trim();
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const num = parseInt(c, 16);
+    if (isNaN(num)) return 'rgba(99, 102, 241, ' + alpha + ')';
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+  };
+
+  const glowSetting = ambientGlow ?? (typeof window !== 'undefined' ? ((localStorage.getItem('aura_ambient_glow') as any) || 'soft') : 'soft');
+  const glowColor = ambientGlowColor ?? (typeof window !== 'undefined' ? (localStorage.getItem('aura_ambient_glow_color') || '#6366f1') : '#6366f1');
 
 const liveCurrentTime = useAudioPlaybackTime(
   getCurrentTime,
@@ -213,19 +231,19 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
         }
       `}</style>
 
-      {/* Background Ambient Glow */}
-      {(typeof window !== 'undefined' ? (localStorage.getItem('aura_ambient_glow') || 'soft') : 'soft') !== 'off' && (
+            {/* Background Ambient Glow */}
+      {glowSetting !== 'off' && (
         <div 
-          className={`fixed inset-0 pointer-events-none transition-all duration-1000 ${
-            (typeof window !== 'undefined' ? localStorage.getItem('aura_ambient_glow') : null) === 'vibrant'
-              ? 'opacity-60 blur-[110px]'
-              : 'opacity-35 blur-[140px]'
+          className={`fixed inset-0 pointer-events-none transition-all duration-700 ${
+            glowSetting === 'vibrant'
+              ? 'opacity-65 blur-[100px]'
+              : 'opacity-40 blur-[130px]'
           }`}
-          style={{ background: `radial-gradient(circle at 50% 35%, rgba(242,125,38,0.35) 0%, rgba(249,115,22,0.15) 45%, transparent 80%)` }}
+          style={{ background: `radial-gradient(circle at 50% 35%, ${hexToRgba(glowColor, glowSetting === 'vibrant' ? 0.45 : 0.35)} 0%, ${hexToRgba(glowColor, glowSetting === 'vibrant' ? 0.20 : 0.12)} 45%, transparent 80%)` }}
         />
       )}
 
-      {/* Contenedor principal que fluye completo */}
+{/* Contenedor principal que fluye completo */}
       <div className="flex flex-col min-h-full w-full relative z-10">
         {/* Mobile Pull-down handle indicator */}
         <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mt-2.5 shrink-0 md:hidden pointer-events-none" />

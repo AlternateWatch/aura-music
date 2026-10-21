@@ -442,14 +442,41 @@ export default function App() {
   const [accentColor, setAccentColor] = useState<string>(() => {
     return localStorage.getItem('aura_accent_color') || '#F27D26';
   });
+  const [ambientGlowColor, setAmbientGlowColor] = useState<string>(() => {
+    return localStorage.getItem('aura_ambient_glow_color') || '#6366f1';
+  });
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('aura_haptics_enabled');
     return saved !== null ? saved === 'true' : true;
   });
 
+  const applyAccentColor = (hex: string) => {
+    if (typeof document === 'undefined' || !hex) return;
+    document.documentElement.style.setProperty('--brand-primary', hex);
+    document.documentElement.style.setProperty('--color-brand-primary', hex);
+    let tag = document.getElementById('aura-accent-override');
+    if (!tag) {
+      tag = document.createElement('style');
+      tag.id = 'aura-accent-override';
+      document.head.appendChild(tag);
+    }
+    tag.textContent = `
+      :root, html, body {
+        --brand-primary: ${hex} !important;
+        --color-brand-primary: ${hex} !important;
+      }
+      .text-brand-primary { color: ${hex} !important; }
+      .bg-brand-primary { background-color: ${hex} !important; }
+      .border-brand-primary { border-color: ${hex} !important; }
+      .fill-brand-primary { fill: ${hex} !important; }
+      .ring-brand-primary { --tw-ring-color: ${hex} !important; }
+      .accent-brand-primary { accent-color: ${hex} !important; }
+    `;
+  };
+
   useEffect(() => {
-    if (accentColor && typeof document !== 'undefined') {
-      document.documentElement.style.setProperty('--brand-primary', accentColor);
+    if (accentColor) {
+      applyAccentColor(accentColor);
     }
   }, [accentColor]);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
@@ -5284,6 +5311,9 @@ getCurrentTime={audioObj.getCurrentTime}
               onToggleAi={(val: boolean) => {
                 setIsAiEnabled(val);
                 localStorage.setItem('aura_enable_ai', String(val));
+                if (!val) {
+                  setIsAuraDjOpen(false);
+                }
               }}
               isVisualizerEnabled={audioSettings.visualizer.enabled}
               onToggleVisualizer={(val: boolean) => {
@@ -5313,6 +5343,12 @@ getCurrentTime={audioObj.getCurrentTime}
               onChangeAccentColor={(hex: string) => {
                 setAccentColor(hex);
                 localStorage.setItem('aura_accent_color', hex);
+                applyAccentColor(hex);
+              }}
+              ambientGlowColor={ambientGlowColor}
+              onChangeAmbientGlowColor={(color: string) => {
+                setAmbientGlowColor(color);
+                localStorage.setItem('aura_ambient_glow_color', color);
               }}
               hapticsEnabled={hapticsEnabled}
               onToggleHaptics={(val: boolean) => {

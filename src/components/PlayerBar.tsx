@@ -423,7 +423,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); hapticImpact("medium"); onTogglePlay(e); }}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] text-black active:scale-95 shadow transition-transform cursor-pointer outline-none"
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-brand-primary text-black active:scale-95 shadow transition-transform cursor-pointer outline-none"
                   title={isPlaying ? "Pausar" : "Reproducir"}
                 >
                   {isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} className="ml-0.5" fill="currentColor" />}
@@ -442,7 +442,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             {/* Barra de progreso de la tarjeta */}
             <div className="relative w-full h-1 bg-white/10 rounded-full overflow-hidden pointer-events-none">
               <div
-                className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full transition-all duration-150"
+                className="h-full bg-brand-primary rounded-full transition-all duration-150"
                 style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
               />
             </div>
@@ -461,7 +461,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
             {/* Hairline Progress Bar along the top edge */}
             <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-white/10 overflow-hidden pointer-events-none">
               <div
-                className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-orange-400 transition-all duration-150"
+                className="h-full bg-brand-primary transition-all duration-150"
                 style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
               />
             </div>
@@ -541,7 +541,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
                   WebkitTapHighlightColor: "transparent",
                   WebkitTouchCallout: "none",
                 }}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 to-[#F27D26] text-black shrink-0 active:scale-95 transition-transform shadow-[0_4px_16px_rgba(242,125,38,0.4)] cursor-pointer outline-none focus:outline-none"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-brand-primary text-black shrink-0 active:scale-95 transition-transform shadow-lg cursor-pointer outline-none focus:outline-none"
                 title={isPlaying ? "Pausar" : "Reproducir"}
               >
                 {isPlaying ? (
