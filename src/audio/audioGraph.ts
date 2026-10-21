@@ -380,8 +380,17 @@ export class AudioGraph {
     (toAudio as any).webkitPreservesPitch = preservesPitch;
     void toAudio.play().catch(() => {});
 
-    fromAudio.pause();
-    fromAudio.currentTime = 0;
+    const playPromise = toAudio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {});
+    }
+
+    setTimeout(() => {
+      try {
+        fromAudio.pause();
+        fromAudio.currentTime = 0;
+      } catch {}
+    }, 60);
 
     this.activePlayer = to;
     if (Number.isFinite(toAudio.duration) && toAudio.duration > 0) {

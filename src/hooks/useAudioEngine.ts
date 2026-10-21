@@ -101,7 +101,7 @@ export function useAudioEngine(
     const preloaded = standbyPreloadedTrackRef.current;
     if (!preloaded || preloaded.id !== targetSong.id) return false;
     if (!isSameAudioSource(standbyAudio.src, preloaded.url)) return false;
-    if (standbyAudio.readyState < 3) return false; // Al menos HAVE_FUTURE_DATA
+    if (standbyAudio.readyState < 2) return false; // Al menos HAVE_CURRENT_DATA (listo para reproducir primer frame)
     if (standbyAudio.error) return false;
     return true;
   }, []);
@@ -195,11 +195,11 @@ export function useAudioEngine(
       // Informar al gestor de prioridad del estado del buffer de reproducción
       playbackPriority.reportPlaybackState(audio ? !audio.paused : true, audio, remaining);
 
-      // LOOKAHEAD: Solo precargar la siguiente si la activa ya tiene todo su final buferizado
-      const prebufferThreshold = Math.min(10, Math.max(3, dur * 0.4));
+      // Precarga ultra-anticipada: inicia tan pronto lleve 3s sonando de forma estable
+      // para que cuando termine la canción actual, la siguiente ya esté 100% en memoria
       const bufferedAhead = playbackPriority.getBufferedAhead(audio);
-      const isActiveTrackSafe = bufferedAhead >= Math.min(remaining - 0.5, 8) || remaining <= 2;
-      const canPrebuffer = time > 5 && time >= dur * 0.4 && remaining <= prebufferThreshold && isActiveTrackSafe;
+      const isBufferHealthy = bufferedAhead >= 3 || remaining <= 40;
+      const canPrebuffer = time > 3 && isBufferHealthy;
 
       if (canPrebuffer && standbyPreloadedForSongRef.current !== songId) {
         standbyPreloadedForSongRef.current = songId;
@@ -250,8 +250,8 @@ export function useAudioEngine(
           }
         }
       } else if (gapless) {
-        // Gapless 0 ms: disparar cuando resten menos de 80 ms para sample exacto sin gap
-        const isGaplessPoint = time > 5 && time >= dur * 0.7 && remaining <= 0.08 && remaining >= -0.5;
+        // Gapless 0 ms: disparar cuando resten menos de 180 ms para solapamiento sample-exacto sin silencio
+        const isGaplessPoint = time > 3 && remaining <= 0.18 && remaining >= -0.5;
         if (isGaplessPoint && transitionTriggeredForSongRef.current !== songId) {
           const nextSong = nextTrackCandidateRef.current;
           const g = graphRef.current;
@@ -367,14 +367,42 @@ export function useAudioEngine(
       audioRef.current = a1;
     }
 
-    const onTimeA = () => { if (activePlayerRef.current === "A") handleTimeUpdate(a1.currentTime); };
-    const onTimeB = () => { if (activePlayerRef.current === "B") handleTimeUpdate(a2.currentTime); };
+    const onTimeA = () => {
+      if (audioRef.current === a1 || (!a1.paused && a2.paused)) {
+        if (activePlayerRef.current !== "A") activePlayerRef.current = "A";
+        if (audioRef.current !== a1) audioRef.current = a1;
+        handleTimeUpdate(a1.currentTime);
+      }
+    };
+    const onTimeB = () => {
+      if (audioRef.current === a2 || (!a2.paused && a1.paused)) {
+        if (activePlayerRef.current !== "B") activePlayerRef.current = "B";
+        if (audioRef.current !== a2) audioRef.current = a2;
+        handleTimeUpdate(a2.currentTime);
+      }
+    };
 
-    const onMetaA = () => { if (activePlayerRef.current === "A") handleLoadedMetadata(a1.duration); };
-    const onMetaB = () => { if (activePlayerRef.current === "B") handleLoadedMetadata(a2.duration); };
+    const onMetaA = () => {
+      if (audioRef.current === a1 || (!a1.paused && a2.paused)) {
+        handleLoadedMetadata(a1.duration);
+      }
+    };
+    const onMetaB = () => {
+      if (audioRef.current === a2 || (!a2.paused && a1.paused)) {
+        handleLoadedMetadata(a2.duration);
+      }
+    };
 
-    const onEndA = () => { if (activePlayerRef.current === "A") handleEnded("A"); };
-    const onEndB = () => { if (activePlayerRef.current === "B") handleEnded("B"); };
+    const onEndA = () => {
+      if (audioRef.current === a1 || (!a1.paused && a2.paused)) {
+        handleEnded("A");
+      }
+    };
+    const onEndB = () => {
+      if (audioRef.current === a2 || (!a2.paused && a1.paused)) {
+        handleEnded("B");
+      }
+    };
 
     let stallTimer: ReturnType<typeof setTimeout> | null = null;
     const onWaiting = () => {
@@ -444,6 +472,21 @@ export function useAudioEngine(
       a2.removeEventListener("error", onAudioError);
     };
   }, [handleTimeUpdate, handleLoadedMetadata, handleEnded]);
+
+  // Ticker activo de alta precisión: garantiza que la barra de reproducción avance sin interrupciones
+  useEffect(() => {
+    if (!isPlaying) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    timer = setInterval(() => {
+      const a = audioRef.current;
+      if (a && !a.paused && Number.isFinite(a.currentTime)) {
+        handleTimeUpdate(a.currentTime);
+      }
+    }, 150);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isPlaying, handleTimeUpdate]);
 
   const getCurrentTime = useCallback(() => {
     return audioRef.current?.currentTime ?? currentTimeRef.current;
