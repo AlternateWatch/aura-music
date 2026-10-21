@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Download, CheckCircle2, X, ExternalLink, ShieldAlert, ArrowRight } from 'lucide-react';
-import { type AppUpdateInfo } from '../hooks/useAppUpdate';
+import { type AppUpdateInfo, getDiffReleaseNotes } from '../hooks/useAppUpdate';
 import { hapticImpact } from '../utils/haptics';
 import { Capacitor } from '@capacitor/core';
 import AuraMedia from '../plugins/auraMedia';
@@ -20,6 +20,8 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   currentVersion
 }) => {
   const [downloadStarted, setDownloadStarted] = useState(false);
+
+  const diffNotes = getDiffReleaseNotes(updateInfo, currentVersion);
 
   const handleStartUpdate = async () => {
     if (!updateInfo) return;
@@ -114,11 +116,20 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 
             {/* Novedades y Release Notes */}
             <div className="space-y-1.5 mb-6">
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">
-                Novedades de esta versión
-              </p>
-              <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 text-xs text-white/80 leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap font-sans">
-                {updateInfo.releaseNotes || "Mejoras de rendimiento y correcciones en la aplicación."}
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">
+                  {diffNotes.isMultiVersion
+                    ? `Novedades acumuladas (${diffNotes.versionsCount} versiones)`
+                    : `Novedades del parche (v${updateInfo.latestVersion})`}
+                </p>
+                {diffNotes.isMultiVersion && (
+                  <span className="text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/20">
+                    Desde v{currentVersion}
+                  </span>
+                )}
+              </div>
+              <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 text-xs text-white/80 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-sans">
+                {diffNotes.notes || "Mejoras de rendimiento y correcciones en la aplicación."}
               </div>
             </div>
 

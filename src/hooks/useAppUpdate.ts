@@ -5,6 +5,13 @@ import { API_BASE } from '../utils/api';
 
 export const CURRENT_APP_VERSION = "1.0.4";
 
+export interface AppUpdateHistoryItem {
+  version: string;
+  versionCode?: number;
+  notes: string;
+  publishedAt?: string;
+}
+
 export interface AppUpdateInfo {
   platform: string;
   latestVersion: string;
@@ -13,6 +20,7 @@ export interface AppUpdateInfo {
   downloadUrl: string;
   mandatory?: boolean;
   publishedAt?: string;
+  history?: AppUpdateHistoryItem[];
 }
 
 /**
@@ -30,6 +38,51 @@ export function isNewerVersion(latest: string, current: string): boolean {
     if (l < c) return false;
   }
   return false;
+}
+
+/**
+ * Devuelve únicamente las notas de los parches entre la versión actual instalada
+ * y la versión más reciente.
+ * - Si es 1 versión de salto (ej. 1.0.3 -> 1.0.4), devuelve SOLO las notas de 1.0.4 sin acumular anteriores.
+ * - Si salta varias versiones (ej. 1.0.2 -> 1.0.4), agrupa las notas de 1.0.4 y 1.0.3.
+ */
+export function getDiffReleaseNotes(
+  updateInfo: AppUpdateInfo | null,
+  currentVersion: string
+): { notes: string; versionsCount: number; isMultiVersion: boolean } {
+  if (!updateInfo) return { notes: '', versionsCount: 0, isMultiVersion: false };
+
+  const history = updateInfo.history;
+  if (Array.isArray(history) && history.length > 0) {
+    // Filtrar solo aquellas versiones en el historial que sean estrictamente más nuevas que la instalada
+    const relevant = history
+      .filter(item => isNewerVersion(item.version, currentVersion))
+      .sort((a, b) => (isNewerVersion(a.version, b.version) ? -1 : 1));
+
+    if (relevant.length === 1) {
+      return {
+        notes: relevant[0].notes,
+        versionsCount: 1,
+        isMultiVersion: false
+      };
+    } else if (relevant.length > 1) {
+      const formatted = relevant
+        .map(item => `✨ Versión v${item.version}:\n${item.notes}`)
+        .join('\n\n');
+      return {
+        notes: formatted,
+        versionsCount: relevant.length,
+        isMultiVersion: true
+      };
+    }
+  }
+
+  // Fallback si no hay historial
+  return {
+    notes: updateInfo.releaseNotes || 'Mejoras de rendimiento y estabilidad.',
+    versionsCount: 1,
+    isMultiVersion: false
+  };
 }
 
 export function useAppUpdate() {
@@ -69,7 +122,12 @@ export function useAppUpdate() {
         } catch {}
       }
 
-      const res = await fetch(`${API_BASE}/api/app/version`, {
+      const url = new URL(`${API_BASE}/api/app/version`);
+      if (installedVer) {
+        url.searchParams.set('current', installedVer);
+      }
+
+      const res = await fetch(url.toString(), {
         cache: 'no-store',
         headers: { 'Accept': 'application/json' }
       });

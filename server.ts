@@ -509,30 +509,62 @@ app.get(['/api/app/version', '/api/version'], async (req: Request, res: Response
         const candidates = [
             path.join(uploadDir, 'version.json'),
             path.join(ROOT_DIR, 'version.json'),
-            path.join(DIST_DIR, 'version.json')
+            path.join(DIST_DIR, 'version.json'),
+            path.join(ROOT_DIR, 'public', 'version.json')
         ];
+        let versionData: any = null;
         for (const file of candidates) {
             if (fs.existsSync(file)) {
                 try {
-                    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-                    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-                    return res.json(data);
+                    versionData = JSON.parse(fs.readFileSync(file, 'utf8'));
+                    break;
                 } catch (parseErr) {
                     console.error('Error parsing version file:', parseErr);
                 }
             }
         }
 
+        if (!versionData) {
+            versionData = {
+                platform: "android",
+                latestVersion: "1.0.4",
+                versionCode: 5,
+                releaseNotes: "• Selector responsivo de 1 a 3 columnas para explorar canciones y álbumes en móvil.\n• Reactividad total al tono de acento: Aura DJ, divisor de 0 dB en ecualizador, deslizador de preamp, crossfade e icono de moderación.",
+                downloadUrl: `${req.protocol}://${req.get('host')}/download/aura-latest.apk?v=1.0.4`,
+                mandatory: false,
+                publishedAt: new Date().toISOString()
+            };
+        }
+
+        const currentParam = String(req.query.current || req.query.currentVersion || '').trim();
+        if (currentParam && Array.isArray(versionData.history)) {
+            const isNewer = (latest: string, curr: string) => {
+                const pL = latest.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+                const pC = curr.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+                for (let i = 0; i < Math.max(pL.length, pC.length); i++) {
+                    const l = pL[i] || 0;
+                    const c = pC[i] || 0;
+                    if (l > c) return true;
+                    if (l < c) return false;
+                }
+                return false;
+            };
+
+            const relevant = versionData.history
+                .filter((item: any) => isNewer(item.version, currentParam))
+                .sort((a: any, b: any) => (isNewer(a.version, b.version) ? -1 : 1));
+
+            if (relevant.length === 1) {
+                versionData.releaseNotes = relevant[0].notes;
+            } else if (relevant.length > 1) {
+                versionData.releaseNotes = relevant
+                    .map((item: any) => `✨ Versión v${item.version}:\n${item.notes}`)
+                    .join('\n\n');
+            }
+        }
+
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        return res.json({
-            platform: "android",
-            latestVersion: "1.0.4",
-            versionCode: 5,
-            releaseNotes: "Mejoras de rendimiento y estabilidad.",
-            downloadUrl: `${req.protocol}://${req.get('host')}/download/aura-latest.apk`,
-            mandatory: false,
-            publishedAt: new Date().toISOString()
-        });
+        return res.json(versionData);
     } catch (e: any) {
         console.error("Error al obtener versión de la app:", e);
         res.status(500).json({ error: "No se pudo consultar la versión" });
