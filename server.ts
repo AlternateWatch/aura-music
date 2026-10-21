@@ -507,10 +507,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 app.get(['/api/app/version', '/api/version'], async (req: Request, res: Response) => {
     try {
         const candidates = [
-            path.join(uploadDir, 'version.json'),
+            path.join(ROOT_DIR, 'public', 'version.json'),
             path.join(ROOT_DIR, 'version.json'),
             path.join(DIST_DIR, 'version.json'),
-            path.join(ROOT_DIR, 'public', 'version.json')
+            path.join(uploadDir, 'version.json')
         ];
         let versionData: any = null;
         for (const file of candidates) {
