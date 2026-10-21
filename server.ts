@@ -686,7 +686,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
     <h1>Descarga Oficial APK</h1>
     <p class="desc">La última versión con panel de personalización avanzado, estilos de reproductor y mayor velocidad.</p>
     <a href="/download/aura-latest.apk" class="btn" id="dlBtn" download="aura-latest.apk">
-      <span>⬇️ Descargar APK (62 MB)</span>
+      <span>⬇️ Descargar APK (6.6 MB)</span>
     </a>
     <p class="auto-notice" id="timerNotice">La descarga comenzará automáticamente en 2 segundos...</p>
     
