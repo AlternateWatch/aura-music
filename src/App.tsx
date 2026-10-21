@@ -4363,7 +4363,7 @@ transition={{
               <AlbumDetailView
                 albumName={selectedAlbumName}
                 songs={songs.filter(s => s.album === selectedAlbumName)}
-                currentSong={currentSong}
+                currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
                 isPlaying={isPlaying}
                 likedIds={likedIds}
                 playlists={playlists}
@@ -5281,16 +5281,16 @@ transition={{
 
       <Suspense fallback={null}><LazyMinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} /></Suspense>
       <Suspense fallback={null}><AnimatePresence>{tabsSong && <LazyTabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence></Suspense>
-      <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
+      <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
   subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => audioObj.seek(t)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} liveCurrentTime={audioObj.getCurrentTime()} subscribeToTime={audioObj.subscribeToTime}
 getCurrentTime={audioObj.getCurrentTime}
- onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => audioObj.seek(t)} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} audioSettings={audioSettings} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
+ onClose={() => setIsFullPlayerOpen(false)} currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl} isPlaying={isPlaying} onTogglePlay={() => { handlePlaySong(currentSong!); }} onNext={handleNext} onPrevious={handlePrevious} duration={audioObj.duration} onSeek={(t) => audioObj.seek(t)} volume={volume} onVolumeChange={setVolume} isShuffle={socketObj.isShuffle} isLoop={socketObj.isLoop} onToggleShuffle={toggleShuffle} onToggleLoop={toggleLoop} onToggleLyrics={() => { setIsFullPlayerOpen(false); setIsLyricsOpen(true); }} onToggleQueue={() => setIsQueueOpen(true)} onOpenAudioSettings={() => { setIsFullPlayerOpen(false); setIsAudioSettingsOpen(true); }} activeTheme={activeTheme} audioSettings={audioSettings} onOpenMinigameLobby={() => { setIsFullPlayerOpen(false); setIsMinigameLobbyOpen(true); }} />}</AnimatePresence>
       <Suspense fallback={null}><AnimatePresence>{isQueueOpen && <LazyQueueOverlay
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
         queue={getCurrentPlayPool()}
-        currentSong={currentSong}
+        currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
         onPlayFromQueue={(song) => handlePlaySong(song, false, 0, true)}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
@@ -5309,7 +5309,7 @@ getCurrentTime={audioObj.getCurrentTime}
         startEndOfSongTimer={sleepTimer.startEndOfSongTimer}
         cancelTimer={sleepTimer.cancelTimer}
         extendTimer={sleepTimer.extendTimer}
-        currentSong={currentSong}
+        currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
       />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isSocialOpen && <LazySocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{hostOnlyNotice && (

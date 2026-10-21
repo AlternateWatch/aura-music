@@ -206,8 +206,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
     (currentSong as any)?.animated_cover_path ||
     (currentSong as any)?.animatedCoverUrl
   );
-  const isNative = Capacitor.isNativePlatform();
-  const isVideo = !isNative && (isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path));
+  const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
   const coverSrc = resolvedCoverUrl || resolveMediaUrl(currentSong.coverUrl) || DEFAULT_COVER;
 
   const [videoError, setVideoError] = useState(false);
@@ -305,35 +304,33 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
               }}
               className="aspect-square w-full max-w-[280px] sm:max-w-[340px] md:max-w-[450px] rounded-[32px] md:rounded-[48px] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.6)] md:shadow-[0_50px_100px_rgba(0,0,0,0.8)] border border-white/5 relative group shrink-0 bg-black cursor-grab active:cursor-grabbing will-change-transform"
             >
-              {animUrl && !videoError ? (
-                isVideo ? (
-                  <video
-                    ref={animatedVideoRef}
-                    key={animUrl}
-                    src={animUrl}
-                    poster={coverSrc}
-                    preload="auto"
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    onError={() => setVideoError(true)}
-                    className="w-full h-full object-cover pointer-events-none"
-                  />
-                ) : (
-                  <img 
-                    key={animUrl}
-                    src={animUrl} 
-                    onError={(e) => {
-                      if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
-                        e.currentTarget.src = DEFAULT_COVER;
-                        e.currentTarget.removeAttribute('srcset');
-                      }
-                    }}
-                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
-                    alt={currentSong.title} 
-                  />
-                )
+              {animUrl && !videoError && isVideo ? (
+                <video
+                  ref={animatedVideoRef}
+                  key={animUrl}
+                  src={animUrl}
+                  poster={coverSrc}
+                  preload="auto"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  onError={() => setVideoError(true)}
+                  className="w-full h-full object-cover pointer-events-none"
+                />
+              ) : animUrl && !videoError && !isVideoUrl(animUrl) ? (
+                <img 
+                  key={animUrl}
+                  src={animUrl} 
+                  onError={(e) => {
+                    if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
+                      e.currentTarget.src = DEFAULT_COVER;
+                      e.currentTarget.removeAttribute('srcset');
+                    }
+                  }}
+                  className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 pointer-events-none" 
+                  alt={currentSong.title} 
+                />
               ) : (
                 <img 
                   src={coverSrc}
