@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, Download, CheckCircle2, X, ExternalLink, ShieldAlert, ArrowRight } from 'lucide-react';
+import { Sparkles, Download, CheckCircle2, X, ExternalLink, ArrowRight } from 'lucide-react';
 import { type AppUpdateInfo, getDiffReleaseNotes } from '../hooks/useAppUpdate';
 import { hapticImpact } from '../utils/haptics';
 import { Capacitor } from '@capacitor/core';
@@ -11,17 +11,35 @@ interface UpdateModalProps {
   onClose: () => void;
   updateInfo: AppUpdateInfo | null;
   currentVersion: string;
+  isWhatsNew?: boolean;
 }
 
 export const UpdateModal: React.FC<UpdateModalProps> = ({
   isOpen,
   onClose,
   updateInfo,
-  currentVersion
+  currentVersion,
+  isWhatsNew = false
 }) => {
   const [downloadStarted, setDownloadStarted] = useState(false);
 
   const diffNotes = getDiffReleaseNotes(updateInfo, currentVersion);
+
+  const notesToDisplay = useMemo(() => {
+    if (!updateInfo) return '';
+    if (isWhatsNew) {
+      const match = updateInfo.history?.find((h) => h.version === currentVersion);
+      return match?.notes || updateInfo.releaseNotes || 'Mejoras de rendimiento y estabilidad en esta versión.';
+    }
+    return diffNotes.notes || 'Mejoras de rendimiento y correcciones en la aplicación.';
+  }, [isWhatsNew, updateInfo, currentVersion, diffNotes.notes]);
+
+  const handleClose = () => {
+    if (isWhatsNew) {
+      localStorage.setItem('aura_last_seen_version', currentVersion);
+    }
+    onClose();
+  };
 
   const handleStartUpdate = async () => {
     if (!updateInfo) return;
@@ -68,12 +86,15 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Fondo difuminado decorativo */}
-            <div className="absolute -top-24 -right-24 w-60 h-60 rounded-full blur-3xl pointer-events-none" style={{ background: "var(--aura-dj-subtle, rgba(242,125,38,0.2))" }} />
+            <div
+              className="absolute -top-24 -right-24 w-60 h-60 rounded-full blur-3xl pointer-events-none"
+              style={{ background: "var(--aura-dj-subtle, rgba(242,125,38,0.2))" }}
+            />
 
-            {/* Botón de cerrar si no es obligatoria */}
-            {!updateInfo.mandatory && (
+            {/* Botón de cerrar */}
+            {(!updateInfo.mandatory || isWhatsNew) && (
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="absolute top-5 right-5 p-2 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 aria-label="Cerrar aviso"
               >
@@ -90,51 +111,60 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
               <div className="min-w-0 flex-1 pt-0.5">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] uppercase font-bold tracking-[0.2em] text-brand-primary">
-                    Actualización de Aura
+                    {isWhatsNew ? "Novedades de Aura" : "Actualización de Aura"}
                   </span>
                 </div>
                 <h3 className="text-xl font-bold text-white tracking-tight mt-0.5">
-                  Nueva versión disponible
+                  {isWhatsNew ? `¡Bienvenido a Aura v${currentVersion}!` : "Nueva versión disponible"}
                 </h3>
               </div>
             </div>
 
-            {/* Comparativa de versiones */}
-            <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white/5 border border-white/5 mb-5 text-xs">
-              <div className="flex items-center gap-1.5 text-white/50">
-                <span>Instalada:</span>
-                <span className="font-mono font-semibold text-white/80">v{currentVersion}</span>
+            {/* Banner de estado o comparativa de versiones */}
+            {isWhatsNew ? (
+              <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-brand-primary/10 border border-brand-primary/20 mb-5 text-xs text-brand-primary font-semibold">
+                <CheckCircle2 size={16} className="shrink-0" />
+                <span>Estás usando la versión v{currentVersion} recién instalada</span>
               </div>
-              <ArrowRight size={14} className="text-white/30 mx-1" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-brand-primary font-bold">Nueva:</span>
-                <span className="font-mono font-bold px-2 py-0.5 rounded-lg bg-brand-primary/20 text-brand-primary border border-brand-primary/30">
-                  v{updateInfo.latestVersion}
-                </span>
+            ) : (
+              <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-white/5 border border-white/5 mb-5 text-xs">
+                <div className="flex items-center gap-1.5 text-white/50">
+                  <span>Instalada:</span>
+                  <span className="font-mono font-semibold text-white/80">v{currentVersion}</span>
+                </div>
+                <ArrowRight size={14} className="text-white/30 mx-1" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-brand-primary font-bold">Nueva:</span>
+                  <span className="font-mono font-bold px-2 py-0.5 rounded-lg bg-brand-primary/20 text-brand-primary border border-brand-primary/30">
+                    v{updateInfo.latestVersion}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Novedades y Release Notes */}
             <div className="space-y-1.5 mb-6">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">
-                  {diffNotes.isMultiVersion
+                  {isWhatsNew
+                    ? `Novedades incluidas en esta versión`
+                    : diffNotes.isMultiVersion
                     ? `Novedades acumuladas (${diffNotes.versionsCount} versiones)`
                     : `Novedades del parche (v${updateInfo.latestVersion})`}
                 </p>
-                {diffNotes.isMultiVersion && (
+                {!isWhatsNew && diffNotes.isMultiVersion && (
                   <span className="text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/20">
                     Desde v{currentVersion}
                   </span>
                 )}
               </div>
               <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 text-xs text-white/80 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-sans">
-                {diffNotes.notes || "Mejoras de rendimiento y correcciones en la aplicación."}
+                {notesToDisplay}
               </div>
             </div>
 
-            {/* Estado posterior a iniciar la descarga */}
-            {downloadStarted && (
+            {/* Estado posterior a iniciar la descarga en modo update */}
+            {!isWhatsNew && downloadStarted && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -151,34 +181,45 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             )}
 
             {/* Botones de acción */}
-            <div className="flex flex-col gap-2.5">
+            {isWhatsNew ? (
               <button
-                onClick={handleStartUpdate}
+                type="button"
+                onClick={handleClose}
                 className="w-full py-3.5 px-6 rounded-2xl font-bold text-sm aura-dj-btn hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Download size={18} />
-                <span>{downloadStarted ? "Volver a descargar APK" : "Actualizar ahora"}</span>
+                <Sparkles size={18} />
+                <span>¡Entendido, a escuchar música!</span>
               </button>
-
-              {downloadStarted ? (
-                <a
-                  href={updateInfo.downloadUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full py-2.5 text-center text-xs font-semibold text-white/50 hover:text-white flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <span>Descarga manual directa</span>
-                  <ExternalLink size={12} />
-                </a>
-              ) : !updateInfo.mandatory ? (
+            ) : (
+              <div className="flex flex-col gap-2.5">
                 <button
-                  onClick={onClose}
-                  className="w-full py-2.5 text-center text-xs font-semibold text-white/40 hover:text-white transition-colors cursor-pointer"
+                  onClick={handleStartUpdate}
+                  className="w-full py-3.5 px-6 rounded-2xl font-bold text-sm aura-dj-btn hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Más tarde
+                  <Download size={18} />
+                  <span>{downloadStarted ? "Volver a descargar APK" : "Actualizar ahora"}</span>
                 </button>
-              ) : null}
-            </div>
+
+                {downloadStarted ? (
+                  <a
+                    href={updateInfo.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-2.5 text-center text-xs font-semibold text-white/50 hover:text-white flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>Descarga manual directa</span>
+                    <ExternalLink size={12} />
+                  </a>
+                ) : !updateInfo.mandatory ? (
+                  <button
+                    onClick={handleClose}
+                    className="w-full py-2.5 text-center text-xs font-semibold text-white/40 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Más tarde
+                  </button>
+                ) : null}
+              </div>
+            )}
           </motion.div>
         </div>
       )}

@@ -18,6 +18,7 @@ interface ProfileOverlayProps {
   isCheckingUpdate?: boolean;
   updateCheckMessage?: string | null;
   onCheckForUpdates?: () => void;
+  onOpenWhatsNew?: () => void;
 }
 
 export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({ 
@@ -29,7 +30,8 @@ export const ProfileOverlay: React.FC<ProfileOverlayProps> = ({
   currentVersion = "1.0.0",
   isCheckingUpdate = false,
   updateCheckMessage = null,
-  onCheckForUpdates 
+  onCheckForUpdates,
+  onOpenWhatsNew
 }) => {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);

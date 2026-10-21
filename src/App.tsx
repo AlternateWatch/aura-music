@@ -236,6 +236,8 @@ export default function App() {
     updateInfo,
     currentVersion,
     isUpdateModalOpen,
+    isWhatsNewModal,
+    openWhatsNewModal,
     isChecking: isCheckingUpdate,
     checkMessage: updateCheckMessage,
     checkForUpdates,
@@ -5453,6 +5455,7 @@ getCurrentTime={audioObj.getCurrentTime}
           isCheckingUpdate={isCheckingUpdate}
           updateCheckMessage={updateCheckMessage}
           onCheckForUpdates={() => checkForUpdates(true)}
+          onOpenWhatsNew={() => { setIsProfileOpen(false); openWhatsNewModal(); }}
         />
       )}</AnimatePresence></Suspense>
       <AnimatePresence>{isImportOpen && (
@@ -5808,6 +5811,7 @@ getCurrentTime={audioObj.getCurrentTime}
         onClose={dismissUpdate}
         updateInfo={updateInfo}
         currentVersion={currentVersion}
+        isWhatsNew={isWhatsNewModal}
       />
     </div>
   );

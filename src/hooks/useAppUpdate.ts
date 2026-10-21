@@ -43,8 +43,8 @@ export function isNewerVersion(latest: string, current: string): boolean {
 /**
  * Devuelve únicamente las notas de los parches entre la versión actual instalada
  * y la versión más reciente.
- * - Si es 1 versión de salto (ej. 1.0.3 -> 1.0.4), devuelve SOLO las notas de 1.0.4 sin acumular anteriores.
- * - Si salta varias versiones (ej. 1.0.2 -> 1.0.4), agrupa las notas de 1.0.4 y 1.0.3.
+ * - Si es 1 versión de salto (ej. 1.0.4 -> 1.0.5), devuelve SOLO las notas de 1.0.5 sin acumular anteriores.
+ * - Si salta varias versiones (ej. 1.0.3 -> 1.0.5), agrupa las notas de 1.0.5 y 1.0.4.
  */
 export function getDiffReleaseNotes(
   updateInfo: AppUpdateInfo | null,
@@ -89,6 +89,7 @@ export function useAppUpdate() {
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [currentVersion, setCurrentVersion] = useState<string>(CURRENT_APP_VERSION);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isWhatsNewModal, setIsWhatsNewModal] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [checkMessage, setCheckMessage] = useState<string | null>(null);
 
@@ -105,6 +106,48 @@ export function useAppUpdate() {
         .catch(() => {});
     }
     return () => { isMounted = false; };
+  }, []);
+
+  // 1. Detección automática al arrancar:
+  // Si acabas de actualizar/instalar una versión y es la primera vez que la abres,
+  // mostrar automáticamente las novedades de dicha versión (What's New modal).
+  useEffect(() => {
+    const checkFirstLaunchOrUpdate = async () => {
+      let installedVer = currentVersion;
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const info = await CapacitorApp.getInfo();
+          if (info?.version) {
+            installedVer = info.version;
+            setCurrentVersion(installedVer);
+          }
+        } catch {}
+      }
+
+      const lastSeen = localStorage.getItem("aura_last_seen_version");
+      if (lastSeen !== installedVer) {
+        // Primera vez abriendo esta versión
+        try {
+          const res = await fetch(`${API_BASE}/api/app/version`, {
+            cache: 'no-store',
+            headers: { 'Accept': 'application/json' }
+          });
+          if (res.ok) {
+            const data: AppUpdateInfo = await res.json();
+            // Solo mostrar novedades de la instalada si no hay una actualización mayor pendiente
+            if (!isNewerVersion(data.latestVersion, installedVer)) {
+              setUpdateInfo(data);
+              setIsWhatsNewModal(true);
+              setIsUpdateModalOpen(true);
+              return;
+            }
+          }
+        } catch {}
+      }
+    };
+
+    const timer = setTimeout(checkFirstLaunchOrUpdate, 1200);
+    return () => clearTimeout(timer);
   }, []);
 
   const checkForUpdates = useCallback(async (isManual = false) => {
@@ -142,6 +185,7 @@ export function useAppUpdate() {
 
       if (hasNewVersion) {
         setUpdateInfo(data);
+        setIsWhatsNewModal(false);
         const dismissedKey = `aura_dismissed_update_${data.latestVersion}`;
         const wasDismissed = sessionStorage.getItem(dismissedKey) === 'true';
 
@@ -163,31 +207,59 @@ export function useAppUpdate() {
     }
   }, [currentVersion]);
 
-  // Comprobar automáticamente al arrancar ÚNICAMENTE en Android nativo
+  // Comprobar automáticamente actualizaciones al arrancar en Android nativo (después de 3s)
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
       return;
     }
 
     const timer = setTimeout(() => {
-      checkForUpdates(false);
-    }, 2500);
+      // Solo buscar updates si no está abierto el modal de What's New
+      if (!isWhatsNewModal) {
+        checkForUpdates(false);
+      }
+    }, 3200);
 
     return () => clearTimeout(timer);
-  }, [checkForUpdates]);
+  }, [checkForUpdates, isWhatsNewModal]);
+
+  const openWhatsNewModal = useCallback(async () => {
+    setIsChecking(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/app/version`, {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        const data: AppUpdateInfo = await res.json();
+        setUpdateInfo(data);
+        setIsWhatsNewModal(true);
+        setIsUpdateModalOpen(true);
+      }
+    } catch {}
+    finally {
+      setIsChecking(false);
+    }
+  }, []);
 
   const dismissUpdate = useCallback(() => {
-    if (updateInfo) {
+    if (isWhatsNewModal) {
+      localStorage.setItem('aura_last_seen_version', currentVersion);
+      setIsWhatsNewModal(false);
+    } else if (updateInfo) {
       sessionStorage.setItem(`aura_dismissed_update_${updateInfo.latestVersion}`, 'true');
     }
     setIsUpdateModalOpen(false);
-  }, [updateInfo]);
+  }, [updateInfo, isWhatsNewModal, currentVersion]);
 
   return {
     updateInfo,
     currentVersion,
     isUpdateModalOpen,
     setIsUpdateModalOpen,
+    isWhatsNewModal,
+    setIsWhatsNewModal,
+    openWhatsNewModal,
     isChecking,
     checkMessage,
     checkForUpdates,

@@ -95,6 +95,7 @@ export const FullPlayerOverlay: React.FC<FullPlayerOverlayProps> = (props) => {
   subscribeToTime,
   ambientGlow,
   ambientGlowColor,
+  audioSettings,
 } = props;
 
   const hexToRgba = (hex: string, alpha: number) => {
