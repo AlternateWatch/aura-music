@@ -1,9 +1,9 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.2",
-  "versionCode": 3,
-  "releaseNotes": "• Versión 1.0.2 de prueba del actualizador automático.\n• Prioridad absoluta de reproducción de música frente a descargas.\n• Optimización de buffer y rendimiento general.",
+  "latestVersion": "1.0.3",
+  "versionCode": 4,
+  "releaseNotes": "• Nueva sección de Personalización avanzada (Temas, Fondo, Visuales, Estilos de reproductor, IA y Hápticos).\n• Color de acento de la app 100% reactivo con selector libre de colores y paleta enriquecida.\n• Resplandor ambiental del reproductor completo (Full Player) personalizable con color libre, paleta y ajuste de intensidad.\n• Selector de estilos para el mini reproductor móvil (Isla flotante, Dock clásico, Minimal Glass y Tarjeta moderna).\n• Selector de columnas en móvil (1 a 3 columnas) para explorar canciones.\n• Desactivación total de funciones de IA (Aura DJ oculto de toda la interfaz cuando se desactiva).",
   "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk",
   "mandatory": false,
-  "publishedAt": "2026-10-20T21:56:00Z"
+  "publishedAt": "2026-10-21T09:11:46.279Z"
 }
