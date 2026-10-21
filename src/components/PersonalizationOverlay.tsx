@@ -151,7 +151,7 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
 
         {/* CABECERA */}
         <div className="flex items-center gap-4 mb-6 shrink-0 pr-12">
-          <div className="p-3 bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-brand-primary/30 rounded-2xl text-brand-primary shrink-0">
+          <div className="p-3 aura-dj-badge border rounded-2xl shrink-0">
             <Palette size={26} />
           </div>
           <div>
@@ -656,7 +656,7 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
               {/* TOGGLE FUNCIONES DE IA */}
               <div className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
                 <div className="flex items-center gap-3.5 pr-4">
-                  <div className="p-2.5 bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-brand-primary/30 rounded-xl text-brand-primary shrink-0">
+                  <div className="p-2.5 aura-dj-badge border rounded-xl shrink-0">
                     <Sparkles size={20} />
                   </div>
                   <div>

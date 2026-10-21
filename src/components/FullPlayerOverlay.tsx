@@ -264,12 +264,12 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
           </div>
           <button 
             onClick={onOpenMinigameLobby}
-            className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-full hover:bg-orange-500/10 cursor-pointer group transition-colors shrink-0 outline-none"
+            className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-full hover:bg-brand-primary/10 cursor-pointer group transition-colors shrink-0 outline-none"
             title="Start Recon Minigame"
           >
               <div className="relative w-2 h-2 md:w-3 md:h-3">
-                <div className="absolute inset-0 bg-orange-500 rounded-full animate-ping opacity-75" />
-                <div className="relative w-full h-full bg-orange-500 rounded-full shadow-[0_0_15px_rgba(249,115,22,1)]" />
+                <div className="absolute inset-0 bg-brand-primary rounded-full animate-ping opacity-75" />
+                <div className="relative w-full h-full bg-brand-primary rounded-full" style={{ boxShadow: "0 0 15px var(--color-brand-primary, #F27D26)" }} />
               </div>
           </button>
         </div>

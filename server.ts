@@ -543,7 +543,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
         return res.redirect('/download/aura-latest.apk');
     }
 
-    let version = '1.0.3';
+    let version = '1.0.4';
     try {
         const vPath = path.join(ROOT_DIR, 'version.json');
         if (fs.existsSync(vPath)) {

@@ -647,7 +647,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
                     <div className="relative h-2.5 bg-black/40 border border-white/10 rounded-full overflow-hidden p-0.5">
                       <motion.div
-                        className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 rounded-full shadow-lg shadow-orange-500/30"
+                        className="h-full aura-dj-btn rounded-full"
                         initial={{ width: '0%' }}
                         animate={{ width: `${singleProgress.percent}%` }}
                         transition={{ ease: "easeOut", duration: 0.15 }}
@@ -835,7 +835,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                     {/* Barra de progreso en bytes de la pista actual */}
                     <div className="relative h-2.5 bg-black/40 border border-white/10 rounded-full overflow-hidden p-0.5">
                       <motion.div
-                        className="h-full bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 rounded-full"
+                        className="h-full aura-dj-btn rounded-full"
                         animate={{ width: `${uploadProgress.trackPercent}%` }}
                         transition={{ ease: "easeOut", duration: 0.15 }}
                       />

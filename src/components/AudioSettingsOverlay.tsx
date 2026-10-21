@@ -147,13 +147,13 @@ const EqCurve: React.FC<{ bands: number[]; active: boolean }> = ({ bands, active
         <line
           key={db}
           x1={0} x2={CURVE_W} y1={yOf(db)} y2={yOf(db)}
-          stroke="white" strokeOpacity={db === 0 ? 0.15 : 0.06} strokeDasharray={db === 0 ? undefined : "4 6"}
+          stroke={db === 0 ? "var(--color-brand-primary, #F27D26)" : "white"} strokeOpacity={db === 0 ? (active ? 0.6 : 0.25) : 0.06} strokeDasharray={db === 0 ? undefined : "4 6"}
           vectorEffect="non-scaling-stroke"
         />
       ))}
-      <path d={area} fill="#F27D26" fillOpacity={active ? 0.12 : 0.04} />
+      <path d={area} fill="var(--color-brand-primary, #F27D26)" fillOpacity={active ? 0.15 : 0.04} />
       <path
-        d={path} fill="none" stroke="#F27D26" strokeOpacity={active ? 1 : 0.35}
+        d={path} fill="none" stroke="var(--color-brand-primary, #F27D26)" strokeOpacity={active ? 1 : 0.35}
         strokeWidth={2} strokeLinejoin="round" vectorEffect="non-scaling-stroke"
       />
     </svg>
@@ -380,7 +380,8 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                         })
                       }
                       aria-label="Crossfade duration"
-                      className="w-full mt-2 accent-[#F27D26] cursor-pointer"
+                      className="w-full mt-2 accent-brand-primary cursor-pointer"
+                      style={{ accentColor: "var(--color-brand-primary, #F27D26)" }}
                     />
                     <div className="flex justify-between text-[9px] font-mono text-white/25 mt-1">
                       <span>1s</span>
@@ -497,7 +498,8 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                 onChange={(e) => setEq({ preamp: parseFloat(e.target.value) })}
                 onDoubleClick={() => setEq({ preamp: 0 })}
                 aria-label="Preamp"
-                className="w-full mt-3 accent-[#F27D26] cursor-pointer"
+                className="w-full mt-3 accent-brand-primary cursor-pointer"
+                style={{ accentColor: "var(--color-brand-primary, #F27D26)" }}
               />
 
               <div className="flex items-center justify-between gap-4 mt-4">

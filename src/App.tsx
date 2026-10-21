@@ -450,10 +450,60 @@ export default function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
+  const getAccentGradientColors = (hex: string): [string, string, string] => {
+    try {
+      let c = hex.replace('#', '');
+      if (c.length === 3) c = c.split('').map(x => x + x).join('');
+      const r = parseInt(c.substring(0, 2), 16) / 255;
+      const g = parseInt(c.substring(2, 4), 16) / 255;
+      const b = parseInt(c.substring(4, 6), 16) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h = 0, s = 0, l = (max + min) / 2;
+      if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+          case g: h = (b - r) / d + 2; break;
+          case b: h = (r - g) / d + 4; break;
+        }
+        h = Math.round(h * 60);
+      }
+      s = Math.round(s * 100);
+      l = Math.round(l * 100);
+
+      const toHex = (hue: number, sat: number, lit: number) => {
+        hue = ((hue % 360) + 360) % 360;
+        const sa = Math.max(0, Math.min(100, sat)) / 100;
+        const la = Math.max(0, Math.min(100, lit)) / 100;
+        const a = sa * Math.min(la, 1 - la);
+        const fn = (n: number) => {
+          const k = (n + hue / 30) % 12;
+          const color = la - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+          return Math.round(255 * color).toString(16).padStart(2, '0');
+        };
+        return `#${fn(0)}${fn(8)}${fn(4)}`;
+      };
+
+      const c1 = toHex(h - 18, Math.min(100, s + 6), Math.min(84, l + 8));
+      const c2 = hex;
+      const c3 = toHex(h + 24, Math.max(30, s), Math.max(22, l - 6));
+      return [c1, c2, c3];
+    } catch {
+      return ['#f59e0b', hex, '#ef4444'];
+    }
+  };
+
   const applyAccentColor = (hex: string) => {
     if (typeof document === 'undefined' || !hex) return;
+    const [c1, c2, c3] = getAccentGradientColors(hex);
     document.documentElement.style.setProperty('--brand-primary', hex);
     document.documentElement.style.setProperty('--color-brand-primary', hex);
+    document.documentElement.style.setProperty('--accent-tone', hex);
+    document.documentElement.style.setProperty('--accent-glow', `${hex}40`);
+    document.documentElement.style.setProperty('--aura-dj-gradient', `linear-gradient(135deg, ${c1}, ${c2}, ${c3})`);
+    document.documentElement.style.setProperty('--aura-dj-subtle', `linear-gradient(135deg, ${c1}33, ${c2}26, ${c3}26)`);
+
     let tag = document.getElementById('aura-accent-override');
     if (!tag) {
       tag = document.createElement('style');
@@ -464,13 +514,28 @@ export default function App() {
       :root, html, body {
         --brand-primary: ${hex} !important;
         --color-brand-primary: ${hex} !important;
+        --accent-tone: ${hex} !important;
+        --accent-glow: ${hex}40 !important;
+        --aura-dj-gradient: linear-gradient(135deg, ${c1}, ${c2}, ${c3}) !important;
+        --aura-dj-subtle: linear-gradient(135deg, ${c1}33, ${c2}26, ${c3}26) !important;
       }
       .text-brand-primary { color: ${hex} !important; }
       .bg-brand-primary { background-color: ${hex} !important; }
       .border-brand-primary { border-color: ${hex} !important; }
       .fill-brand-primary { fill: ${hex} !important; }
+      .stroke-brand-primary { stroke: ${hex} !important; }
       .ring-brand-primary { --tw-ring-color: ${hex} !important; }
       .accent-brand-primary { accent-color: ${hex} !important; }
+      .aura-dj-btn {
+        background: linear-gradient(135deg, ${c1}, ${c2}, ${c3}) !important;
+        box-shadow: 0 10px 25px ${hex}40 !important;
+        color: #ffffff !important;
+      }
+      .aura-dj-badge {
+        background: linear-gradient(135deg, ${c1}33, ${c2}26, ${c3}26) !important;
+        border-color: ${hex}66 !important;
+        color: ${hex} !important;
+      }
     `;
   };
 
@@ -3227,7 +3292,7 @@ useEffect(() => {
               <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => { setSelectedAlbumName(null); setSelectedArtistName(null); }}>AURA<span className="text-brand-primary">.</span></span>
               <div className={`hidden lg:flex gap-8 text-[10px] font-bold uppercase`}>
                 <button onClick={() => {setShowModeration(false); setActivePlaylistId("all"); setSelectedAlbumName(null); setSelectedArtistName(null);}} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
-                {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 ${showModeration ? 'text-amber-500 border-b border-amber-500 pb-1' : ''}`}><ShieldCheck size={12}/> Moderation</button>}
+                {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 transition-colors ${showModeration ? 'text-brand-primary border-b border-brand-primary pb-1' : 'text-white/40 hover:text-white'}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
               </div>
@@ -3261,7 +3326,7 @@ useEffect(() => {
                   {isAiEnabled && (
                   <button
                     onClick={() => setIsAuraDjOpen(true)}
-                    className="relative overflow-hidden bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 shadow-lg shadow-orange-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-inset ring-white/25 [background-clip:border-box] [background-origin:border-box]"
+                    className="relative overflow-hidden aura-dj-btn text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-inset ring-white/25"
                     title="Aura DJ con Gemini AI"
                   >
                     <Sparkles size={13} className="fill-white" />
@@ -3957,7 +4022,7 @@ transition={{
                   : "hover:bg-white/5 active:bg-white/10"
               }`}
             >
-              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${showModeration ? "bg-brand-primary/25 text-brand-primary ring-1 ring-brand-primary/40" : "bg-brand-primary/15 text-brand-primary"}`}>
                 <ShieldCheck size={16} />
               </div>
 
@@ -4239,7 +4304,7 @@ transition={{
                     <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40 flex items-center gap-2">
                       <Disc size={14} /> Discografía ({artistAlbums.length})
                     </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <div className={getMobileAlbumGridClass(mobileColumns)}>
                       {artistAlbums.map(alb => (
                         <div 
                           key={alb.title} 
@@ -4271,7 +4336,7 @@ transition={{
                   <h3 className="text-[11px] font-bold uppercase tracking-[0.3em] text-white/40">
                     Todas las canciones ({flattenedSongs.length})
                   </h3>
-                  <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6">
+                  <div className={getMobileSongGridClass(mobileColumns)}>
                     {flattenedSongs.slice(0, renderedCount).map((song, idx) => (
                       <MusicCard 
                         key={song.id}
@@ -4454,7 +4519,7 @@ transition={{
                                 {isAiEnabled && (
                                 <button
                                   onClick={() => setIsAuraDjOpen(true)}
-                                  className="px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-amber-500/20 via-[#F27D26]/20 to-rose-500/20 text-brand-primary border border-brand-primary/40 hover:bg-brand-primary/20 shadow-md"
+                                  className="px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer aura-dj-badge hover:brightness-110 shadow-md"
                                 >
                                   <Sparkles size={12} className="fill-brand-primary" />
                                   <span>Aura DJ</span>
@@ -4674,7 +4739,7 @@ transition={{
                                         <button
                                           onClick={() => setIsAuraDjOpen(true)}
                                           title={`Aura DJ: mezclar o reordenar "${currentPlaylist.name}"`}
-                                          className="px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm bg-gradient-to-r from-amber-500/15 via-[#F27D26]/15 to-rose-500/15 text-brand-primary border border-brand-primary/30 hover:bg-brand-primary/25"
+                                          className="px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer shadow-sm aura-dj-badge hover:brightness-110"
                                         >
                                           <Sparkles size={11} className="fill-brand-primary" />
                                           <span>Aura DJ</span>
@@ -4769,7 +4834,7 @@ transition={{
 
                     {/* RESPONSIVE GRID */}
                     {activePlaylistId === 'all' && librarySection === 'albums' ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
+                      <div className={getMobileAlbumGridClass(mobileColumns)}>
                         {filteredAlbums.map((alb, idx) => (
                           <div
                             key={alb.title}
@@ -4835,7 +4900,7 @@ transition={{
                         )}
                       </div>
                     ) : activePlaylistId === 'all' && librarySection === 'artists' ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full">
+                      <div className={getMobileAlbumGridClass(mobileColumns)}>
                         {filteredArtists.map((art, idx) => (
                           <div
                             key={art.name}
@@ -4877,7 +4942,7 @@ transition={{
                         )}
                       </div>
                     ) : (
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6 w-full max-w-full">
+                    <div className={`${getMobileSongGridClass(mobileColumns)} w-full max-w-full`}>
                         {displayItems.slice(0, renderedCount).map((item: any, idx: number) => (
                             <div
                                 key={item.id}

@@ -497,13 +497,14 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         e.stopPropagation();
         onDrop?.();
       }}
+      style={isActive ? { boxShadow: '0 8px 24px var(--accent-glow, rgba(242,125,38,0.2))' } : undefined}
       className={`group relative p-2.5 sm:p-3 md:p-4 rounded-2xl md:rounded-3xl transition-all duration-300 flex flex-col justify-between ${
         showMenu ? 'z-30' : 'z-0'
       } ${
         isDragging
           ? 'opacity-30 scale-95'
           : isActive
-            ? 'bg-white/10 ring-1 ring-[#F27D26]/40 shadow-[0_8px_24px_rgba(242,125,38,0.2)]'
+            ? 'bg-white/10 ring-1 ring-brand-primary/40'
             : 'bg-white/5 hover:bg-white/[0.08]'
       } ${
         onDragStart ? 'cursor-grab active:cursor-grabbing' : ''

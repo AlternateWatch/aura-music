@@ -367,7 +367,7 @@ export function AuraDjOverlay({
         {/* CABECERA */}
         <div className="flex items-center justify-between pb-4 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-amber-500 via-[#F27D26] to-rose-500 flex items-center justify-center shadow-lg shadow-orange-500/20">
+            <div className="w-9 h-9 rounded-2xl aura-dj-btn flex items-center justify-center shrink-0">
               <Sparkles size={18} className="text-white fill-white" />
             </div>
             <div>
@@ -413,9 +413,9 @@ export function AuraDjOverlay({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden border-b border-white/10 bg-amber-950/20 -mx-5 sm:-mx-7 px-5 sm:px-7 py-3.5 shrink-0"
+              className="overflow-hidden border-b border-white/10 bg-white/5 -mx-5 sm:-mx-7 px-5 sm:px-7 py-3.5 shrink-0"
             >
-              <div className="flex items-start gap-2.5 text-xs text-amber-100/90 mb-2">
+              <div className="flex items-start gap-2.5 text-xs text-white/90 mb-2">
                 <Info size={14} className="shrink-0 mt-0.5 text-brand-primary" />
                 <p>
                   Tu API Key se almacena <strong>cifrada con AES-256 en la base de datos</strong> para que no tengas que introducirla al cerrar e iniciar sesión. Clave gratuita en{' '}
@@ -423,7 +423,7 @@ export function AuraDjOverlay({
                     href="https://aistudio.google.com/app/apikey"
                     target="_blank"
                     rel="noreferrer"
-                    className="underline text-amber-400 font-bold hover:text-amber-200"
+                    className="underline text-brand-primary font-bold hover:brightness-125"
                   >
                     Google AI Studio
                   </a>.
@@ -441,7 +441,7 @@ export function AuraDjOverlay({
                 <button
                   type="button"
                   onClick={handleSaveApiKey}
-                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-[#F27D26] hover:brightness-110 text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-orange-500/20 transition-all"
+                  className="px-4 py-1.5 rounded-xl aura-dj-btn hover:brightness-110 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   {keySavedMessage ? (
                     <>
@@ -508,7 +508,7 @@ export function AuraDjOverlay({
                   {mixResult.vibeTags.map((tag, idx) => (
                     <span
                       key={idx}
-                      className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-amber-300 border border-white/10 font-bold"
+                      className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary border border-brand-primary/20 font-bold"
                     >
                       #{tag.replace(/^#/, '')}
                     </span>
@@ -579,7 +579,7 @@ export function AuraDjOverlay({
                 <p className="text-base font-bold text-white tracking-tight">
                   Aura DJ está mezclando...
                 </p>
-                <p className="text-xs text-amber-300/90 font-mono animate-pulse">
+                <p className="text-xs text-brand-primary font-mono animate-pulse">
                   {[
                     isExistingCustomPlaylist ? 'Escaneando temas de la playlist...' : 'Escaneando biblioteca musical...',
                     'Analizando la vibra y flujo solicitado...',
@@ -732,7 +732,7 @@ export function AuraDjOverlay({
                 <button
                   type="button"
                   onClick={handlePlayNow}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 hover:brightness-110 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/25 cursor-pointer transition-all active:scale-95"
+                  className="px-5 py-2 rounded-xl aura-dj-btn hover:brightness-110 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
                 >
                   <Play size={14} fill="white" /> Reproducir ahora
                 </button>
@@ -748,7 +748,7 @@ export function AuraDjOverlay({
                 type="button"
                 onClick={() => handleGenerate()}
                 disabled={isLoading || !prompt.trim() || isLoadingSource || candidateCount === 0}
-                className="ml-auto px-6 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 hover:brightness-110 text-white font-bold text-xs flex items-center gap-2 shadow-xl shadow-orange-500/20 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="ml-auto px-6 py-2.5 rounded-2xl aura-dj-btn hover:brightness-110 text-white font-bold text-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Sparkles size={14} className="fill-white" />
                 Generar mezcla

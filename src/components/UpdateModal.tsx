@@ -66,7 +66,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Fondo difuminado decorativo */}
-            <div className="absolute -top-24 -right-24 w-60 h-60 bg-gradient-to-br from-amber-500/20 via-[#F27D26]/20 to-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -top-24 -right-24 w-60 h-60 rounded-full blur-3xl pointer-events-none" style={{ background: "var(--aura-dj-subtle, rgba(242,125,38,0.2))" }} />
 
             {/* Botón de cerrar si no es obligatoria */}
             {!updateInfo.mandatory && (
@@ -81,7 +81,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 
             {/* Header con icono decorativo */}
             <div className="flex items-start gap-4 mb-5">
-              <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-amber-500 via-[#F27D26] to-rose-500 flex items-center justify-center shadow-lg shadow-orange-500/20 shrink-0">
+              <div className="w-13 h-13 rounded-2xl aura-dj-btn flex items-center justify-center shrink-0">
                 <Sparkles size={24} className="text-white fill-white" />
               </div>
 
@@ -143,7 +143,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             <div className="flex flex-col gap-2.5">
               <button
                 onClick={handleStartUpdate}
-                className="w-full py-3.5 px-6 rounded-2xl font-bold text-sm bg-gradient-to-r from-amber-500 via-[#F27D26] to-rose-500 text-white shadow-lg shadow-orange-500/25 hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3.5 px-6 rounded-2xl font-bold text-sm aura-dj-btn hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Download size={18} />
                 <span>{downloadStarted ? "Volver a descargar APK" : "Actualizar ahora"}</span>
