@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.7",
-  "versionCode": 8,
-  "releaseNotes": "• Corrección integral del motor de audio: eliminación de micro-cortes, silencios y bucles de buffering al usar Speed Up (1.15x), Nightcore (1.25x) y velocidades aceleradas.\n• Motor dual híbrido: reproducción nativa acelerada por hardware para tempo y tono, con procesamiento Web Audio dedicado para reverberación espacial.\n• Sincronización continua de buffer sin bloqueos en conexiones móviles.",
+  "latestVersion": "1.0.8",
+  "versionCode": 9,
+  "releaseNotes": "• Solución definitiva al desajuste de canciones: eliminado por completo el bug donde el audio repetía la pista anterior mientras la interfaz mostraba la siguiente.\n• Control de velocidad impecable: sincronización de playbackRate en transiciones, carga de pistas y centro de control del sistema/Android.\n• Reproducción estable sin cortes: auto-reanudación de Web Audio ante reposo de pantalla y auto-recuperación de red.",
   "history": [
+    {
+      "version": "1.0.8",
+      "versionCode": 9,
+      "notes": "• Solución definitiva al desajuste de canciones: eliminado por completo el bug donde el audio repetía la pista anterior mientras la interfaz mostraba la siguiente.\n• Control de velocidad impecable: sincronización de playbackRate en transiciones, carga de pistas y centro de control del sistema/Android.\n• Reproducción estable sin cortes: auto-reanudación de Web Audio ante reposo de pantalla y auto-recuperación de red."
+    },
     {
       "version": "1.0.7",
       "versionCode": 8,
@@ -45,7 +50,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.7",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.8",
   "mandatory": false,
-  "publishedAt": "2026-10-21T12:40:00.000Z"
+  "publishedAt": "2026-10-21T17:38:49.203Z"
 }

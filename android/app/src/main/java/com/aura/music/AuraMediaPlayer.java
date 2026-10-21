@@ -63,7 +63,7 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
 
     private float playbackSpeed = 1.0f;
 
-    public void setPlaybackSpeed(float speed) {
+    public void setPlaybackSpeedFromApp(float speed) {
         if (speed <= 0f) speed = 1.0f;
         if (Math.abs(this.playbackSpeed - speed) < 0.01f) return;
         this.currentPositionMs = getExtrapolatedPositionMs();

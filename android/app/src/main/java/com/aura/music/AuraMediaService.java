@@ -579,7 +579,7 @@ public class AuraMediaService extends MediaSessionService {
     ) {
         mainHandler.post(() -> {
             if (player != null) {
-                player.setPlaybackSpeed(speed);
+                player.setPlaybackSpeedFromApp(speed);
             }
         });
     }
