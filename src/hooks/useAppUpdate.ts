@@ -133,7 +133,16 @@ export function useAppUpdate() {
             headers: { 'Accept': 'application/json' }
           });
           if (res.ok) {
-            const data: AppUpdateInfo = await res.json();
+            let data: AppUpdateInfo = await res.json();
+      try {
+        const staticRes = await fetch(`${API_BASE}/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (staticRes.ok) {
+          const staticData = await staticRes.json();
+          if (isNewerVersion(staticData.latestVersion, data.latestVersion)) {
+            data = staticData;
+          }
+        }
+      } catch (e) {}
             // Solo mostrar novedades de la instalada si no hay una actualización mayor pendiente
             if (!isNewerVersion(data.latestVersion, installedVer)) {
               setUpdateInfo(data);
