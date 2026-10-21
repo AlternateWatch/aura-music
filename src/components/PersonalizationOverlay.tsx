@@ -51,6 +51,10 @@ interface PersonalizationOverlayProps {
   accentColor: string;
   onChangeAccentColor: (hex: string) => void;
 
+  // Columnas catálogo móvil
+  mobileColumns: 1 | 2 | 3;
+  onChangeMobileColumns: (cols: 1 | 2 | 3) => void;
+
   // Hápticos
   hapticsEnabled: boolean;
   onToggleHaptics: (enabled: boolean) => void;
@@ -76,6 +80,8 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
   onChangeAmbientGlow,
   accentColor,
   onChangeAccentColor,
+  mobileColumns,
+  onChangeMobileColumns,
   hapticsEnabled,
   onToggleHaptics,
 }) => {
@@ -423,6 +429,72 @@ export const PersonalizationOverlay: React.FC<PersonalizationOverlayProps> = ({
                     </div>
                   );
                 })}
+              </div>
+
+              {/* NÚMERO DE COLUMNAS DE CANCIONES EN MÓVIL */}
+              <div className="pt-4 border-t border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-white/50">
+                      Columnas del Catálogo en Móvil
+                    </h4>
+                    <p className="text-[11px] text-white/40 mt-0.5">
+                      Personaliza cuántas columnas de canciones ver en pantallas móviles.
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-brand-primary/20 text-brand-primary border border-brand-primary/30">
+                    {mobileColumns} {mobileColumns === 1 ? 'columna' : 'columnas'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
+                  {[
+                    { cols: 1 as const, title: '1 Columna', badge: 'Grande', desc: 'Tarjetas grandes y máximo detalle' },
+                    { cols: 2 as const, title: '2 Columnas', badge: 'Estándar', desc: 'Equilibrado y cómodo (Spotify/Apple)' },
+                    { cols: 3 as const, title: '3 Columnas', badge: 'Compacto', desc: 'Muchos más temas de un vistazo' },
+                  ].map((colOpt) => {
+                    const isSelected = mobileColumns === colOpt.cols;
+                    return (
+                      <button
+                        key={colOpt.cols}
+                        type="button"
+                        onClick={() => { hapticImpact('light'); onChangeMobileColumns(colOpt.cols); }}
+                        className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'border-brand-primary bg-white/5 shadow-[0_4px_20px_rgba(242,125,38,0.2)]'
+                            : 'border-white/5 bg-white/[0.02] hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-white">{colOpt.title}</span>
+                          {isSelected && <Check size={14} className="text-brand-primary" />}
+                        </div>
+
+                        {/* Miniatura esquemática de las columnas */}
+                        <div className="w-full h-8 bg-black/40 rounded-lg p-1 flex gap-1 items-center mb-2 pointer-events-none">
+                          {colOpt.cols === 1 && (
+                            <div className="w-full h-full bg-white/20 rounded" />
+                          )}
+                          {colOpt.cols === 2 && (
+                            <>
+                              <div className="flex-1 h-full bg-white/20 rounded" />
+                              <div className="flex-1 h-full bg-white/20 rounded" />
+                            </>
+                          )}
+                          {colOpt.cols === 3 && (
+                            <>
+                              <div className="flex-1 h-full bg-white/20 rounded" />
+                              <div className="flex-1 h-full bg-white/20 rounded" />
+                              <div className="flex-1 h-full bg-white/20 rounded" />
+                            </>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-white/40 leading-snug">{colOpt.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

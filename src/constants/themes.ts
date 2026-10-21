@@ -19,6 +19,7 @@ export const THEMES: Theme[] = [
 ];
 
 export type MobilePlayerStyle = 'floating' | 'classic' | 'minimal' | 'card';
+export type MobileColumns = 1 | 2 | 3;
 
 export interface MobilePlayerOption {
   id: MobilePlayerStyle;

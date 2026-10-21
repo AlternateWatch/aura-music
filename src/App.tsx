@@ -404,6 +404,30 @@ export default function App() {
   const [mobilePlayerStyle, setMobilePlayerStyle] = useState<MobilePlayerStyle>(() => {
     return (localStorage.getItem('aura_mobile_player_style') as MobilePlayerStyle) || 'floating';
   });
+  const [mobileColumns, setMobileColumns] = useState<1 | 2 | 3>(() => {
+    const saved = localStorage.getItem('aura_mobile_columns');
+    return saved === '1' ? 1 : saved === '3' ? 3 : 2;
+  });
+
+  const getMobileSongGridClass = (cols: 1 | 2 | 3) => {
+    if (cols === 1) {
+      return "grid grid-cols-1 gap-3.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6";
+    }
+    if (cols === 3) {
+      return "grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6";
+    }
+    return "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-6";
+  };
+
+  const getMobileAlbumGridClass = (cols: 1 | 2 | 3) => {
+    if (cols === 1) {
+      return "grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full";
+    }
+    if (cols === 3) {
+      return "grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3 md:gap-6 animate-in fade-in duration-200 w-full max-w-full";
+    }
+    return "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6 animate-in fade-in duration-200 w-full max-w-full";
+  };
   const [isAiEnabled, setIsAiEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('aura_enable_ai');
     return saved !== null ? saved === 'true' : true;
@@ -5264,6 +5288,11 @@ getCurrentTime={audioObj.getCurrentTime}
               isVisualizerEnabled={audioSettings.visualizer.enabled}
               onToggleVisualizer={(val: boolean) => {
                 updateAudioSettings({ ...audioSettings, visualizer: { ...audioSettings.visualizer, enabled: val } });
+              }}
+              mobileColumns={mobileColumns}
+              onChangeMobileColumns={(cols: 1 | 2 | 3) => {
+                setMobileColumns(cols);
+                localStorage.setItem("aura_mobile_columns", String(cols));
               }}
               mobilePlayerStyle={mobilePlayerStyle}
               onSelectMobilePlayerStyle={(style: MobilePlayerStyle) => {
