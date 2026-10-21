@@ -18,7 +18,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo, callback: () => void) {
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
 
     // Si el error es un fallo de carga de chunk, intentamos recargar la página
@@ -26,8 +26,6 @@ export class ErrorBoundary extends Component<Props, State> {
         error.message.includes('Loading chunk')) {
       window.location.reload();
     }
-
-    callback();
   }
 
   public render() {

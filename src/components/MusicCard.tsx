@@ -556,9 +556,9 @@ export const MusicCard: React.FC<MusicCardProps> = ({
               {song.title}
             </h3>
             {isDownloading ? (
-              <Loader2 size={12} className="text-brand-primary animate-spin shrink-0" title="Descargando para modo sin conexión..." />
+              <span title="Descargando para modo sin conexión..."><Loader2 size={12} className="text-brand-primary animate-spin shrink-0" /></span>
             ) : isOffline ? (
-              <Download size={12} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
+              <span title="Disponible sin conexión"><Download size={12} className="text-emerald-400 shrink-0" /></span>
             ) : null}
           </div>
           <p className="text-xs md:text-[10px] text-white/50 uppercase font-bold tracking-wider truncate" title={song.artist}>

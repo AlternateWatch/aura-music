@@ -426,7 +426,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                       {track.title}
                     </p>
                     {isTrackOffline && (
-                      <CheckCircle2 size={12} className="text-emerald-400 shrink-0" title="Guardado offline" />
+                      <span title="Guardado offline"><CheckCircle2 size={12} className="text-emerald-400 shrink-0" /></span>
                     )}
                     {isTrackDownloading && (
                       <Loader2 size={12} className="animate-spin text-brand-primary shrink-0" />

@@ -1823,7 +1823,7 @@ useEffect(() => {
     setActiveQueue(tracks);
     setManualQueueIds([]);
     setRadioQueueIds(new Set());
-    handlePlaySong(tracks[0], false, 0, false, tracks);
+    handlePlaySong(tracks[0], false, 0, false);
   };
 
   // --- MOTOR DE RECOMENDACIÓN: RADIO INFINITA / AUTOPLAY ---
@@ -3761,7 +3761,7 @@ transition={{
                           {p.name}
                         </span>
                         {offlinePlaylistIds.has(p.id.toString()) && (
-                          <Download size={11} className="text-emerald-400 shrink-0 ml-auto" title="Disponible sin conexión" />
+                          <span title="Disponible sin conexión"><Download size={11} className="text-emerald-400 shrink-0 ml-auto" /></span>
                         )}
                       </div>
                     </button>
@@ -4120,7 +4120,7 @@ transition={{
                       <div className="flex items-center justify-between mb-6">
                         <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3>
                         <div className="flex gap-3">
-                          <Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" title="Crear playlist" onClick={handleOpenCreatePlaylist} />
+                          <button type="button" title="Crear playlist" onClick={handleOpenCreatePlaylist}><Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" /></button>
                           <UploadIcon size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
                         </div>
                       </div>
@@ -4147,12 +4147,12 @@ transition={{
                                   )}
                                   <span className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary font-bold" : "text-white/50 hover:text-white"}`}>{p.name}</span>
                                   {offlinePlaylistIds.has(p.id.toString()) && (
-                                    <Download size={11} className="text-emerald-400 shrink-0" title="Disponible sin conexión" />
+                                    <span title="Disponible sin conexión"><Download size={11} className="text-emerald-400 shrink-0" /></span>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2">
-                                  <Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }} />
-                                  <Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }} />
+                                  <button type="button" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }}><Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" /></button>
+                                  <button type="button" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }}><Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" /></button>
                                 </div>
                             </li>
                         ))}
@@ -4365,7 +4365,7 @@ transition={{
               <AlbumDetailView
                 albumName={selectedAlbumName}
                 songs={songs.filter(s => s.album === selectedAlbumName)}
-                currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
+                currentSong={currentSong}
                 isPlaying={isPlaying}
                 likedIds={likedIds}
                 playlists={playlists}
@@ -5283,7 +5283,7 @@ transition={{
 
       <Suspense fallback={null}><LazyMinigameLobbyOverlay isOpen={isMinigameLobbyOpen} onClose={() => setIsMinigameLobbyOpen(false)} onStart={startMinigame} /></Suspense>
       <Suspense fallback={null}><AnimatePresence>{tabsSong && <LazyTabsOverlay song={tabsSong} onClose={() => setTabsSong(null)} />}</AnimatePresence></Suspense>
-      <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
+      <Suspense fallback={null}><AnimatePresence>{isLyricsOpen && <LazyLyricsOverlay isOpen={isLyricsOpen} onClose={() => setIsLyricsOpen(false)} currentSong={currentSong} currentTime={audioObj.getCurrentTime()} getCurrentTime={audioObj.getCurrentTime}
   subscribeToTime={audioObj.subscribeToTime} onSeek={(t:any) => audioObj.seek(t)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{isFullPlayerOpen && <FullPlayerOverlay isOpen={isFullPlayerOpen} liveCurrentTime={audioObj.getCurrentTime()} subscribeToTime={audioObj.subscribeToTime}
 getCurrentTime={audioObj.getCurrentTime}
@@ -5292,7 +5292,7 @@ getCurrentTime={audioObj.getCurrentTime}
         isOpen={isQueueOpen}
         onClose={() => setIsQueueOpen(false)}
         queue={getCurrentPlayPool()}
-        currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
+        currentSong={currentSong}
         onPlayFromQueue={(song) => handlePlaySong(song, false, 0, true)}
         onReorderQueue={handleReorderQueue}
         isShuffle={socketObj.isShuffle}
@@ -5311,7 +5311,7 @@ getCurrentTime={audioObj.getCurrentTime}
         startEndOfSongTimer={sleepTimer.startEndOfSongTimer}
         cancelTimer={sleepTimer.cancelTimer}
         extendTimer={sleepTimer.extendTimer}
-        currentSong={currentSong} animatedCoverUrl={resolvedAnimatedCoverUrl}
+        currentSong={currentSong}
       />}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isSocialOpen && <LazySocialSidebar token={token} user={user} socket={socketObj.socketRef.current} unreadSenders={socketObj.unreadSenders} setUnreadSenders={socketObj.setUnreadSenders} currentSession={socketObj.currentSession} onClose={() => setIsSocialOpen(false)} />}</AnimatePresence></Suspense>
       <AnimatePresence>{hostOnlyNotice && (

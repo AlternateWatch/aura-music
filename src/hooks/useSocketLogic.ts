@@ -186,7 +186,11 @@ export function useSocketLogic(
     });
     socket.on("receive-session-invite", (invite) => setActiveInvite(invite));
 
-    return () => { socket.disconnect(); socketRef.current = null; };
+    return () => {
+      clearInterval(heartbeatInterval);
+      socket.disconnect();
+      socketRef.current = null;
+    };
   }, []);
 
   useEffect(() => {

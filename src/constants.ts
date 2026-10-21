@@ -12,6 +12,11 @@ export interface Song {
   format: 'mp3' | 'flac';
   tabs_url: string | null;
   track_number: number | null;
+  duration?: number;
+  is_liked?: number | boolean;
+  animated_cover_path?: string | null;
+  animatedCoverUrl?: string | null;
+  video_url?: string | null;
 }
 export interface Playlist {
   id: string;
