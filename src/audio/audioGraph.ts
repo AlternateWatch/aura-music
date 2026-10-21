@@ -199,6 +199,20 @@ export class AudioGraph {
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 64;
 
+    // Convolución y nodos para reverberación espacial
+    this.convolver = ctx.createConvolver();
+    try {
+      this.convolver.buffer = createImpulseResponse(ctx, 2.0, 2.2);
+    } catch (e) {
+      console.warn("No se pudo generar el buffer de reverberación:", e);
+    }
+    this.reverbDryGain = ctx.createGain();
+    this.reverbDryGain.gain.value = 1;
+    this.reverbWetGain = ctx.createGain();
+    this.reverbWetGain.gain.value = 0;
+    this.reverbMerge = ctx.createGain();
+    this.reverbMerge.gain.value = 1;
+
     this.rebuildChain(false, false);
 
     this.audioA.volume = 1;
@@ -211,7 +225,9 @@ export class AudioGraph {
   }
 
   private rebuildChain(eqOn: boolean, normOn: boolean) {
-    const key = `${eqOn ? 1 : 0}:${normOn ? 1 : 0}`;
+    const reverbWet = Math.max(0, Math.min(1, this.settings.playbackRate?.reverbWet ?? 0));
+    const reverbOn = reverbWet > 0;
+    const key = `${eqOn ? 1 : 0}:${normOn ? 1 : 0}:${reverbOn ? 1 : 0}`;
     if (this.activeDspChainKey === key) return;
     this.activeDspChainKey = key;
 
@@ -222,6 +238,10 @@ export class AudioGraph {
       this.preamp,
       ...this.filters,
       this.limiter,
+      this.reverbDryGain,
+      this.reverbWetGain,
+      this.convolver,
+      this.reverbMerge,
       this.master,
       this.analyser,
     ];
@@ -236,14 +256,28 @@ export class AudioGraph {
     if (useLimiter) {
       chain.push(this.limiter);
     }
-    chain.push(this.master, this.analyser);
 
     let node: AudioNode = this.preSum;
     for (const next of chain) {
       node.connect(next);
       node = next;
     }
-    node.connect(this.ctx.destination);
+
+    if (reverbOn) {
+      node.connect(this.reverbDryGain);
+      this.reverbDryGain.connect(this.reverbMerge);
+
+      node.connect(this.convolver);
+      this.convolver.connect(this.reverbWetGain);
+      this.reverbWetGain.connect(this.reverbMerge);
+
+      this.reverbMerge.connect(this.master);
+    } else {
+      node.connect(this.master);
+    }
+
+    this.master.connect(this.analyser);
+    this.analyser.connect(this.ctx.destination);
 
     if (this.meterNode && normOn) {
       try {
@@ -440,7 +474,16 @@ export class AudioGraph {
 
     const eqOn = s.eq.enabled;
     const normOn = s.normalizer.enabled;
+    const reverbWet = Math.max(0, Math.min(1, s.playbackRate?.reverbWet ?? 0));
+    const reverbOn = reverbWet > 0;
     this.rebuildChain(eqOn, normOn);
+
+    if (reverbOn) {
+      const dryVal = Math.max(0.15, 1 - reverbWet * 0.45);
+      const wetVal = reverbWet * 0.7;
+      this.reverbDryGain.gain.setTargetAtTime(dryVal, now, 0.03);
+      this.reverbWetGain.gain.setTargetAtTime(wetVal, now, 0.03);
+    }
 
     if (normOn) {
       if (!this.meterInitStarted) {
@@ -690,6 +733,12 @@ export class AudioGraph {
     this.audioB.removeEventListener("ended", this.onEnded);
     if (this.fadeTimer) clearTimeout(this.fadeTimer);
     if (this.meterNode) this.meterNode.port.onmessage = null;
+    try {
+      this.convolver?.disconnect();
+      this.reverbWetGain?.disconnect();
+      this.reverbDryGain?.disconnect();
+      this.reverbMerge?.disconnect();
+    } catch {}
     this.listeners.clear();
     void this.ctx.close();
   }

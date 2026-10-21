@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.6",
-  "versionCode": 7,
-  "releaseNotes": "• Corrección de error crítico (audioSettings is not defined) en el reproductor completo.\n• Nueva ventana emergente de bienvenida que muestra automáticamente las novedades de la versión recién instalada en el primer inicio.\n• Botón directo en Ajustes de Perfil para volver a consultar las notas de la versión instalada cuando desees.",
+  "latestVersion": "1.0.7",
+  "versionCode": 8,
+  "releaseNotes": "• Corrección integral del motor de audio: eliminación de micro-cortes, silencios y bucles de buffering al usar Speed Up (1.15x), Nightcore (1.25x) y velocidades aceleradas.\n• Motor dual híbrido: reproducción nativa acelerada por hardware para tempo y tono, con procesamiento Web Audio dedicado para reverberación espacial.\n• Sincronización continua de buffer sin bloqueos en conexiones móviles.",
   "history": [
+    {
+      "version": "1.0.7",
+      "versionCode": 8,
+      "notes": "• Corrección integral del motor de audio: eliminación de micro-cortes, silencios y bucles de buffering al usar Speed Up (1.15x), Nightcore (1.25x) y velocidades aceleradas.\n• Motor dual híbrido: reproducción nativa acelerada por hardware para tempo y tono, con procesamiento Web Audio dedicado para reverberación espacial.\n• Sincronización continua de buffer sin bloqueos en conexiones móviles."
+    },
     {
       "version": "1.0.6",
       "versionCode": 7,
@@ -40,7 +45,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.6",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.7",
   "mandatory": false,
-  "publishedAt": "2026-10-21T11:47:08.776Z"
+  "publishedAt": "2026-10-21T12:40:00.000Z"
 }

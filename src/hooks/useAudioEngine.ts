@@ -55,8 +55,7 @@ export function useAudioEngine(
   const needsGraph =
     settings.normalizer.enabled ||
     settings.eq.enabled ||
-    settings.crossfade.enabled ||
-    (settings.gapless?.enabled ?? true) ||
+    (settings.crossfade.enabled && settings.crossfade.duration > 0) ||
     (settings.playbackRate?.reverbWet ?? 0) > 0 ||
     visualizerActive;
 
@@ -161,8 +160,17 @@ export function useAudioEngine(
           nextTrackCandidateRef.current = nextInfo.song;
           void nextInfo.resolveUrl().then((url) => {
             if (url && standbyPreloadedForSongRef.current === songId) {
-              const g = ensureGraph();
-              g?.prepareStandby(url);
+              const g = graphRef.current;
+              if (g) {
+                g.prepareStandby(url);
+              } else {
+                const standby = activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
+                if (standby && standby.paused && standby.src !== url) {
+                  standby.src = url;
+                  standby.preload = "auto";
+                  standby.load();
+                }
+              }
             }
           });
         }
@@ -191,21 +199,44 @@ export function useAudioEngine(
           }
         }
       } else if (gapless) {
-        // Gapless 0 ms: disparar cuando resten menos de 45 ms para sample exacto sin gap
-        const isGaplessPoint = time > 5 && time >= dur * 0.7 && remaining <= 0.045 && remaining >= -0.5;
+        // Gapless 0 ms: disparar cuando resten menos de 80 ms para sample exacto sin gap (soporta velocidades aceleradas)
+        const isGaplessPoint = time > 5 && time >= dur * 0.7 && remaining <= 0.08 && remaining >= -0.5;
         if (isGaplessPoint && transitionTriggeredForSongRef.current !== songId) {
           const nextSong = nextTrackCandidateRef.current;
-          const g = ensureGraph();
-          const standbyAudio = g?.getStandbyAudio();
+          const g = graphRef.current;
+          const standbyAudio = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
           // Solo si el siguiente track está listo para reproducir
           if (nextSong && onGaplessNextRef.current && standbyAudio && standbyAudio.readyState >= 2) {
             transitionTriggeredForSongRef.current = songId;
             loadedSongIdRef.current = nextSong.id;
-            g.triggerGaplessTransition();
-            activePlayerRef.current = g.getActivePlayer();
-            const newAudio = g.getActiveAudio();
-            audioRef.current = newAudio;
-            const newDur = (Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+            if (g) {
+              g.triggerGaplessTransition();
+              activePlayerRef.current = g.getActivePlayer();
+              audioRef.current = g.getActiveAudio();
+            } else {
+              const from = activePlayerRef.current;
+              const to: "A" | "B" = from === "A" ? "B" : "A";
+              const fromAudio = from === "A" ? primaryAudioRef.current : secondaryAudioRef.current;
+              const toAudio = to === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
+              activePlayerRef.current = to;
+              if (toAudio) {
+                audioRef.current = toAudio;
+                toAudio.volume = volumeRef.current;
+                const rate = settingsRef.current.playbackRate?.rate ?? 1.0;
+                const preservesPitch = settingsRef.current.playbackRate?.preservePitch !== false;
+                if (toAudio.playbackRate !== rate) toAudio.playbackRate = rate;
+                (toAudio as any).preservesPitch = preservesPitch;
+                (toAudio as any).mozPreservesPitch = preservesPitch;
+                (toAudio as any).webkitPreservesPitch = preservesPitch;
+                void toAudio.play().catch(() => {});
+              }
+              if (fromAudio) {
+                fromAudio.pause();
+                fromAudio.currentTime = 0;
+              }
+            }
+            const newAudio = audioRef.current;
+            const newDur = (newAudio && Number.isFinite(newAudio.duration) && newAudio.duration > 0)
               ? newAudio.duration
               : (nextSong.duration || 0);
             setDuration(newDur);
@@ -234,20 +265,43 @@ export function useAudioEngine(
 
     if (nextTrackCandidateRef.current && onGaplessNextRef.current && (gapless || (cf.enabled && cf.duration > 0))) {
       const nextSong = nextTrackCandidateRef.current;
-      const g = ensureGraph();
-      const standbyAudio = g?.getStandbyAudio();
+      const g = graphRef.current;
+      const standbyAudio = g ? g.getStandbyAudio() : (activePlayerRef.current === "A" ? secondaryAudioRef.current : primaryAudioRef.current);
       if (standbyAudio && standbyAudio.readyState >= 2) {
         transitionTriggeredForSongRef.current = songId;
         loadedSongIdRef.current = nextSong.id;
-        if (cf.enabled && cf.duration > 0) {
+        if (cf.enabled && cf.duration > 0 && g) {
           g.triggerCrossfadeTransition(cf.duration);
-        } else {
+          activePlayerRef.current = g.getActivePlayer();
+          audioRef.current = g.getActiveAudio();
+        } else if (g) {
           g.triggerGaplessTransition();
+          activePlayerRef.current = g.getActivePlayer();
+          audioRef.current = g.getActiveAudio();
+        } else {
+          const from = activePlayerRef.current;
+          const to: "A" | "B" = from === "A" ? "B" : "A";
+          const fromAudio = from === "A" ? primaryAudioRef.current : secondaryAudioRef.current;
+          const toAudio = to === "A" ? secondaryAudioRef.current : primaryAudioRef.current;
+          activePlayerRef.current = to;
+          if (toAudio) {
+            audioRef.current = toAudio;
+            toAudio.volume = volumeRef.current;
+            const rate = settingsRef.current.playbackRate?.rate ?? 1.0;
+            const preservesPitch = settingsRef.current.playbackRate?.preservePitch !== false;
+            if (toAudio.playbackRate !== rate) toAudio.playbackRate = rate;
+            (toAudio as any).preservesPitch = preservesPitch;
+            (toAudio as any).mozPreservesPitch = preservesPitch;
+            (toAudio as any).webkitPreservesPitch = preservesPitch;
+            void toAudio.play().catch(() => {});
+          }
+          if (fromAudio) {
+            fromAudio.pause();
+            fromAudio.currentTime = 0;
+          }
         }
-        activePlayerRef.current = g.getActivePlayer();
-        const newAudio = g.getActiveAudio();
-        audioRef.current = newAudio;
-        const newDur = (Number.isFinite(newAudio.duration) && newAudio.duration > 0)
+        const newAudio = audioRef.current;
+        const newDur = (newAudio && Number.isFinite(newAudio.duration) && newAudio.duration > 0)
           ? newAudio.duration
           : (nextSong.duration || 0);
         setDuration(newDur);
@@ -294,8 +348,8 @@ export function useAudioEngine(
     a2.addEventListener("ended", onEndB);
     a1.addEventListener("waiting", onWaiting);
     a2.addEventListener("waiting", onWaiting);
-    a1.addEventListener("stalled", onWaiting);
-    a2.addEventListener("stalled", onWaiting);
+    // Note: stalled is fired when browser intentionally pauses socket read when buffer is full.
+    // Do NOT attach onWaiting to stalled as it causes false buffer lockups on mobile.
     a1.addEventListener("playing", onPlaying);
     a2.addEventListener("playing", onPlaying);
     a1.addEventListener("pause", onPause);
@@ -312,8 +366,6 @@ export function useAudioEngine(
       a2.removeEventListener("ended", onEndB);
       a1.removeEventListener("waiting", onWaiting);
       a2.removeEventListener("waiting", onWaiting);
-      a1.removeEventListener("stalled", onWaiting);
-      a2.removeEventListener("stalled", onWaiting);
       a1.removeEventListener("playing", onPlaying);
       a2.removeEventListener("playing", onPlaying);
       a1.removeEventListener("pause", onPause);
@@ -337,7 +389,7 @@ export function useAudioEngine(
 
     [primaryAudioRef.current, secondaryAudioRef.current].forEach(a => {
       if (a) {
-        if (a.playbackRate !== rate) a.playbackRate = rate;
+        if (Math.abs(a.playbackRate - rate) > 0.001) a.playbackRate = rate;
         (a as any).preservesPitch = preservesPitch;
         (a as any).mozPreservesPitch = preservesPitch;
         (a as any).webkitPreservesPitch = preservesPitch;
@@ -345,14 +397,23 @@ export function useAudioEngine(
     });
 
     graphRef.current?.applySettings(settings);
-  }, [settings, graphVersion]);
+  }, [
+    settings.playbackRate?.rate,
+    settings.playbackRate?.preservePitch,
+    settings.playbackRate?.reverbWet,
+    settings.eq,
+    settings.normalizer,
+    settings.crossfade,
+    graphVersion
+  ]);
 
   useEffect(() => {
     const graph = graphRef.current;
     if (graph) {
       graph.setVolume(volume);
-    } else if (audioRef.current) {
-      audioRef.current.volume = volume;
+    } else {
+      if (primaryAudioRef.current) primaryAudioRef.current.volume = volume;
+      if (secondaryAudioRef.current) secondaryAudioRef.current.volume = volume;
     }
   }, [volume, graphVersion]);
 
@@ -383,7 +444,11 @@ export function useAudioEngine(
 
   // Carga y reproducción controlada
   useEffect(() => {
-    const audio = audioRef.current;
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = activePlayerRef.current === "A" ? primaryAudioRef.current : secondaryAudioRef.current;
+      if (audio) audioRef.current = audio;
+    }
 
     if (!audio || !currentSong || !resolvedAudioUrl) {
       return;
@@ -488,8 +553,6 @@ export function useAudioEngine(
     currentSong?.id,
     isPlaying,
     resolvedAudioUrl,
-    needsGraph,
-    ensureGraph,
     setIsPlaying,
   ]);
 

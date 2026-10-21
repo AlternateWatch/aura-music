@@ -57,7 +57,7 @@ export const PLAYBACK_PRESETS: PlaybackPresetDef[] = [
     icon: "⚡",
     rate: 1.25,
     preservePitch: false,
-    reverbWet: 0.05,
+    reverbWet: 0.0,
     description: "1.25x velocidad acelerada con tono agudo natural y energía",
   },
   {
