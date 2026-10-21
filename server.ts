@@ -513,17 +513,21 @@ app.get(['/api/app/version', '/api/version'], async (req: Request, res: Response
         ];
         for (const file of candidates) {
             if (fs.existsSync(file)) {
-                const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-                return res.json(data);
+                try {
+                    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+                    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                    return res.json(data);
+                } catch (parseErr) {
+                    console.error('Error parsing version file:', parseErr);
+                }
             }
         }
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         return res.json({
             platform: "android",
-            latestVersion: "1.0.0",
-            versionCode: 1,
+            latestVersion: "1.0.4",
+            versionCode: 5,
             releaseNotes: "Mejoras de rendimiento y estabilidad.",
             downloadUrl: `${req.protocol}://${req.get('host')}/download/aura-latest.apk`,
             mandatory: false,
