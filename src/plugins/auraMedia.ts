@@ -34,6 +34,10 @@ export interface AuraMediaPlugin {
     durationMs: number;
   }): Promise<void>;
 
+  openExternalUrl?(options: {
+    url: string;
+  }): Promise<void>;
+
   addListener(
     eventName: 'play' | 'pause' | 'next' | 'previous' | 'shuffleChanged' | 'repeatChanged' | 'seek',
     listenerFunc: (data: any) => void

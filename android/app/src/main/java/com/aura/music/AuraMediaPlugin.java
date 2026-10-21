@@ -2,6 +2,7 @@ package com.aura.music;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -360,5 +361,22 @@ public class AuraMediaPlugin extends Plugin {
                 "repeatChanged",
                 data
         );
+    }
+
+    @PluginMethod
+    public void openExternalUrl(PluginCall call) {
+        String urlString = call.getString("url");
+        if (urlString == null || urlString.isEmpty()) {
+            call.reject("URL is required");
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(urlString));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open external URL", e);
+        }
     }
 }

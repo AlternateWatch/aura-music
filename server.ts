@@ -535,7 +535,193 @@ app.get(['/api/app/version', '/api/version'], async (req: Request, res: Response
     }
 });
 
-// 2. Descarga directa del APK de actualización para Android
+// 2. Landing page amigable y descarga directa del APK de Android
+app.get(['/download', '/descargar'], (req: Request, res: Response) => {
+    const accept = (req.headers.accept || '').toLowerCase();
+    // Si la petición viene de curl o pide explícitamente el APK, redirigir al binario
+    if (accept.includes('application/vnd.android.package-archive')) {
+        return res.redirect('/download/aura-latest.apk');
+    }
+
+    let version = '1.0.3';
+    try {
+        const vPath = path.join(ROOT_DIR, 'version.json');
+        if (fs.existsSync(vPath)) {
+            const vData = JSON.parse(fs.readFileSync(vPath, 'utf8'));
+            if (vData.latestVersion) version = vData.latestVersion;
+        }
+    } catch {}
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Descargar Aura Music para Android</title>
+  <meta http-equiv="refresh" content="2;url=/download/aura-latest.apk">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #09090b;
+      color: #fafafa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .card {
+      background: #121215;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 28px;
+      max-width: 440px;
+      width: 100%;
+      padding: 32px 24px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(242, 125, 38, 0.15);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .glow {
+      position: absolute;
+      top: -60px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 200px;
+      height: 200px;
+      background: radial-gradient(circle, rgba(242, 125, 38, 0.3) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 14px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(242, 125, 38, 0.15);
+      color: #F27D26;
+      border: 1px solid rgba(242, 125, 38, 0.3);
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ffffff 40%, #a1a1aa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.desc {
+      color: #a1a1aa;
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 16px 24px;
+      border-radius: 18px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #ffffff;
+      background: linear-gradient(135deg, #f59e0b, #F27D26, #ef4444);
+      text-decoration: none;
+      box-shadow: 0 10px 25px rgba(242, 125, 38, 0.35);
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .auto-notice {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #71717a;
+    }
+    .steps {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      text-align: left;
+    }
+    .step-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #e4e4e7;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .step-item {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #a1a1aa;
+      line-height: 1.4;
+    }
+    .step-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 11px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="glow"></div>
+    <span class="badge">Aura Music v${version} (Android)</span>
+    <h1>Descarga Oficial APK</h1>
+    <p class="desc">La última versión con panel de personalización avanzado, estilos de reproductor y mayor velocidad.</p>
+    <a href="/download/aura-latest.apk" class="btn" id="dlBtn" download="aura-latest.apk">
+      <span>⬇️ Descargar APK (62 MB)</span>
+    </a>
+    <p class="auto-notice" id="timerNotice">La descarga comenzará automáticamente en 2 segundos...</p>
+    
+    <div class="steps">
+      <div class="step-title">Pasos para instalar</div>
+      <div class="step-item">
+        <span class="step-num">1</span>
+        <span>Pulsa el botón de descarga si tu navegador no ha iniciado la descarga.</span>
+      </div>
+      <div class="step-item">
+        <span class="step-num">2</span>
+        <span>Si Android te muestra <em>"¿Quieres descargar este archivo?"</em> o aviso de app externa, selecciona <strong>Descargar de todos modos</strong>.</span>
+      </div>
+      <div class="step-item">
+        <span class="step-num">3</span>
+        <span>Abre la barra de notificaciones y pulsa <strong>aura-latest.apk</strong> para actualizar tu app sin perder datos.</span>
+      </div>
+    </div>
+  </div>
+  <script>
+    setTimeout(function() {
+      var n = document.getElementById('timerNotice');
+      if (n) n.innerText = 'Si la descarga no ha comenzado, pulsa el botón naranja arriba.';
+      window.location.href = '/download/aura-latest.apk';
+    }, 1500);
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(html);
+});
+
+// 2.1 Descarga directa del archivo binario APK
 app.get(['/download/aura-latest.apk', '/download/app-release.apk', '/api/app/download'], async (req: Request, res: Response) => {
     try {
         const apkCandidates = [
@@ -547,11 +733,22 @@ app.get(['/download/aura-latest.apk', '/download/app-release.apk', '/api/app/dow
         ];
 
         for (const file of apkCandidates) {
-            if (fs.existsSync(file)) {
-                res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-                res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
-                res.setHeader('Cache-Control', 'public, max-age=3600');
-                return res.sendFile(file);
+            const resolvedPath = path.resolve(file);
+            if (fs.existsSync(resolvedPath)) {
+                const stat = fs.statSync(resolvedPath);
+                if (stat.isFile() && stat.size > 1000000) {
+                    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+                    res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
+                    res.setHeader('Content-Length', stat.size);
+                    res.setHeader('Cache-Control', 'public, max-age=60');
+                    res.setHeader('Accept-Ranges', 'bytes');
+                    return res.sendFile(resolvedPath, (err) => {
+                        if (err && !res.headersSent) {
+                            console.error('[Download APK] Error enviando archivo:', err);
+                            res.status(500).send('Error enviando el archivo APK.');
+                        }
+                    });
+                }
             }
         }
 
@@ -560,7 +757,15 @@ app.get(['/download/aura-latest.apk', '/download/app-release.apk', '/api/app/dow
             if (b2Obj && b2Obj.stream) {
                 res.setHeader('Content-Type', 'application/vnd.android.package-archive');
                 res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
-                res.setHeader('Cache-Control', 'public, max-age=3600');
+                if (b2Obj.contentLength !== undefined) {
+                    res.setHeader('Content-Length', b2Obj.contentLength);
+                }
+                res.setHeader('Cache-Control', 'public, max-age=60');
+                res.setHeader('Accept-Ranges', 'bytes');
+                b2Obj.stream.on('error', (err) => {
+                    console.error('[Download APK] Error en stream B2:', err);
+                    if (!res.headersSent) res.status(500).end();
+                });
                 return b2Obj.stream.pipe(res);
             }
         }

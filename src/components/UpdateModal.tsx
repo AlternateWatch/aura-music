@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Download, CheckCircle2, X, ExternalLink, ShieldAlert, ArrowRight } from 'lucide-react';
 import { type AppUpdateInfo } from '../hooks/useAppUpdate';
 import { hapticImpact } from '../utils/haptics';
+import { Capacitor } from '@capacitor/core';
+import AuraMedia from '../plugins/auraMedia';
 
 interface UpdateModalProps {
   isOpen: boolean;
@@ -19,15 +21,33 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 }) => {
   const [downloadStarted, setDownloadStarted] = useState(false);
 
-  const handleStartUpdate = () => {
+  const handleStartUpdate = async () => {
     if (!updateInfo) return;
     hapticImpact('heavy');
     setDownloadStarted(true);
 
     const downloadUrl = updateInfo.downloadUrl;
-    // Abrir enlace en el navegador del sistema o gestor de descargas de Android
+
+    // Si estamos en la app nativa de Android, usamos el Intent nativo para abrir Chrome / navegador externo
+    if (Capacitor.isNativePlatform() && AuraMedia?.openExternalUrl) {
+      try {
+        await AuraMedia.openExternalUrl({ url: downloadUrl });
+        return;
+      } catch (e) {
+        console.warn('Error abriendo enlace con AuraMedia:', e);
+      }
+    }
+
+    // En navegador web convencional o fallback
     try {
-      window.open(downloadUrl, '_system');
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = 'aura-latest.apk';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch {
       window.location.href = downloadUrl;
     }
