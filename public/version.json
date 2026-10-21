@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.5",
-  "versionCode": 6,
-  "releaseNotes": "• Control de velocidad y efectos de audio especiales: Presets instantáneos para Nightcore (1.25x + High Pitch), Slowed & Reverb (0.85x + Spatial Reverb), Speed Up (1.15x) y Modo Normal.\n• Deslizador continuo de velocidad (0.50x a 2.00x) y control de bloqueo de tono (Pitch Lock).\n• Reverberación de sala inmersiva por convolución en tiempo real con Web Audio.\n• Acceso rápido al modo de audio desde el Full Player y la barra de reproducción.\n• Sistema de vibración háptica contextual refinada (éxito en favoritos, advertencias en borrado y selección táctil).",
+  "latestVersion": "1.0.6",
+  "versionCode": 7,
+  "releaseNotes": "• Corrección de error crítico (audioSettings is not defined) en el reproductor completo.\n• Nueva ventana emergente de bienvenida que muestra automáticamente las novedades de la versión recién instalada en el primer inicio.\n• Botón directo en Ajustes de Perfil para volver a consultar las notas de la versión instalada cuando desees.",
   "history": [
+    {
+      "version": "1.0.6",
+      "versionCode": 7,
+      "notes": "• Corrección de error crítico (audioSettings is not defined) en el reproductor completo.\n• Nueva ventana emergente de bienvenida que muestra automáticamente las novedades de la versión recién instalada en el primer inicio.\n• Botón directo en Ajustes de Perfil para volver a consultar las notas de la versión instalada cuando desees."
+    },
     {
       "version": "1.0.5",
       "versionCode": 6,
@@ -35,7 +40,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.5",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.6",
   "mandatory": false,
-  "publishedAt": "2026-10-21T11:25:00.000Z"
+  "publishedAt": "2026-10-21T11:47:08.776Z"
 }
