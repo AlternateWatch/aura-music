@@ -206,7 +206,8 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
     (currentSong as any)?.animated_cover_path ||
     (currentSong as any)?.animatedCoverUrl
   );
-  const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
+  const isNative = Capacitor.isNativePlatform();
+  const isVideo = !isNative && (isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path));
   const coverSrc = resolvedCoverUrl || resolveMediaUrl(currentSong.coverUrl) || DEFAULT_COVER;
 
   const [videoError, setVideoError] = useState(false);

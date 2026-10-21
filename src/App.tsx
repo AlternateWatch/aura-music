@@ -1227,7 +1227,9 @@ useEffect(() => {
       const resolved = await resolveFileUrl(rawUrl);
       if (!resolved) return;
       if (isAnimatedCoverVideo(resolved)) {
-        await preloadVideo(resolved);
+        if (!Capacitor.isNativePlatform()) {
+          await preloadVideo(resolved);
+        }
       } else {
         await preloadImage(resolved);
       }
@@ -5137,7 +5139,7 @@ transition={{
                     <div className="absolute -inset-20 blur-[120px] rounded-full animate-pulse transition-all duration-1000" style={{ backgroundColor: `${dynamicColor}33` }} />
                     <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] rounded-[60px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/10 bg-black">
                       {resolvedAnimatedCoverUrl && !tvVideoError ? (
-                        isVideoUrl(resolvedAnimatedCoverUrl) ? (
+                        (isVideoUrl(resolvedAnimatedCoverUrl) && !Capacitor.isNativePlatform()) ? (
                           <video
                             src={resolvedAnimatedCoverUrl}
                             autoPlay
@@ -5149,7 +5151,7 @@ transition={{
                           />
                         ) : (
                           <img
-                            src={resolvedAnimatedCoverUrl}
+                            src={!isVideoUrl(resolvedAnimatedCoverUrl) ? resolvedAnimatedCoverUrl : (resolvedCoverUrl || DEFAULT_COVER)}
                             onError={(e) => {
                               if (!e.currentTarget.src.includes('default_cover.jpg') && !e.currentTarget.src.includes('default-cover.jpg')) {
                                 e.currentTarget.src = DEFAULT_COVER;

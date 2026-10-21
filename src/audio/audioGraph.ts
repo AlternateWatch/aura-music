@@ -70,6 +70,16 @@ const dbToLin = (db: number) => Math.pow(10, db / 20);
 
 const sharedCache = new LoudnessCache();
 
+function isSameAudioSource(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    return new URL(a, window.location.href).href === new URL(b, window.location.href).href;
+  } catch {
+    return a.endsWith(b) || b.endsWith(a);
+  }
+}
+
 function createImpulseResponse(ctx: AudioContext, duration = 2.5, decay = 2.2): AudioBuffer {
   const sampleRate = ctx.sampleRate;
   const length = Math.max(1, Math.floor(sampleRate * duration));
@@ -340,7 +350,7 @@ export class AudioGraph {
     (standby as any).mozPreservesPitch = preservesPitch;
     (standby as any).webkitPreservesPitch = preservesPitch;
 
-    if (standby.paused && standby.src !== src) {
+    if (standby.paused && !isSameAudioSource(standby.src, src)) {
       standby.src = src;
       standby.preload = "auto";
       standby.load();
