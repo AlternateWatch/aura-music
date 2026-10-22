@@ -1,13 +1,18 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.8",
-  "versionCode": 9,
-  "releaseNotes": "• Portadas animadas en vídeo MP4: Soporte completo en Android nativo con muteo síncrono en DOM sin cortes ni pérdida de foco de audio.\n• Rendimiento y fluidez: Arrastre de barra con throttling a 150 ms, code-splitting Rollup (<488 kB) y ticker adaptativo para máximo ahorro de batería.\n• Estabilidad integral: Corrección de fugas en WebSocket, ErrorBoundary blindado y sincronización total de la biblioteca.",
+  "latestVersion": "1.0.9",
+  "versionCode": 10,
+  "releaseNotes": "• Subida de álbumes ordenada y precisa: Los archivos MP3/FLAC ahora se asignan por defecto en el orden exacto de selección y subida, garantizando que el audio y el título coincidan sin desórdenes.\n• Selector de asignación interactivo: Elige o intercambia manualmente el archivo asignado a cada pista del disco con prevención de duplicados.\n• Reordenación rápida con flechas: Mueve o intercambia pistas adyacentes al instante con los botones ▲ y ▼.\n• Estrategias de emparejamiento avanzadas: Modos 'En orden de subida', 'Auto-detectar inteligente' (lee etiquetas ID3v2/FLAC y patrones de pista en el nombre de archivo) y 'Alfabético A-Z'.\n• Soporte perfeccionado para álbumes multi-disco evitando solapamientos de pistas.",
   "history": [
+    {
+      "version": "1.0.9",
+      "versionCode": 10,
+      "notes": "• Subida de álbumes ordenada y precisa: Los archivos MP3/FLAC ahora se asignan por defecto en el orden exacto de selección y subida, garantizando que el audio y el título coincidan sin desórdenes.\n• Selector de asignación interactivo: Elige o intercambia manualmente el archivo asignado a cada pista del disco con prevención de duplicados.\n• Reordenación rápida con flechas: Mueve o intercambia pistas adyacentes al instante con los botones ▲ y ▼.\n• Estrategias de emparejamiento avanzadas: Modos 'En orden de subida', 'Auto-detectar inteligente' (lee etiquetas ID3v2/FLAC y patrones de pista en el nombre de archivo) y 'Alfabético A-Z'.\n• Soporte perfeccionado para álbumes multi-disco evitando solapamientos de pistas."
+    },
     {
       "version": "1.0.8",
       "versionCode": 9,
-      "notes": "• Portadas animadas en vídeo MP4: Soporte completo en Android nativo con muteo síncrono en DOM sin cortes ni pérdida de foco de audio.\n• Rendimiento y fluidez: Arrastre de barra con throttling a 150 ms, code-splitting Rollup (<488 kB) y ticker adaptativo para máximo ahorro de batería.\n• Estabilidad integral: Corrección de fugas en WebSocket, ErrorBoundary blindado y sincronización total de la biblioteca."
+      "notes": "• Subida de álbumes ordenada y precisa: Los archivos MP3/FLAC ahora se asignan por defecto en el orden exacto de selección y subida, garantizando que el audio y el título coincidan sin desórdenes.\n• Selector de asignación interactivo: Elige o intercambia manualmente el archivo asignado a cada pista del disco con prevención de duplicados.\n• Reordenación rápida con flechas: Mueve o intercambia pistas adyacentes al instante con los botones ▲ y ▼.\n• Estrategias de emparejamiento avanzadas: Modos 'En orden de subida', 'Auto-detectar inteligente' (lee etiquetas ID3v2/FLAC y patrones de pista en el nombre de archivo) y 'Alfabético A-Z'.\n• Soporte perfeccionado para álbumes multi-disco evitando solapamientos de pistas."
     },
     {
       "version": "1.0.7",
@@ -50,7 +55,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.8",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.9",
   "mandatory": false,
-  "publishedAt": "2026-10-21T19:23:35.453Z"
+  "publishedAt": "2026-10-22T08:51:47.310Z"
 }

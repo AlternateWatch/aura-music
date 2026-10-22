@@ -4,8 +4,10 @@ import { API_BASE } from '../utils/api';
 import {
   X, Upload as UploadIcon, Music, Image as ImageIcon,
   CheckCircle2, AlertCircle, Loader2, Disc, Search,
-  Layers, Check, FileAudio, ArrowLeft, RefreshCw, Calendar, User
+  Layers, Check, FileAudio, ArrowLeft, RefreshCw, Calendar, User,
+  ArrowUp, ArrowDown, Sparkles, ListOrdered, Trash2
 } from 'lucide-react';
+import { matchFilesToTracks } from '../utils/audioMetadata';
 
 interface MusicUploadProps {
   onClose: () => void;
@@ -13,7 +15,10 @@ interface MusicUploadProps {
 }
 
 interface ITunesTrack {
+  id: string;
   trackNumber: number;
+  discNumber?: number;
+  globalTrackNumber: number;
   trackName: string;
   artistName: string;
   collectionName: string;
@@ -135,7 +140,9 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const [albumCoverPreview, setAlbumCoverPreview] = useState<string | null>(null);
   
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [fileAssignments, setFileAssignments] = useState<{ [trackNumber: number]: File | null }>({});
+  const [fileAssignments, setFileAssignments] = useState<{ [trackId: string]: File | null }>({});
+  const [matchStrategy, setMatchStrategy] = useState<'order' | 'smart' | 'alphabetical'>('order');
+  const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
   const [singleProgress, setSingleProgress] = useState<UploadProgressState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<BatchUploadProgressState | null>(null);
 
@@ -363,35 +370,91 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       const data = await res.json();
       const songsOnly: ITunesTrack[] = (data.results || [])
         .filter((r: any) => r.wrapperType === 'track')
-        .map((r: any) => ({
-          trackNumber: r.trackNumber,
+        .sort((a: any, b: any) => {
+          const discA = a.discNumber || 1;
+          const discB = b.discNumber || 1;
+          if (discA !== discB) return discA - discB;
+          return (a.trackNumber || 0) - (b.trackNumber || 0);
+        })
+        .map((r: any, idx: number) => ({
+          id: r.trackId ? String(r.trackId) : `${r.discNumber || 1}_${r.trackNumber || (idx + 1)}_${idx}`,
+          trackNumber: r.trackNumber || (idx + 1),
+          discNumber: r.discNumber || 1,
+          globalTrackNumber: idx + 1,
           trackName: r.trackName,
           artistName: r.artistName,
           collectionName: r.collectionName
-        }))
-        .sort((a: ITunesTrack, b: ITunesTrack) => a.trackNumber - b.trackNumber);
+        }));
 
       setAlbumTracks(songsOnly);
 
       if (selectedFiles.length > 0) {
-        autoMatchFiles(selectedFiles, songsOnly);
+        applyMatchingStrategy('order', selectedFiles, songsOnly);
       }
     } catch(e) {
       setError("Error al obtener las pistas del álbum.");
     }
   };
 
-  const autoMatchFiles = (files: File[], tracks: ITunesTrack[]) => {
-    const sortedFiles = [...files].sort((a, b) => 
-      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-    );
+  const applyMatchingStrategy = async (
+    strategy: 'order' | 'smart' | 'alphabetical',
+    filesToUse: File[] = selectedFiles,
+    tracksToUse: ITunesTrack[] = albumTracks
+  ) => {
+    if (tracksToUse.length === 0 || filesToUse.length === 0) return;
+    setMatchStrategy(strategy);
+    if (strategy === 'smart') {
+      setIsAnalyzingAudio(true);
+    }
+    try {
+      const assignments = await matchFilesToTracks(filesToUse, tracksToUse, strategy);
+      setFileAssignments(assignments);
+    } catch (err) {
+      console.error('Error al emparejar pistas:', err);
+    } finally {
+      setIsAnalyzingAudio(false);
+    }
+  };
 
-    const assignments: { [trackNumber: number]: File | null } = {};
-    tracks.forEach((track, index) => {
-      assignments[track.trackNumber] = sortedFiles[index] || null;
+  const handleClearAssignments = () => {
+    const empty: { [trackId: string]: File | null } = {};
+    albumTracks.forEach((t) => {
+      empty[t.id] = null;
     });
+    setFileAssignments(empty);
+  };
 
-    setFileAssignments(assignments);
+  const handleAssignFileToTrack = (trackId: string, fileName: string) => {
+    setFileAssignments((prev) => {
+      const next = { ...prev };
+      if (!fileName) {
+        next[trackId] = null;
+        return next;
+      }
+      const chosenFile = selectedFiles.find((f) => f.name === fileName) || null;
+      if (!chosenFile) return prev;
+
+      const existingTrackId = Object.keys(next).find((tid) => next[tid]?.name === fileName);
+      if (existingTrackId && existingTrackId !== trackId) {
+        next[existingTrackId] = prev[trackId] || null;
+      }
+      next[trackId] = chosenFile;
+      return next;
+    });
+  };
+
+  const handleSwapAdjacent = (trackIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? trackIndex - 1 : trackIndex + 1;
+    if (targetIndex < 0 || targetIndex >= albumTracks.length) return;
+
+    const currentTrack = albumTracks[trackIndex];
+    const targetTrack = albumTracks[targetIndex];
+
+    setFileAssignments((prev) => ({
+      ...prev,
+      [currentTrack.id]: prev[targetTrack.id] || null,
+      [targetTrack.id]: prev[currentTrack.id] || null,
+    }));
   };
 
   const handleMultipleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -400,12 +463,12 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     setSelectedFiles(files);
 
     if (albumTracks.length > 0) {
-      autoMatchFiles(files, albumTracks);
+      applyMatchingStrategy('order', files, albumTracks);
     }
   };
 
   const handleBatchUpload = async () => {
-    const tracksToUpload = albumTracks.filter(t => fileAssignments[t.trackNumber] !== null);
+    const tracksToUpload = albumTracks.filter(t => fileAssignments[t.id] !== null && fileAssignments[t.id] !== undefined);
     if (tracksToUpload.length === 0) {
       setError("Selecciona archivos de audio para las pistas del álbum.");
       return;
@@ -419,7 +482,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
     for (let i = 0; i < total; i++) {
       const track = tracksToUpload[i];
-      const file = fileAssignments[track.trackNumber]!;
+      const file = fileAssignments[track.id]!;
 
       setUploadProgress({
         current: i + 1,
@@ -435,7 +498,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
       formData.append('title', track.trackName);
       formData.append('artist', track.artistName);
       formData.append('album', track.collectionName);
-      formData.append('track_number', track.trackNumber.toString());
+      formData.append('track_number', (track.globalTrackNumber || track.trackNumber).toString());
       formData.append('audio', file);
       if (albumCoverFile) {
         formData.append('cover', albumCoverFile);
@@ -465,7 +528,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
           uploadedTrackIds.push(data.id);
         }
       } catch(err: any) {
-        const failMsg = `Error al subir pista ${track.trackNumber} ("${track.trackName}"): ${err.message || 'Fallo de red'}.`;
+        const failMsg = `Error al subir pista ${track.globalTrackNumber || track.trackNumber} ("${track.trackName}"): ${err.message || 'Fallo de red'}.`;
 
         if (uploadedTrackIds.length > 0) {
           setError(`${failMsg} Limpiando y cancelando las ${uploadedTrackIds.length} pistas anteriores...`);
@@ -786,28 +849,183 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                       <p className="text-[10px] font-bold uppercase tracking-wider text-white">
                         {selectedFiles.length > 0 ? `${selectedFiles.length} archivos de audio cargados` : 'Selecciona o arrastra los MP3 / FLAC del disco'}
                       </p>
-                      <p className="text-[8px] text-white/30 uppercase mt-0.5">Se auto-ordenarán automáticamente por número</p>
+                      <p className="text-[8px] text-white/30 uppercase mt-0.5">Se asignarán en el orden exacto en que los selecciones</p>
                     </div>
 
-                    <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
-                      {albumTracks.map((track) => {
-                        const assigned = fileAssignments[track.trackNumber];
+                    {/* BARRA DE HERRAMIENTAS Y ESTRATEGIAS */}
+                    {selectedFiles.length > 0 && (
+                      <div className="space-y-2 p-3 bg-white/[0.03] border border-white/10 rounded-2xl">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">
+                              Asignación:
+                            </span>
+                            <span className="text-[10px] font-mono font-bold text-brand-primary">
+                              {Object.values(fileAssignments).filter(Boolean).length} / {albumTracks.length} asignadas
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => applyMatchingStrategy('order')}
+                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                                matchStrategy === 'order'
+                                  ? 'bg-brand-primary text-black shadow-md'
+                                  : 'bg-white/5 hover:bg-white/10 text-white/70'
+                              }`}
+                              title="Asigna los archivos según el orden exacto en el que los seleccionaste"
+                            >
+                              <ListOrdered size={12} /> En orden
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => applyMatchingStrategy('smart')}
+                              disabled={isAnalyzingAudio}
+                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                                matchStrategy === 'smart'
+                                  ? 'bg-brand-primary text-black shadow-md'
+                                  : 'bg-white/5 hover:bg-white/10 text-white/70'
+                              }`}
+                              title="Lee metadatos ID3/FLAC y números en los nombres de archivo para emparejar inteligentemente"
+                            >
+                              {isAnalyzingAudio ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Auto-detectar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => applyMatchingStrategy('alphabetical')}
+                              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                                matchStrategy === 'alphabetical'
+                                  ? 'bg-brand-primary text-black shadow-md'
+                                  : 'bg-white/5 hover:bg-white/10 text-white/70'
+                              }`}
+                              title="Ordena los archivos alfabéticamente de la A a la Z"
+                            >
+                              A-Z
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleClearAssignments}
+                              className="px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center gap-1 cursor-pointer"
+                              title="Quitar asignación de todas las pistas"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="text-[8px] text-white/40 leading-relaxed">
+                          💡 Puedes cambiar el archivo de cada pista con su desplegable o moverlos arriba/abajo con las flechas <span className="text-white/70">▲ ▼</span>.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* LISTA DE PISTAS CON ASIGNACIÓN Y CONTROLES INTERACTIVOS */}
+                    <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
+                      {albumTracks.map((track, idx) => {
+                        const assigned = fileAssignments[track.id];
                         return (
                           <div
-                            key={track.trackNumber}
-                            className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs ${
-                              assigned ? 'bg-white/[0.03] border-white/5' : 'bg-red-500/5 border-red-500/10 opacity-60'
+                            key={track.id}
+                            className={`p-2.5 rounded-xl border text-xs transition-all ${
+                              assigned
+                                ? 'bg-white/[0.03] border-white/10 hover:border-white/20'
+                                : 'bg-red-500/5 border-red-500/15'
                             }`}
                           >
-                            <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
-                              <span className="text-[10px] font-mono font-bold text-white/30 w-5">{track.trackNumber}</span>
-                              <p className="text-[11px] font-semibold text-white truncate">{track.trackName}</p>
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className="text-[10px] font-mono font-bold text-white/40 w-6 shrink-0 text-center bg-white/5 rounded px-1 py-0.5">
+                                  {track.discNumber && albumTracks.some(t => (t.discNumber || 1) > 1)
+                                    ? `D${track.discNumber}:${track.trackNumber}`
+                                    : `#${track.globalTrackNumber}`}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-bold text-white truncate" title={track.trackName}>
+                                    {track.trackName}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Flechas de reordenación arriba / abajo y desasignar */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSwapAdjacent(idx, 'up')}
+                                  disabled={idx === 0}
+                                  title="Mover archivo a la pista anterior"
+                                  className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-white/5 text-white/70 hover:text-white flex items-center justify-center cursor-pointer disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <ArrowUp size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSwapAdjacent(idx, 'down')}
+                                  disabled={idx === albumTracks.length - 1}
+                                  title="Mover archivo a la pista siguiente"
+                                  className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-white/5 text-white/70 hover:text-white flex items-center justify-center cursor-pointer disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <ArrowDown size={11} />
+                                </button>
+                                {assigned && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAssignFileToTrack(track.id, '')}
+                                    title="Desasignar archivo de esta pista"
+                                    className="w-6 h-6 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center justify-center cursor-pointer transition-colors"
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-[9px] font-mono text-brand-primary truncate max-w-[150px]">
-                                {assigned ? assigned.name : 'Sin archivo'}
-                              </span>
-                              {assigned ? <Check size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-red-400" />}
+
+                            {/* Desplegable interactivo para elegir archivo */}
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1 min-w-0">
+                                <select
+                                  value={assigned ? assigned.name : ''}
+                                  onChange={(e) => handleAssignFileToTrack(track.id, e.target.value)}
+                                  className={`w-full text-[10px] font-mono rounded-lg py-1 px-2 border outline-none cursor-pointer transition-colors ${
+                                    assigned
+                                      ? 'bg-black/60 text-brand-primary border-white/10 focus:border-brand-primary'
+                                      : 'bg-red-500/10 text-red-300 border-red-500/20 focus:border-red-400'
+                                  }`}
+                                >
+                                  <option value="" className="bg-[#181818] text-white/50">
+                                    -- Ningún archivo seleccionado --
+                                  </option>
+                                  {selectedFiles.map((f, fIdx) => {
+                                    const assignedToTrack = albumTracks.find(
+                                      (t) => t.id !== track.id && fileAssignments[t.id]?.name === f.name
+                                    );
+                                    return (
+                                      <option
+                                        key={`${f.name}-${fIdx}`}
+                                        value={f.name}
+                                        className="bg-[#181818] text-white"
+                                      >
+                                        #{fIdx + 1}: {f.name} {assignedToTrack ? `(en pista #${assignedToTrack.globalTrackNumber})` : ''}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+
+                              <div className="shrink-0 flex items-center">
+                                {assigned ? (
+                                  <span title="Archivo asignado correctamente">
+                                    <Check size={14} className="text-green-400" />
+                                  </span>
+                                ) : (
+                                  <span title="Sin archivo asignado">
+                                    <AlertCircle size={14} className="text-red-400" />
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
@@ -870,7 +1088,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
                         {uploadProgress ? `SUBIENDO ${uploadProgress.current}/${uploadProgress.total} (${uploadProgress.trackPercent}%)` : 'SUBIENDO ÁLBUM...'}
                       </span>
                     ) : (
-                      `Subir Álbum (${Object.values(fileAssignments).filter(Boolean).length} pistas listas)`
+                      `Subir Álbum (${Object.values(fileAssignments).filter(Boolean).length} de ${albumTracks.length} pistas listas)`
                     )}
                   </button>
                 )}
