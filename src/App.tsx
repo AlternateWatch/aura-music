@@ -1680,11 +1680,80 @@ useEffect(() => {
     return true;
   };
 
+  // Obtiene las pistas de los álbumes siguientes en la biblioteca en orden alfabético
+  // y después las canciones sueltas sin álbum, evitando volver al inicio de la BD al terminar un álbum.
+  const getSubsequentLibraryTracksForAlbum = (targetAlbum: string, allSongs: Song[]): Song[] => {
+    if (!targetAlbum || !allSongs || allSongs.length === 0) return [];
+
+    const albumMap = new Map<string, Song[]>();
+    const nonAlbumSongs: Song[] = [];
+
+    allSongs.forEach(song => {
+      const alb = song.album?.trim();
+      if (alb) {
+        if (!albumMap.has(alb)) {
+          albumMap.set(alb, []);
+        }
+        albumMap.get(alb)!.push(song);
+      } else {
+        nonAlbumSongs.push(song);
+      }
+    });
+
+    const sortTracks = (tracks: Song[]) => {
+      return [...tracks].sort((a, b) => {
+        const numA = Number(a.track_number);
+        const numB = Number(b.track_number);
+        if (numA && numB) return numA - numB;
+        if (numA && !numB) return -1;
+        if (!numA && numB) return 1;
+        return a.title.localeCompare(b.title);
+      });
+    };
+
+    const sortedAlbumNames = Array.from(albumMap.keys()).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    const normTarget = targetAlbum.trim().toLowerCase();
+    const targetIdx = sortedAlbumNames.findIndex(name => name.trim().toLowerCase() === normTarget);
+
+    let subsequentAlbumNames: string[] = [];
+    if (targetIdx !== -1) {
+      subsequentAlbumNames = [
+        ...sortedAlbumNames.slice(targetIdx + 1),
+        ...sortedAlbumNames.slice(0, targetIdx)
+      ];
+    } else {
+      subsequentAlbumNames = sortedAlbumNames.filter(name => name.trim().toLowerCase() !== normTarget);
+    }
+
+    const result: Song[] = [];
+    for (const albName of subsequentAlbumNames) {
+      const tracks = albumMap.get(albName);
+      if (tracks && tracks.length > 0) {
+        result.push(...sortTracks(tracks));
+      }
+    }
+
+    if (nonAlbumSongs.length > 0) {
+      const sortedNonAlbum = [...nonAlbumSongs].sort((a, b) => {
+        const artCmp = (a.artist || '').localeCompare(b.artist || '');
+        if (artCmp !== 0) return artCmp;
+        return a.title.localeCompare(b.title);
+      });
+      result.push(...sortedNonAlbum);
+    }
+
+    return result;
+  };
+
   const handlePlaySong = async (
     song: Song,
     fromSocket = false,
     initialPos = 0,
-    preserveQueue = false
+    preserveQueue = false,
+    albumContextName?: string | null
   ) => {
     if (!fromSocket && blockIfGuest()) return;
     if (currentSong?.id === song.id) {
@@ -1706,26 +1775,32 @@ useEffect(() => {
 
     if (!fromSocket && !preserveQueue) {
       // 1. DESDE UN ÁLBUM
-      if (selectedAlbumName) {
+      const effectiveAlbumName = albumContextName ?? selectedAlbumName;
+      if (effectiveAlbumName) {
         setPlaybackContext('album');
-        setContextAlbumName(selectedAlbumName);
+        setContextAlbumName(effectiveAlbumName);
 
         const albumTracks = songs
-          .filter(s => s.album === selectedAlbumName)
-          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
+          .filter(s => s.album === effectiveAlbumName)
+          .sort((a, b) => {
+            const numA = Number(a.track_number);
+            const numB = Number(b.track_number);
+            if (numA && numB) return numA - numB;
+            if (numA && !numB) return -1;
+            if (!numA && numB) return 1;
+            return a.title.localeCompare(b.title);
+          });
 
-        const libraryTracks = songs
-          .filter(s => s.album !== selectedAlbumName)
-          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+        const subsequentTracks = getSubsequentLibraryTracksForAlbum(effectiveAlbumName, songs);
 
         if (socketObj.isShuffle) {
           const otherAlbumSongs = albumTracks.filter(s => s.id !== song.id).sort(() => Math.random() - 0.5);
           const shuffledAlbum = [song, ...otherAlbumSongs];
-          const shuffledLibrary = [...libraryTracks].sort(() => Math.random() - 0.5);
+          const shuffledLibrary = [...subsequentTracks].sort(() => Math.random() - 0.5);
           finalQueue = [...shuffledAlbum, ...shuffledLibrary];
           socketObj.setShuffledQueue(finalQueue);
         } else {
-          finalQueue = [...albumTracks, ...libraryTracks];
+          finalQueue = [...albumTracks, ...subsequentTracks];
         }
         setActiveQueue(finalQueue);
         setManualQueueIds([]);
@@ -2028,10 +2103,15 @@ audioObj.seek(0);
       if (playbackContext === 'album' && contextAlbumName) {
         const albumTracks = songs
           .filter(s => s.album === contextAlbumName)
-          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
-        const libraryTracks = songs
-          .filter(s => s.album !== contextAlbumName)
-          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+          .sort((a, b) => {
+            const numA = Number(a.track_number);
+            const numB = Number(b.track_number);
+            if (numA && numB) return numA - numB;
+            if (numA && !numB) return -1;
+            if (!numA && numB) return 1;
+            return a.title.localeCompare(b.title);
+          });
+        const libraryTracks = getSubsequentLibraryTracksForAlbum(contextAlbumName, songs);
 
         const otherAlbumSongs = albumTracks.filter(s => s.id !== currentSong?.id).sort(() => Math.random() - 0.5);
         const shuffledAlbum = currentSong ? [currentSong, ...otherAlbumSongs] : otherAlbumSongs;
@@ -2047,10 +2127,15 @@ audioObj.seek(0);
       if (playbackContext === 'album' && contextAlbumName) {
         const albumTracks = songs
           .filter(s => s.album === contextAlbumName)
-          .sort((a, b) => (Number(a.track_number) || 9999) - (Number(b.track_number) || 9999));
-        const libraryTracks = songs
-          .filter(s => s.album !== contextAlbumName)
-          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+          .sort((a, b) => {
+            const numA = Number(a.track_number);
+            const numB = Number(b.track_number);
+            if (numA && numB) return numA - numB;
+            if (numA && !numB) return -1;
+            if (!numA && numB) return 1;
+            return a.title.localeCompare(b.title);
+          });
+        const libraryTracks = getSubsequentLibraryTracksForAlbum(contextAlbumName, songs);
         setActiveQueue([...albumTracks, ...libraryTracks]);
       }
     }
@@ -2229,6 +2314,63 @@ audioObj.seek(0);
     }
 
     filtered.splice(insertIdx, 0, song);
+
+    setActiveQueue(filtered);
+    if (isShuff) {
+      socketObj.setShuffledQueue(filtered);
+    }
+    socketObj.emitCommand('update-queue', { queue: filtered });
+  };
+
+  const handleAddAlbumToQueue = (tracks: Song[]) => {
+    if (!tracks || tracks.length === 0) return;
+    if (!currentSong) {
+      handlePlaySong(tracks[0], false, 0, false, tracks[0].album || null);
+      if (tracks.length > 1) {
+        setTimeout(() => {
+          handleAddAlbumToQueue(tracks.slice(1));
+        }, 50);
+      }
+      return;
+    }
+
+    const isShuff = socketObj.isShuffle;
+    const currentPool = isShuff
+      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...songs]))
+      : (activeQueue.length > 0 ? [...activeQueue] : [...songs]);
+
+    let curIdx = currentPool.findIndex(s => s.id === currentSong.id);
+    if (curIdx === -1) {
+      currentPool.unshift(currentSong);
+      curIdx = 0;
+    }
+
+    const trackIdsToAdd = new Set(tracks.map(t => t.id));
+    const filtered = currentPool.filter((s, idx) => idx === curIdx || !trackIdsToAdd.has(s.id));
+    curIdx = filtered.findIndex(s => s.id === currentSong.id);
+
+    const manualSet = new Set(manualQueueIds);
+    let target = curIdx + 1;
+    while (target < filtered.length && manualSet.has(filtered[target].id)) {
+      target++;
+    }
+
+    if (target === curIdx + 1 && playbackContext === 'album' && contextAlbumName) {
+      let lastAlbumTrackIdx = -1;
+      for (let i = curIdx; i < filtered.length; i++) {
+        if (filtered[i].album === contextAlbumName) {
+          lastAlbumTrackIdx = i;
+        }
+      }
+      if (lastAlbumTrackIdx !== -1) {
+        target = lastAlbumTrackIdx + 1;
+      }
+    }
+
+    filtered.splice(target, 0, ...tracks);
+
+    const addedIds = tracks.map(t => t.id);
+    setManualQueueIds(prev => [...prev.filter(id => !trackIdsToAdd.has(id)), ...addedIds]);
 
     setActiveQueue(filtered);
     if (isShuff) {
@@ -3025,18 +3167,20 @@ useEffect(() => {
     return;
   }
 
-  const effectiveDur = (Number.isFinite(audioObj.duration) && audioObj.duration > 0)
-    ? audioObj.duration
-    : (currentSong.duration || 0);
+  const songIdStr = String(currentSong.id);
+  const isNewTrackForNative = lastNativeTrackSentRef.current?.id !== songIdStr;
+
+  const effectiveDur = isNewTrackForNative
+    ? (currentSong.duration && currentSong.duration > 0 ? currentSong.duration : (Number.isFinite(audioObj.duration) && audioObj.duration > 0 ? audioObj.duration : 0))
+    : (Number.isFinite(audioObj.duration) && audioObj.duration > 0 ? audioObj.duration : (currentSong.duration || 0));
 
   const durationMs = Math.max(
     0,
     Math.round(effectiveDur * 1000)
   );
 
-  const songIdStr = String(currentSong.id);
   if (
-    lastNativeTrackSentRef.current?.id === songIdStr &&
+    !isNewTrackForNative &&
     Math.abs(lastNativeTrackSentRef.current.durationMs - durationMs) < 1000
   ) {
     return;
@@ -4373,17 +4517,18 @@ transition={{
                 likedIds={likedIds}
                 playlists={playlists}
                 userRole={userRole}
-                onPlaySong={handlePlaySong}
+                onPlaySong={(song) => handlePlaySong(song, false, 0, false, selectedAlbumName)}
                 onPlayAll={(tracks) => {
-                  if (tracks.length > 0) handlePlaySong(tracks[0]);
+                  if (tracks.length > 0) handlePlaySong(tracks[0], false, 0, false, selectedAlbumName);
                 }}
                 onShuffleAll={(tracks) => {
                   if (tracks.length > 0) {
                     const randomIdx = Math.floor(Math.random() * tracks.length);
                     if (!socketObj.isShuffle) socketObj.setIsShuffle(true);
-                    handlePlaySong(tracks[randomIdx]);
+                    handlePlaySong(tracks[randomIdx], false, 0, false, selectedAlbumName);
                   }
                 }}
+                onAddAlbumToQueue={handleAddAlbumToQueue}
                 onBack={() => setSelectedAlbumName(null)}
                 onOpenArtist={(art) => {
                   setSelectedAlbumName(null);
@@ -4859,19 +5004,49 @@ transition={{
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                 alt={alb.title}
                               />
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const first = alb.tracks[0];
-                                  if (first) {
-                                    setSelectedAlbumName(alb.title);
-                                    handlePlaySong(first);
-                                  }
-                                }}
-                                className="absolute bottom-2.5 right-2.5 w-10 h-10 rounded-full bg-brand-primary text-black flex items-center justify-center opacity-0 group-hover:opacity-100 shadow-2xl hover:scale-110 active:scale-95 transition-all duration-200"
-                                title={`Reproducir ${alb.title}`}
-                              >
-                                <Play size={16} fill="black" className="ml-0.5" />
+                              <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const sorted = [...alb.tracks].sort((a, b) => {
+                                      const numA = Number(a.track_number);
+                                      const numB = Number(b.track_number);
+                                      if (numA && numB) return numA - numB;
+                                      if (numA && !numB) return -1;
+                                      if (!numA && numB) return 1;
+                                      return a.title.localeCompare(b.title);
+                                    });
+                                    handleAddAlbumToQueue(sorted);
+                                  }}
+                                  className="w-10 h-10 rounded-full bg-black/70 backdrop-blur-md text-white border border-white/20 flex items-center justify-center shadow-xl hover:scale-110 hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
+                                  title={`Añadir ${alb.title} a la cola`}
+                                >
+                                  <ListPlus size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const sorted = [...alb.tracks].sort((a, b) => {
+                                      const numA = Number(a.track_number);
+                                      const numB = Number(b.track_number);
+                                      if (numA && numB) return numA - numB;
+                                      if (numA && !numB) return -1;
+                                      if (!numA && numB) return 1;
+                                      return a.title.localeCompare(b.title);
+                                    });
+                                    const first = sorted[0];
+                                    if (first) {
+                                      setSelectedAlbumName(alb.title);
+                                      handlePlaySong(first, false, 0, false, alb.title);
+                                    }
+                                  }}
+                                  className="w-10 h-10 rounded-full bg-brand-primary text-black flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                                  title={`Reproducir ${alb.title}`}
+                                >
+                                  <Play size={16} fill="black" className="ml-0.5" />
+                                </button>
                               </div>
                             </div>
 

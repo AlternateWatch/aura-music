@@ -29,6 +29,7 @@ interface AlbumDetailViewProps {
   onPlaySong: (song: Song) => void;
   onPlayAll: (tracks: Song[]) => void;
   onShuffleAll: (tracks: Song[]) => void;
+  onAddAlbumToQueue?: (tracks: Song[]) => void;
   onBack: () => void;
   onOpenArtist: (artistName: string) => void;
   onToggleLike: (songId: string) => void;
@@ -51,6 +52,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
   onPlaySong,
   onPlayAll,
   onShuffleAll,
+  onAddAlbumToQueue,
   onBack,
   onOpenArtist,
   onToggleLike,
@@ -218,6 +220,26 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
   const isAllOffline = sortedTracks.length > 0 && downloadedCount === sortedTracks.length;
   const isSyncingAny = sortedTracks.some(s => downloadingIds.has(String(s.id)));
 
+  const [albumQueued, setAlbumQueued] = useState(false);
+  const queueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (queueTimeoutRef.current) clearTimeout(queueTimeoutRef.current);
+    };
+  }, []);
+
+  const handleQueueAlbum = () => {
+    if (!onAddAlbumToQueue || sortedTracks.length === 0) return;
+    hapticImpact('light');
+    onAddAlbumToQueue(sortedTracks);
+    setAlbumQueued(true);
+    if (queueTimeoutRef.current) clearTimeout(queueTimeoutRef.current);
+    queueTimeoutRef.current = setTimeout(() => {
+      setAlbumQueued(false);
+    }, 2000);
+  };
+
   const handleDownloadAlbum = () => {
     if (isSyncingAny || isAllOffline || sortedTracks.length === 0) return;
     hapticImpact('medium');
@@ -329,6 +351,21 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
               <Shuffle size={14} />
               <span>Aleatorio</span>
             </button>
+
+            {onAddAlbumToQueue && (
+              <button
+                onClick={handleQueueAlbum}
+                className={`px-5 py-3 rounded-full border text-xs font-bold uppercase tracking-wider hover:scale-105 active:scale-95 transition-all cursor-pointer flex items-center gap-2 ${
+                  albumQueued
+                    ? 'bg-brand-primary/20 text-brand-primary border-brand-primary/40'
+                    : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'
+                }`}
+                title="Añadir todas las canciones del álbum a la cola"
+              >
+                {albumQueued ? <Check size={14} className="text-brand-primary" /> : <ListPlus size={14} />}
+                <span>{albumQueued ? 'Añadido a la cola' : 'Añadir a la cola'}</span>
+              </button>
+            )}
 
             <button
               onClick={handleDownloadAlbum}

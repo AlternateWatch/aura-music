@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.net.wifi.WifiManager;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -47,11 +49,25 @@ public class AuraMediaService extends MediaSessionService {
     private static final long NOTIFICATION_UPDATE_INTERVAL_MS =
             1000L;
 
+    private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
+
     @Override
     public void onCreate() {
         super.onCreate();
 
         instance = this;
+
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null) {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AuraMusic:PlaybackWakeLock");
+            wakeLock.setReferenceCounted(false);
+        }
+        WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (wm != null) {
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AuraMusic:WifiLock");
+            wifiLock.setReferenceCounted(false);
+        }
 
         createNotificationChannel();
 
@@ -545,6 +561,22 @@ public class AuraMediaService extends MediaSessionService {
                     playing
             );
 
+            if (playing) {
+                if (wakeLock != null && !wakeLock.isHeld()) {
+                    try { wakeLock.acquire(); } catch (Exception ignored) {}
+                }
+                if (wifiLock != null && !wifiLock.isHeld()) {
+                    try { wifiLock.acquire(); } catch (Exception ignored) {}
+                }
+            } else {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    try { wakeLock.release(); } catch (Exception ignored) {}
+                }
+                if (wifiLock != null && wifiLock.isHeld()) {
+                    try { wifiLock.release(); } catch (Exception ignored) {}
+                }
+            }
+
             updateNotificationImmediately();
         });
     }
@@ -622,6 +654,15 @@ public class AuraMediaService extends MediaSessionService {
         if (player != null) {
             player.release();
             player = null;
+        }
+
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try { wakeLock.release(); } catch (Exception ignored) {}
+            wakeLock = null;
+        }
+        if (wifiLock != null && wifiLock.isHeld()) {
+            try { wifiLock.release(); } catch (Exception ignored) {}
+            wifiLock = null;
         }
 
         super.onDestroy();

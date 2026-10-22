@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.10",
-  "versionCode": 11,
-  "releaseNotes": "• Gestión instantánea de incidencias en subida de álbumes: Si una pista falla al subirse, se notifica inmediatamente en pantalla en tiempo real con 3 opciones directas:\n  1. Reintentar esta canción sin perder el progreso.\n  2. Saltarte la canción e ir a la siguiente pista del álbum.\n  3. Subir el álbum como está tal cual con todas las canciones guardadas con éxito hasta ese momento.\n• Eliminación del borrado destructivo: Las canciones subidas previamente ya no se eliminan si otra pista posterior encuentra un fallo de red.",
+  "latestVersion": "1.0.11",
+  "versionCode": 12,
+  "releaseNotes": "• Cola de reproducción de álbumes: Nuevo botón para añadir álbumes enteros a la cola en orden correlativo desde el detalle del disco y tarjetas de la biblioteca.\n• Transición fluida entre álbumes: Al terminar un álbum sin modo aleatorio, la reproducción continúa de forma natural por los siguientes álbumes alfabéticamente (evitando saltar al inicio de la biblioteca).\n• Resistencia en segundo plano: Wake Lock parcial y Wifi Lock en servicio nativo para evitar congelaciones o audio bloqueado a 0:00 mientras juegas o bloqueas la pantalla.\n• Firma unificada para compilaciones debug entre múltiples dispositivos.",
   "history": [
+    {
+      "version": "1.0.11",
+      "versionCode": 12,
+      "notes": "• Cola de reproducción de álbumes: Nuevo botón para añadir álbumes enteros a la cola en orden correlativo desde el detalle del disco y tarjetas de la biblioteca.\n• Transición fluida entre álbumes: Al terminar un álbum sin modo aleatorio, la reproducción continúa de forma natural por los siguientes álbumes alfabéticamente (evitando saltar al inicio de la biblioteca).\n• Resistencia en segundo plano: Wake Lock parcial y Wifi Lock en servicio nativo para evitar congelaciones o audio bloqueado a 0:00 mientras juegas o bloqueas la pantalla.\n• Firma unificada para compilaciones debug entre múltiples dispositivos."
+    },
     {
       "version": "1.0.10",
       "versionCode": 11,

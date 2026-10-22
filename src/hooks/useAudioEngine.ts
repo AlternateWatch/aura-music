@@ -105,7 +105,8 @@ export function useAudioEngine(
     if (!isSameAudioSource(standbyAudio.src, preloaded.url)) return false;
     if (standbyAudio.error) return false;
     // En móviles/WebView, preload="auto" solo carga hasta HAVE_METADATA (1) por políticas de red
-    if (standbyAudio.readyState < 1 && standbyAudio.networkState === 3) return false;
+    if (standbyAudio.readyState < 2) return false;
+    if (!Number.isFinite(standbyAudio.duration) || standbyAudio.duration <= 0) return false;
     return true;
   }, []);
 
@@ -413,7 +414,10 @@ export function useAudioEngine(
       if (stallTimer) clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         const cur = audioRef.current;
-        if (cur && !cur.paused) {
+        if (cur && isPlayingRef.current) {
+          if (graphRef.current && graphRef.current.ctx.state !== "running") {
+            void graphRef.current.resume().catch(() => {});
+          }
           void cur.play().catch(() => {});
         }
       }, 2500);
@@ -436,6 +440,9 @@ export function useAudioEngine(
       if (el === audioRef.current && isPlayingRef.current) {
         setTimeout(() => {
           if (isPlayingRef.current && el.paused && audioRef.current === el) {
+            if (graphRef.current && graphRef.current.ctx.state !== "running") {
+              void graphRef.current.resume().catch(() => {});
+            }
             void el.play().catch(() => {});
           }
         }, 120);
@@ -445,6 +452,12 @@ export function useAudioEngine(
       playbackPriority.setBuffering(false);
       const el = e.target as HTMLAudioElement;
       if (el === audioRef.current) {
+        if (graphRef.current && graphRef.current.ctx.state !== "running") {
+          void graphRef.current.resume().catch(() => {});
+        }
+        if (isPlayingRef.current && el.paused) {
+          void el.play().catch(() => {});
+        }
         if (Number.isFinite(el.duration) && el.duration > 0 && (!durationRef.current || durationRef.current <= 0)) {
           handleLoadedMetadata(el.duration);
         }
@@ -631,6 +644,9 @@ export function useAudioEngine(
             el.removeEventListener("canplay", onRecoverCanPlay);
             try { el.currentTime = saveTime; } catch {}
             applyPlaybackRate(el);
+            if (graphRef.current && graphRef.current.ctx.state !== "running") {
+              void graphRef.current.resume().catch(() => {});
+            }
             void el.play().catch(() => {});
           };
           el.addEventListener("canplay", onRecoverCanPlay, { once: true });

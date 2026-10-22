@@ -237,7 +237,7 @@ export class AudioGraph {
     this.ctx.onstatechange = () => {
       if (this.ctx.state === "suspended") {
         const active = this.getActiveAudio();
-        if (active && !active.paused) {
+        if (active && (!active.paused || active.readyState >= 1)) {
           void this.ctx.resume().catch(() => {});
         }
       }
@@ -388,6 +388,10 @@ export class AudioGraph {
     (toAudio as any).preservesPitch = preservesPitch;
     (toAudio as any).mozPreservesPitch = preservesPitch;
     (toAudio as any).webkitPreservesPitch = preservesPitch;
+
+    if (this.ctx.state !== "running") {
+      void this.ctx.resume().catch(() => {});
+    }
     const playPromise = toAudio.play();
     if (playPromise !== undefined) {
       playPromise.catch(() => {});
@@ -442,6 +446,10 @@ export class AudioGraph {
     (toAudio as any).preservesPitch = preservesPitch;
     (toAudio as any).mozPreservesPitch = preservesPitch;
     (toAudio as any).webkitPreservesPitch = preservesPitch;
+
+    if (this.ctx.state !== "running") {
+      void this.ctx.resume().catch(() => {});
+    }
 
     void toAudio.play().catch(() => {});
 
