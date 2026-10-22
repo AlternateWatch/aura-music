@@ -5,7 +5,8 @@ import {
   X, Upload as UploadIcon, Music, Image as ImageIcon,
   CheckCircle2, AlertCircle, Loader2, Disc, Search,
   Layers, Check, FileAudio, ArrowLeft, RefreshCw, Calendar, User,
-  ArrowUp, ArrowDown, Sparkles, ListOrdered, Trash2
+  ArrowUp, ArrowDown, Sparkles, ListOrdered, Trash2,
+  AlertTriangle, RotateCcw, SkipForward
 } from 'lucide-react';
 import { matchFilesToTracks } from '../utils/audioMetadata';
 
@@ -47,6 +48,14 @@ interface BatchUploadProgressState {
   loadedStr: string;
   totalStr: string;
   phase: 'uploading' | 'processing';
+}
+
+interface UploadErrorPromptState {
+  track: ITunesTrack;
+  errorMsg: string;
+  uploadedCount: number;
+  totalCount: number;
+  resolve: (action: 'finish' | 'skip' | 'retry') => void;
 }
 
 function uploadWithProgress(
@@ -145,6 +154,7 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
   const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
   const [singleProgress, setSingleProgress] = useState<UploadProgressState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<BatchUploadProgressState | null>(null);
+  const [errorPrompt, setErrorPrompt] = useState<UploadErrorPromptState | null>(null);
 
   const multipleFilesRef = useRef<HTMLInputElement>(null);
 
@@ -479,8 +489,9 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
 
     const uploadedTrackIds: (number | string)[] = [];
     const total = tracksToUpload.length;
+    let i = 0;
 
-    for (let i = 0; i < total; i++) {
+    while (i < total) {
       const track = tracksToUpload[i];
       const file = fileAssignments[track.id]!;
 
@@ -527,32 +538,47 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
         if (data?.id) {
           uploadedTrackIds.push(data.id);
         }
+        i++;
       } catch(err: any) {
-        const failMsg = `Error al subir pista ${track.globalTrackNumber || track.trackNumber} ("${track.trackName}"): ${err.message || 'Fallo de red'}.`;
+        const errorMsg = err?.message || 'Error de conexión o fallo del servidor al subir el archivo.';
 
-        if (uploadedTrackIds.length > 0) {
-          setError(`${failMsg} Limpiando y cancelando las ${uploadedTrackIds.length} pistas anteriores...`);
-          for (const id of uploadedTrackIds) {
-            try {
-              await fetch(`${API_BASE}/api/tracks/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` }
-              });
-            } catch(e) {}
-          }
+        // Notificar de inmediato al usuario y ofrecer las 3 opciones requeridas:
+        const userChoice = await new Promise<'finish' | 'skip' | 'retry'>((resolve) => {
+          setErrorPrompt({
+            track,
+            errorMsg,
+            uploadedCount: uploadedTrackIds.length,
+            totalCount: total,
+            resolve: (action) => {
+              setErrorPrompt(null);
+              resolve(action);
+            }
+          });
+        });
+
+        if (userChoice === 'retry') {
+          // Reintentar esta canción (mismo índice i)
+          continue;
+        } else if (userChoice === 'skip') {
+          // Saltarte la canción e ir a la siguiente
+          i++;
+          continue;
+        } else if (userChoice === 'finish') {
+          // Subir el álbum como está tal cual (guardar lo ya subido)
+          break;
         }
-
-        setError(`${failMsg} Subida cancelada por completo para no dejar el álbum a medias.`);
-        setIsUploading(false);
-        setUploadProgress(null);
-        return;
       }
     }
 
     setIsUploading(false);
     setUploadProgress(null);
-    setSuccess(true);
-    setTimeout(() => { onUploadComplete(); onClose(); }, 2200);
+
+    if (uploadedTrackIds.length > 0) {
+      setSuccess(true);
+      setTimeout(() => { onUploadComplete(); onClose(); }, 2200);
+    } else {
+      setError("No se guardó ninguna pista del álbum.");
+    }
   };
 
   return (
@@ -562,6 +588,82 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
         animate={{ opacity: 1, y: 0 }} 
         className="relative w-full max-w-2xl max-h-[90vh] rounded-3xl border border-white/10 bg-[#121212] shadow-2xl overflow-hidden flex flex-col"
       >
+        {/* MODAL DE ERROR INTERACTIVO EN TIEMPO REAL */}
+        <AnimatePresence>
+          {errorPrompt && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[150] flex items-center justify-center bg-black/90 backdrop-blur-md p-6"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="w-full max-w-md bg-[#161616] border border-red-500/30 rounded-3xl p-6 shadow-2xl space-y-5"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-red-500/10 text-red-400 rounded-2xl shrink-0 border border-red-500/20">
+                    <AlertTriangle size={24} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-red-400">
+                      Error durante la subida
+                    </span>
+                    <h3 className="text-sm font-bold text-white truncate mt-0.5" title={errorPrompt.track.trackName}>
+                      {errorPrompt.track.trackName}
+                    </h3>
+                    <p className="text-[10px] text-white/50 truncate font-medium">
+                      Pista #{errorPrompt.track.globalTrackNumber || errorPrompt.track.trackNumber} · {errorPrompt.track.artistName}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-3.5 space-y-1.5">
+                  <p className="text-[11px] font-semibold text-red-300 leading-snug">
+                    {errorPrompt.errorMsg}
+                  </p>
+                  <p className="text-[9px] text-white/40">
+                    Progreso: <span className="font-bold text-white/70">{errorPrompt.uploadedCount}</span> de <span className="font-bold text-white/70">{errorPrompt.totalCount}</span> pistas subidas correctamente.
+                  </p>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  {/* OPCIÓN 1: Reintentar esta canción */}
+                  <button
+                    type="button"
+                    onClick={() => errorPrompt.resolve('retry')}
+                    className="w-full py-3 px-4 rounded-xl font-bold uppercase text-[10px] tracking-wider bg-brand-primary text-black hover:opacity-90 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+                  >
+                    <RotateCcw size={14} /> Reintentar esta canción
+                  </button>
+
+                  {/* OPCIÓN 2: Saltar la canción e ir a la siguiente */}
+                  <button
+                    type="button"
+                    onClick={() => errorPrompt.resolve('skip')}
+                    className="w-full py-3 px-4 rounded-xl font-bold uppercase text-[10px] tracking-wider bg-white/10 hover:bg-white/15 text-white active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                  >
+                    <SkipForward size={14} /> Saltarte la canción e ir a la siguiente
+                  </button>
+
+                  {/* OPCIÓN 3: Subir el álbum como está tal cual */}
+                  <button
+                    type="button"
+                    onClick={() => errorPrompt.resolve('finish')}
+                    className="w-full py-2.5 px-4 rounded-xl font-bold uppercase text-[9px] tracking-wider bg-white/5 hover:bg-white/10 text-white/70 hover:text-white active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer border border-white/5"
+                  >
+                    <CheckCircle2 size={13} className="text-green-400" />
+                    {errorPrompt.uploadedCount > 0
+                      ? `Subir el álbum como está tal cual (${errorPrompt.uploadedCount} pistas guardadas)`
+                      : 'Cancelar subida del álbum (0 pistas guardadas)'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* CABECERA & SELECTOR DE PESTAÑAS */}
         <div className="flex items-center justify-between border-b border-white/5 px-6 py-4 shrink-0">
           <div className="flex items-center gap-4">
