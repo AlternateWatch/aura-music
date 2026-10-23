@@ -1086,7 +1086,27 @@ useEffect(() => {
       const data = await res.json();
       if (!res.ok) return showSessionNotice('No se pudo crear la sesión.');
       const result = await socketObj.joinSession(data.code, { asLeader: true });
-      if (!result.ok) showSessionNotice(joinErrorMessage(data.code, result.error));
+      if (!result.ok) {
+        showSessionNotice(joinErrorMessage(data.code, result.error));
+      } else {
+        // Enviar inmediatamente la canción actual, la cola y el estado al servidor para que el snapshot esté completo
+        if (currentSong) {
+          socketObj.emitCommand('play-track', {
+            id: currentSong.id,
+            song: currentSong,
+            queue: activeQueue.length > 0 ? activeQueue : [currentSong],
+            position: audioObj.getCurrentTime?.() || 0,
+            isPlaying: isPlaying
+          });
+        }
+        if (socketObj.isShuffle) {
+          socketObj.emitCommand('toggle-shuffle', { isShuffle: true, shuffledQueue: socketObj.shuffledQueue });
+        }
+        if (socketObj.isLoop) {
+          socketObj.emitCommand('toggle-loop', { isLoop: true });
+        }
+        showSessionNotice(`Sesión ${data.code} creada. ¡Eres el anfitrión!`);
+      }
     } catch (e) {
       showSessionNotice('No se pudo crear la sesión.');
     }
@@ -1096,8 +1116,11 @@ useEffect(() => {
     const result = await socketObj.joinSession(code);
     if (!result.ok) {
       showSessionNotice(joinErrorMessage(code, result.error));
-    } else if ((result.members ?? 1) <= 1) {
-      showSessionNotice(`Te has unido a ${code}, pero ahora mismo no hay nadie más conectado.`);
+    } else {
+      setIsSessionOpen(true);
+      if ((result.members ?? 1) <= 1) {
+        showSessionNotice(`Te has unido a ${code}, pero ahora mismo no hay nadie más conectado.`);
+      }
     }
     return result;
   };
@@ -1773,19 +1796,33 @@ useEffect(() => {
     preserveQueue = false,
     albumContextName?: string | null
   ) => {
-    if (!fromSocket && blockIfGuest()) return;
+    // Si es un invitado que hace click en la canción actual que estaba pausada (ej. por bloqueo de autoplay),
+    // le permitimos iniciar su reproducción local y resincronizarse con la sesión sin bloquearlo
+    if (!fromSocket && isSessionGuest()) {
+      if (currentSong?.id === song.id && !isPlaying) {
+        setIsPlaying(true);
+        socketObj.resyncSession();
+        return;
+      }
+      if (blockIfGuest()) return;
+    }
+
     if (currentSong?.id === song.id) {
       if (song.coverUrl && song.coverUrl !== currentSong.coverUrl) {
         setCurrentSong(prev => prev ? { ...prev, ...song } : song);
         try { localStorage.setItem('aura_last_song', JSON.stringify({ ...currentSong, ...song })); } catch {}
       }
+      if (fromSocket) {
+        setIsPlaying(true);
+        if (initialPos > 0 && Math.abs(audioObj.getCurrentTime() - initialPos) > 1.5) {
+          audioObj.seek(initialPos);
+        }
+        return;
+      }
       const nextState = !isPlaying;
       setIsPlaying(nextState);
-      if (!fromSocket) {
-        socketObj.emitCommand('toggle-play', { isPlaying: nextState });
-        // Al reanudar dentro de una sesión (p. ej. tras un autoplay bloqueado) nos ponemos al día.
-        if (nextState && socketObj.currentSession) socketObj.resyncSession();
-      }
+      socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+      if (nextState && socketObj.currentSession) socketObj.resyncSession();
       return;
     }
 

@@ -60,7 +60,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  const myId = String(user?.userId ?? '');
+  const myId = String(user?.userId ?? user?.id ?? '');
   const copyCode = async () => {
     if (!currentSession) return;
     try { await navigator.clipboard.writeText(currentSession); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
@@ -113,7 +113,7 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                   onChange={e => setJoinCode(e.target.value.toUpperCase())}
                   onKeyDown={e => { if (e.key === 'Enter' && joinCode.trim()) onJoinSession(joinCode); }}
                   className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-center text-lg font-black tracking-[0.5em] text-white outline-none mb-4 focus:border-brand-primary transition-all" />
-                <button onClick={() => onJoinSession(joinCode)} disabled={!joinCode.trim()}
+                <button onClick={() => onJoinSession(joinCode.trim().toUpperCase())} disabled={!joinCode.trim()}
                   className="w-full py-4 bg-white text-black rounded-2xl font-black uppercase text-xs tracking-widest hover:scale-105 transition-all disabled:opacity-30 disabled:hover:scale-100 flex items-center justify-center gap-2">
                   <LogIn size={14} /> Join Session
                 </button>
@@ -216,7 +216,8 @@ export const SessionOverlay: React.FC<SessionOverlayProps> = ({
                   </div>
                 );
               }
-              const mine = String(m.user?.userId) === myId;
+              const msgUserId = String(m.user?.userId ?? (m.user as any)?.id ?? '');
+              const mine = !!msgUserId && msgUserId === myId;
               return (
                 <div key={i} className={`flex gap-3 ${mine ? 'flex-row-reverse' : ''}`}>
                   {!mine && <Avatar m={{ username: m.user?.username ?? '?', avatar: m.user?.avatar ?? null }} size={32} />}

@@ -2792,7 +2792,19 @@ app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: an
 
 });
 
-app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => { const c = Math.random().toString(36).substring(2, 8).toUpperCase(); await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, req.user.userId]); scheduleSessionDeletion(c, NEVER_JOINED_GRACE_MS); res.json({ code: c }); });
+app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const c = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const userId = String(req.user.userId);
+        await pool.execute('INSERT INTO sessions (code, host_id) VALUES (?, ?)', [c, userId]);
+        sessionHosts.set(c, userId);
+        scheduleSessionDeletion(c, NEVER_JOINED_GRACE_MS);
+        res.json({ code: c });
+    } catch (err) {
+        console.error('Error creating session:', err);
+        res.status(500).json({ error: 'Error creating session' });
+    }
+});
 
 
 
@@ -2871,27 +2883,21 @@ const trackCommand = (code: string, command: string, data: any) => {
     switch (command) {
 
         case 'play-track': {
-
             if (Array.isArray(data?.queue)) st.queue = data.queue;
-
             if (data?.song?.id) {
-
-                const sameSong = st.songId === data.song.id;
-
                 st.song = data.song;
-
                 st.songId = data.song.id;
-
-                if (!sameSong) st.isPlaying = true;
-
+                st.isPlaying = data.isPlaying !== undefined ? !!data.isPlaying : true;
                 st.position = Number(data.position) || 0;
-
                 st.updatedAt = now;
-
             }
-
             break;
+        }
 
+        case 'update-queue': {
+            if (Array.isArray(data?.queue)) st.queue = data.queue;
+            if (Array.isArray(data?.shuffledQueue)) st.shuffledQueue = data.shuffledQueue;
+            break;
         }
 
         case 'sync-time':
@@ -3090,40 +3096,43 @@ const getMembers = (code: string): Member[] => {
 
 const broadcastMembers = (code: string) => io.to(code).emit('session-members', { code, members: getMembers(code) });
 
-const systemChat = (code: string, message: string, kind: 'join' | 'leave' | 'info' = 'info') =>
-
-    io.to(code).emit('receive-chat', { system: true, kind, message, time: new Date() });
+const systemChat = (code: string, message: string, kind: 'join' | 'leave' | 'info' = 'info') => {
+    const msgId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    io.to(code).emit('receive-chat', { id: msgId, system: true, kind, message, time: new Date() });
+};
 
 const userStillInRoom = (code: string, userId: string) => getMembers(code).some(m => m.userId === userId);
 
+// Si el anfitrión se marcha, transferir automáticamente la corona al siguiente miembro activo
+const ensureHostInRoom = async (code: string) => {
+    const currentHost = sessionHosts.get(code);
+    const members = getMembers(code);
+    if (members.length === 0) return;
 
-
-// Anuncia la salida de un usuario. Si fue una desconexión, espera unos segundos
-
-// y solo avisa si no ha vuelto a entrar (evita spam en recargas).
+    const hostStillPresent = members.some(m => m.userId === currentHost);
+    if (!hostStillPresent) {
+        const newHost = members[0];
+        sessionHosts.set(code, newHost.userId);
+        await pool.execute('UPDATE sessions SET host_id = ? WHERE code = ?', [newHost.userId, code]).catch(() => {});
+        broadcastMembers(code);
+        systemChat(code, `${newHost.username} es ahora el nuevo anfitrión de la sesión 👑`, 'info');
+    }
+};
 
 const announceLeave = (code: string, u: { userId: string; username: string }, delayed: boolean) => {
-
     const key = `${code}:${u.userId}`;
-
     const doIt = () => {
-
         pendingLeaves.delete(key);
-
         broadcastMembers(code);
-
-        if (!userStillInRoom(code, u.userId)) systemChat(code, `${u.username} ha salido de la sesión 👋`, 'leave');
-
+        if (!userStillInRoom(code, u.userId)) {
+            systemChat(code, `${u.username} ha salido de la sesión 👋`, 'leave');
+            ensureHostInRoom(code);
+        }
     };
-
     if (!delayed) return doIt();
-
     broadcastMembers(code);
-
     if (pendingLeaves.has(key)) clearTimeout(pendingLeaves.get(key)!);
-
     pendingLeaves.set(key, setTimeout(doIt, LEAVE_ANNOUNCE_DELAY_MS));
-
 };
 
 
@@ -3226,8 +3235,10 @@ io.on('connection', (socket) => {
 
         if (socket.data.sessionUsers) delete socket.data.sessionUsers[c];
 
-        if (u) announceLeave(c, u, false);
-
+        if (u) {
+            announceLeave(c, u, false);
+            ensureHostInRoom(c);
+        }
         if (SESSION_CODE_RE.test(c) && roomSize(c) === 0) scheduleSessionDeletion(c);
 
     });
@@ -3280,24 +3291,19 @@ io.on('connection', (socket) => {
 
     // El resto de la sesión solo escucha, así no hay peleas por el control.
 
-    const HOST_ONLY_COMMANDS = new Set(['play-track', 'toggle-play', 'seek', 'toggle-shuffle', 'toggle-loop', 'sync-time']);
+    const HOST_ONLY_COMMANDS = new Set(['play-track', 'toggle-play', 'seek', 'toggle-shuffle', 'toggle-loop', 'sync-time', 'update-queue']);
 
     socket.on('send-command', ({ code, command, data }) => {
-
-        if (!code || !socket.rooms.has(code)) return; // solo miembros de la sala
+        const c = String(code ?? '').trim().toUpperCase();
+        if (!c || !socket.rooms.has(c)) return;
 
         if (HOST_ONLY_COMMANDS.has(command)) {
-
-            const u = socket.data.sessionUsers?.[code];
-
-            if (!u || sessionHosts.get(code) !== u.userId) return; // no es el anfitrión: se ignora
-
+            const u = socket.data.sessionUsers?.[c];
+            if (!u || sessionHosts.get(c) !== u.userId) return;
         }
 
-        trackCommand(code, command, data);
-
-        socket.to(code).emit('receive-command', { command, data });
-
+        trackCommand(c, command, data);
+        socket.to(c).emit('receive-command', { command, data });
     });
 
 
@@ -3351,13 +3357,27 @@ io.on('connection', (socket) => {
     });
 
     socket.on('send-chat', ({ code, user, message }) => {
-
+        const c = String(code ?? '').trim().toUpperCase();
         const text = String(message ?? '').trim().slice(0, 500);
+        if (!c || !text || !socket.rooms.has(c)) return;
+        const msgId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        io.to(c).emit('receive-chat', {
+            id: msgId,
+            user: socket.data.sessionUsers?.[c] ?? user,
+            message: text,
+            time: new Date()
+        });
+    });
 
-        if (!code || !text || !socket.rooms.has(code)) return; // solo miembros, sin mensajes vacíos
-
-        io.to(code).emit('receive-chat', { user: socket.data.sessionUsers?.[code] ?? user, message: text, time: new Date() });
-
+    socket.on('send-reaction', ({ code, messageId, reaction, userId }) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        if (!c || !socket.rooms.has(c) || !messageId || !reaction) return;
+        const effectiveUserId = String(userId ?? socket.data.sessionUsers?.[c]?.userId ?? '');
+        io.to(c).emit('receive-reaction', {
+            messageId,
+            userId: effectiveUserId,
+            reaction
+        });
     });
 
     socket.on('send-private-message', ({ sender, receiverId, message }) => { io.to(`user_${receiverId}`).emit('receive-private-message', { sender_id: sender.userId, receiver_id: receiverId, message, created_at: new Date() }); });

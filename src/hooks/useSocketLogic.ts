@@ -5,7 +5,14 @@ import { Song } from "../constants";
 export type SessionMember = { userId: string; username: string; avatar: string | null; isHost: boolean };
 export type JoinResult = { ok: boolean; error?: string; members?: number };
 
-const SOCKET_URL = "https://aura.basildo.me";
+const getSocketUrl = () => {
+  if (typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return `${window.location.protocol}//${window.location.hostname}:${window.location.port || 3000}`;
+    }
+  }
+  return "https://aura.basildo.me";
+};
 // Cuánto puede desviarse el audio local respecto al de la sesión antes de saltar.
 const DRIFT_TOLERANCE = 1.5;
 
@@ -17,7 +24,10 @@ export function useSocketLogic(
   setActiveQueue: any
 ) {
   const socketRef = useRef<Socket | null>(null);
-  const [currentSession, setCurrentSessionState] = useState<string | null>(null);
+  const [currentSession, setCurrentSessionState] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return sessionStorage.getItem("aura_active_session") || null;
+  });
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);
   const [sessionMembers, setSessionMembers] = useState<SessionMember[]>([]);
   const [unreadSenders, setUnreadSenders] = useState<string[]>([]);
@@ -45,6 +55,11 @@ export function useSocketLogic(
   const setCurrentSession = useCallback((code: string | null) => {
     sessionRef.current = code;
     setCurrentSessionState(code);
+    if (code) {
+      sessionStorage.setItem("aura_active_session", code);
+    } else {
+      sessionStorage.removeItem("aura_active_session");
+    }
   }, []);
 
   // Aplica el estado de la sesión (canción, posición, cola, shuffle, loop).
@@ -74,11 +89,18 @@ export function useSocketLogic(
   }, []);
 
   useEffect(() => {
-    const socket = io(SOCKET_URL);
+    const socket = io(getSocketUrl(), {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      if (userRef.current) socket.emit("identify", userRef.current.userId);
+      const uid = String(userRef.current?.userId ?? userRef.current?.id ?? "");
+      if (uid) socket.emit("identify", uid);
 
       // Tras una reconexión (red inestable, reinicio del servidor...) el servidor
       // ha olvidado en qué salas estábamos: hay que volver a entrar y ponerse al día.
@@ -194,7 +216,8 @@ export function useSocketLogic(
   }, []);
 
   useEffect(() => {
-    if (user && socketRef.current) socketRef.current.emit("identify", user.userId);
+    const uid = String(user?.userId ?? user?.id ?? "");
+    if (uid && socketRef.current) socketRef.current.emit("identify", uid);
   }, [user]);
 
   // Entra en una sesión. Solo se marca como "dentro" si el servidor confirma
@@ -305,11 +328,12 @@ export function useSocketLogic(
       })
     );
 
+    const uid = String(userRef.current?.userId ?? userRef.current?.id ?? "");
     socketRef.current?.emit("send-reaction", {
       code,
       messageId,
       reaction,
-      userId: userRef.current?.userId
+      userId: uid
     });
   };
 
