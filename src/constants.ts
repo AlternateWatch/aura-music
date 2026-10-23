@@ -13,6 +13,7 @@ export interface Song {
   tabs_url: string | null;
   track_number: number | null;
   duration?: number;
+  genre?: string | null;
   is_liked?: number | boolean;
   animated_cover_path?: string | null;
   animatedCoverUrl?: string | null;

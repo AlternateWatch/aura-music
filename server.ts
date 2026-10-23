@@ -246,9 +246,110 @@ pool.execute(`
     console.error('[DB] Error verificando/agregando columnas a playlists:', err);
 });
 
+// Service API Key (para bot de Discord y servicios externos)
+const AURA_BOT_API_KEY = process.env.AURA_BOT_API_KEY || 'aura_bot_secret_service_key_2026';
+
+const isServiceApiKey = (key: string | undefined | null): boolean => {
+    if (!key) return false;
+    const clean = String(key).trim();
+    if (clean === AURA_BOT_API_KEY) return true;
+    if (process.env.AURA_SERVICE_KEYS) {
+        const keys = process.env.AURA_SERVICE_KEYS.split(',').map(k => k.trim());
+        if (keys.includes(clean)) return true;
+    }
+    return false;
+};
+
+// Auto-extrae duration y genre para pistas existentes que tengan duration NULL
+const backfillTrackMetadata = async () => {
+    try {
+        const [tracks]: any = await pool.execute(
+            'SELECT id, file_path, format FROM tracks WHERE duration IS NULL OR duration = 0 LIMIT 150'
+        );
+        if (!tracks || tracks.length === 0) return;
+
+        const mm: any = await import('music-metadata');
+        console.log(`[Metadata Backfill] Analizando ${tracks.length} pistas con duración pendiente...`);
+
+        for (const track of tracks) {
+            try {
+                let duration: number | null = null;
+                let genre: string | null = null;
+
+                const diskPath = resolveDiskPath(track.file_path);
+                if (diskPath && fs.existsSync(diskPath)) {
+                    const meta = await mm.parseFile(diskPath, { skipCovers: true });
+                    if (meta?.format?.duration) {
+                        duration = Math.round(meta.format.duration * 100) / 100;
+                    }
+                    if (meta?.common?.genre && meta.common.genre.length > 0) {
+                        genre = String(meta.common.genre[0]).slice(0, 255);
+                    }
+                } else if (isB2Configured()) {
+                    const audioFilename = path.basename(String(track.file_path).split('?')[0]);
+                    if (audioFilename && audioFilename !== '.' && audioFilename !== '..') {
+                        const b2Obj = await getB2ObjectStream(audioFilename);
+                        if (b2Obj?.stream) {
+                            const ext = path.extname(audioFilename).toLowerCase();
+                            const mimeType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
+                            const meta = await mm.parseStream(b2Obj.stream, { mimeType }, { skipCovers: true });
+                            if (meta?.format?.duration) {
+                                duration = Math.round(meta.format.duration * 100) / 100;
+                            }
+                            if (meta?.common?.genre && meta.common.genre.length > 0) {
+                                genre = String(meta.common.genre[0]).slice(0, 255);
+                            }
+                        }
+                    }
+                }
+
+                if (duration) {
+                    if (genre) {
+                        await pool.execute('UPDATE tracks SET duration = ?, genre = COALESCE(genre, ?) WHERE id = ?', [duration, genre, track.id]);
+                    } else {
+                        await pool.execute('UPDATE tracks SET duration = ? WHERE id = ?', [duration, track.id]);
+                    }
+                }
+            } catch {}
+        }
+        console.log(`[Metadata Backfill] Finalizada comprobación de metadatos.`);
+    } catch (err) {
+        console.warn('[Metadata Backfill] Aviso durante el análisis:', err);
+    }
+};
+
+// Auto-crear columnas duration y genre si no existen en la tabla tracks
+pool.execute(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre')
+`).then(async ([rows]: any) => {
+    const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
+    if (!existingCols.has('duration')) {
+        await pool.execute('ALTER TABLE tracks ADD COLUMN duration FLOAT NULL DEFAULT NULL');
+        console.log('[DB] Columna duration agregada a la tabla tracks.');
+    }
+    if (!existingCols.has('genre')) {
+        await pool.execute('ALTER TABLE tracks ADD COLUMN genre VARCHAR(255) NULL DEFAULT NULL');
+        console.log('[DB] Columna genre agregada a la tabla tracks.');
+    }
+    setTimeout(backfillTrackMetadata, 4000);
+}).catch(err => {
+    console.error('[DB] Error verificando/agregando columnas a tracks:', err);
+});
+
+
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const apiKeyHeader = req.headers['x-api-key'] || req.query.api_key;
+    const bearerToken = authHeader && (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (authHeader.startsWith('bearer ') ? authHeader.slice(7) : authHeader));
+
+    // 1. Verificar si es una API Key de servicio (ej. bot de Discord)
+    if (isServiceApiKey(apiKeyHeader as string) || isServiceApiKey(bearerToken)) {
+        req.user = { userId: 0, username: 'DiscordBot', role: 'admin', isBot: true };
+        return next();
+    }
+
+    const token = bearerToken;
     if (!token) return res.status(401).json({ error: "No token." });
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
         if (err) return res.status(403).json({ error: "Invalid session." });
@@ -850,50 +951,75 @@ app.post('/api/admin/app/version', authenticateToken, async (req: any, res: Resp
 
 // --- TRACKS (Con Soporte para Likes) ---
 
-app.get('/api/tracks', async (req, res) => { 
-
+app.get('/api/tracks', async (req: any, res: Response) => { 
     const s = req.query.status || 'approved';
-
     const authHeader = req.headers['authorization'];
-
-    const token = authHeader && authHeader.split(' ')[1];
+    const apiKeyHeader = req.headers['x-api-key'] || req.query.api_key;
+    const bearerToken = authHeader && (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (authHeader.startsWith('bearer ') ? authHeader.slice(7) : authHeader));
 
     let userId = null;
-
-    
-
-    if (token) {
-
-        try { const decoded: any = jwt.verify(token, JWT_SECRET); userId = decoded.userId; } catch(e) {}
-
+    if (isServiceApiKey(apiKeyHeader as string) || isServiceApiKey(bearerToken)) {
+        userId = 0;
+    } else if (bearerToken) {
+        try { const decoded: any = jwt.verify(bearerToken, JWT_SECRET); userId = decoded.userId; } catch(e) {}
     }
 
-
+    const q = req.query.q ? String(req.query.q).trim() : null;
+    const limit = req.query.limit ? Math.max(1, Math.min(Number(req.query.limit) || 100, 1000)) : null;
+    const genre = req.query.genre ? String(req.query.genre).trim() : null;
+    const album = req.query.album ? String(req.query.album).trim() : null;
+    const artist = req.query.artist ? String(req.query.artist).trim() : null;
 
     try { 
-
-        // Consulta que devuelve si la canción está en user_likes para el usuario actual
-
-        const query = `
-
+        let query = `
             SELECT t.*, 
-
             (SELECT COUNT(*) FROM user_likes WHERE track_id = t.id AND user_id = ?) as is_liked 
-
             FROM tracks t 
-
-            WHERE t.status = ? 
-
-            ORDER BY t.album ASC, t.track_number ASC
-
+            WHERE t.status = ?
         `;
+        const params: any[] = [userId, s];
 
-        const [t] = await pool.execute(query, [userId, s]); 
+        if (q) {
+            query += ` AND (t.title LIKE ? OR t.artist LIKE ? OR t.album LIKE ?)`;
+            params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+        }
+        if (genre) {
+            query += ` AND t.genre = ?`;
+            params.push(genre);
+        }
+        if (album) {
+            query += ` AND t.album = ?`;
+            params.push(album);
+        }
+        if (artist) {
+            query += ` AND t.artist LIKE ?`;
+            params.push(`%${artist}%`);
+        }
 
-        res.json(t); 
+        query += ` ORDER BY t.album ASC, t.track_number ASC`;
 
-    } catch (e) { console.error("Error in GET /api/tracks:", e); res.status(500).json({ error: "Error loading tracks" }); } 
+        if (limit) {
+            query += ` LIMIT ${limit}`;
+        }
 
+        const [t]: any = await pool.execute(query, params);
+
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const enriched = t.map((item: any) => ({
+            ...item,
+            duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
+            genre: item.genre || null,
+            track_number: item.track_number !== null && item.track_number !== undefined ? Number(item.track_number) : null,
+            audio_url: item.file_path ? `${baseUrl}${item.file_path}` : null,
+            cover_url: item.cover_path ? `${baseUrl}${item.cover_path}` : null,
+            stream_url: `${baseUrl}/api/tracks/${item.id}/stream`
+        }));
+
+        res.json(enriched); 
+    } catch (e) { 
+        console.error("Error in GET /api/tracks:", e); 
+        res.status(500).json({ error: "Error loading tracks" }); 
+    } 
 });
 
 
@@ -941,9 +1067,26 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
             }
         }
 
+        let duration: number | null = null;
+        let genre: string | null = req.body.genre ? String(req.body.genre).trim() : null;
+
+        try {
+            const mm: any = await import('music-metadata');
+            const audioPath = req.files['audio'][0].path;
+            const audioMeta = await mm.parseFile(audioPath, { skipCovers: true });
+            if (audioMeta?.format?.duration) {
+                duration = Math.round(audioMeta.format.duration * 100) / 100;
+            }
+            if (!genre && audioMeta?.common?.genre && audioMeta.common.genre.length > 0) {
+                genre = String(audioMeta.common.genre[0]).slice(0, 255);
+            }
+        } catch (mmErr) {
+            console.warn("No se pudo extraer metadata/duración del archivo de audio:", mmErr);
+        }
+
         const [result]: any = await pool.execute(
-            'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null]
+            'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number, duration, genre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null, duration, genre]
         );
 
         // Subir directamente a Backblaze B2 y limpiar el archivo temporal local
@@ -1033,11 +1176,25 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
         }
 
         const cleanT = (track_number === "" || track_number === "null" || track_number === "0") ? null : parseInt(track_number);
+        const cleanDuration = req.body.duration !== undefined && req.body.duration !== null && !isNaN(Number(req.body.duration)) ? Number(req.body.duration) : undefined;
+        const cleanGenre = req.body.genre !== undefined ? (String(req.body.genre).trim() || null) : undefined;
 
-        await pool.execute(
-            'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ? WHERE id = ?', 
-            [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null, req.params.id]
-        );
+        let updateQuery = 'UPDATE tracks SET title = ?, artist = ?, album = ?, track_number = ?, tabs_url = ?, video_url = ?, cover_path = ?, animated_cover_path = ?';
+        const updateParams: any[] = [title, artist, album, cleanT, tabs_url || null, video_url || null, coverPath, animatedCoverPath || null];
+
+        if (cleanDuration !== undefined) {
+            updateQuery += ', duration = ?';
+            updateParams.push(cleanDuration);
+        }
+        if (cleanGenre !== undefined) {
+            updateQuery += ', genre = ?';
+            updateParams.push(cleanGenre);
+        }
+
+        updateQuery += ' WHERE id = ?';
+        updateParams.push(req.params.id);
+
+        await pool.execute(updateQuery, updateParams);
 
         // Borrado seguro: solo después de actualizar la BD y solo si ninguna otra canción usa el archivo antiguo
         if (oldCover && normalizeMediaPath(oldCover) !== coverPath) {
@@ -1592,29 +1749,39 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
 
 
 app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => {
-
     try {
-
-        const [r] = await pool.execute(
-
-            'SELECT * FROM playlists WHERE owner_id = ?',
-
-            [req.user.userId]
-
-        );
-
-
-
+        let query = 'SELECT * FROM playlists WHERE owner_id = ?';
+        let params: any[] = [req.user.userId];
+        if (req.user.isBot || req.user.role === 'admin') {
+            query = 'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id ORDER BY p.name ASC';
+            params = [];
+        }
+        const [r] = await pool.execute(query, params);
         res.json(r);
-
     } catch (e) {
-
         console.error("Get playlists error:", e);
-
         res.status(500).json({ error: "Error loading playlists" });
-
     }
+});
 
+app.get('/api/playlists/:id', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.id = ? LIMIT 1',
+            [req.params.id]
+        );
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: 'Playlist not found' });
+        }
+        const pl = rows[0];
+        if (!req.user.isBot && req.user.role !== 'admin' && pl.owner_id !== req.user.userId) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+        res.json(pl);
+    } catch (e) {
+        console.error("Get playlist error:", e);
+        res.status(500).json({ error: "Error loading playlist" });
+    }
 });
 
 
@@ -1750,22 +1917,16 @@ app.get('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Re
 
     try {
 
-        // Comprobar que la playlist pertenece al usuario
+        // Comprobar que la playlist pertenece al usuario (los bots y administradores tienen acceso global)
+        if (!req.user.isBot && req.user.role !== 'admin') {
+            const [playlistRows]: any = await pool.execute(
+                'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
+                [req.params.id, req.user.userId]
+            );
 
-        const [playlistRows]: any = await pool.execute(
-
-            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-
-            [req.params.id, req.user.userId]
-
-        );
-
-
-
-        if (playlistRows.length === 0) {
-
-            return res.status(403).json({ error: "Forbidden" });
-
+            if (playlistRows.length === 0) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
         }
 
 
@@ -3410,6 +3571,323 @@ app.use('/uploads', async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.status(404).send('Asset not found');
 });
+
+
+// --- NUEVOS ENDPOINTS PARA DISCORD BOT Y SERVICIOS EXTERNOS ---
+
+// GET /api/tracks/random?limit=N&genre=X
+app.get('/api/tracks/random', async (req: any, res: Response) => {
+    try {
+        const limit = req.query.limit ? Math.max(1, Math.min(Number(req.query.limit) || 1, 100)) : 1;
+        const genre = req.query.genre ? String(req.query.genre).trim() : null;
+
+        let query = "SELECT t.* FROM tracks t WHERE t.status = 'approved'";
+        const params: any[] = [];
+        if (genre) {
+            query += " AND t.genre = ?";
+            params.push(genre);
+        }
+        query += ` ORDER BY RAND() LIMIT ${limit}`;
+
+        const [rows]: any = await pool.execute(query, params);
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const enriched = rows.map((item: any) => ({
+            ...item,
+            duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
+            genre: item.genre || null,
+            track_number: item.track_number !== null && item.track_number !== undefined ? Number(item.track_number) : null,
+            audio_url: item.file_path ? `${baseUrl}${item.file_path}` : null,
+            cover_url: item.cover_path ? `${baseUrl}${item.cover_path}` : null,
+            stream_url: `${baseUrl}/api/tracks/${item.id}/stream`
+        }));
+        res.json(enriched);
+    } catch (e) {
+        console.error("Error in GET /api/tracks/random:", e);
+        res.status(500).json({ error: "Error loading random tracks" });
+    }
+});
+
+// GET /api/tracks/:id público
+app.get('/api/tracks/:id', async (req: any, res: Response) => {
+    try {
+        const authHeader = req.headers['authorization'];
+        const apiKeyHeader = req.headers['x-api-key'] || req.query.api_key;
+        const bearerToken = authHeader && (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (authHeader.startsWith('bearer ') ? authHeader.slice(7) : authHeader));
+        let userId = null;
+        if (isServiceApiKey(apiKeyHeader as string) || isServiceApiKey(bearerToken)) {
+            userId = 0;
+        } else if (bearerToken) {
+            try { const decoded: any = jwt.verify(bearerToken, JWT_SECRET); userId = decoded.userId; } catch(e) {}
+        }
+
+        const [rows]: any = await pool.execute(`
+            SELECT t.*, 
+            (SELECT COUNT(*) FROM user_likes WHERE track_id = t.id AND user_id = ?) as is_liked 
+            FROM tracks t 
+            WHERE t.id = ? LIMIT 1
+        `, [userId, req.params.id]);
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: 'Track not found' });
+        }
+
+        const item = rows[0];
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        res.json({
+            ...item,
+            duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
+            genre: item.genre || null,
+            track_number: item.track_number !== null && item.track_number !== undefined ? Number(item.track_number) : null,
+            audio_url: item.file_path ? `${baseUrl}${item.file_path}` : null,
+            cover_url: item.cover_path ? `${baseUrl}${item.cover_path}` : null,
+            stream_url: `${baseUrl}/api/tracks/${item.id}/stream`
+        });
+    } catch (e) {
+        console.error("Error in GET /api/tracks/:id:", e);
+        res.status(500).json({ error: "Error loading track" });
+    }
+});
+
+// GET /api/tracks/:id/similar (para radio y autoplay del bot)
+app.get('/api/tracks/:id/similar', async (req: any, res: Response) => {
+    try {
+        const trackId = req.params.id;
+        const limit = req.query.limit ? Math.max(1, Math.min(Number(req.query.limit) || 10, 50)) : 10;
+
+        const [seedRows]: any = await pool.execute(
+            'SELECT id, title, artist, album, genre FROM tracks WHERE id = ? LIMIT 1',
+            [trackId]
+        );
+        if (!seedRows || seedRows.length === 0) {
+            return res.status(404).json({ error: 'Seed track not found' });
+        }
+        const seed = seedRows[0];
+
+        const [candidates]: any = await pool.execute(
+            "SELECT t.* FROM tracks t WHERE t.status = 'approved' AND t.id != ?",
+            [trackId]
+        );
+
+        const seedArtistLower = (seed.artist || '').toLowerCase().trim();
+        const seedAlbumLower = (seed.album || '').toLowerCase().trim();
+        const seedGenreLower = (seed.genre || '').toLowerCase().trim();
+
+        const scored = (candidates as any[]).map(candidate => {
+            let score = 0;
+            const candArtist = (candidate.artist || '').toLowerCase().trim();
+            const candAlbum = (candidate.album || '').toLowerCase().trim();
+            const candGenre = (candidate.genre || '').toLowerCase().trim();
+
+            if (candArtist === seedArtistLower && seedArtistLower !== '') {
+                score += 15;
+            } else if (seedArtistLower.includes(candArtist) || candArtist.includes(seedArtistLower)) {
+                score += 8;
+            }
+
+            if (seedGenreLower && candGenre && seedGenreLower === candGenre) {
+                score += 12;
+            }
+
+            if (candAlbum === seedAlbumLower && seedAlbumLower !== '') {
+                score += 6;
+            }
+
+            score += Math.random() * 4;
+            return { track: candidate, score };
+        });
+
+        scored.sort((a, b) => b.score - a.score);
+        const top = scored.slice(0, limit).map(s => s.track);
+
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const enriched = top.map((item: any) => ({
+            ...item,
+            duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
+            genre: item.genre || null,
+            track_number: item.track_number !== null && item.track_number !== undefined ? Number(item.track_number) : null,
+            audio_url: item.file_path ? `${baseUrl}${item.file_path}` : null,
+            cover_url: item.cover_path ? `${baseUrl}${item.cover_path}` : null,
+            stream_url: `${baseUrl}/api/tracks/${item.id}/stream`
+        }));
+
+        res.json(enriched);
+    } catch (e) {
+        console.error("Error in GET /api/tracks/:id/similar:", e);
+        res.status(500).json({ error: "Error loading similar tracks" });
+    }
+});
+
+// GET /api/tracks/:id/stream (con soporte de Range y parámetro ?t=<segundos> para seek en servidor)
+app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT file_path, format, duration FROM tracks WHERE id = ? LIMIT 1',
+            [req.params.id]
+        );
+        if (!rows || rows.length === 0 || !rows[0].file_path) {
+            return res.status(404).send('Track not found');
+        }
+
+        const track = rows[0];
+        const requestedFile = path.basename(decodeURIComponent(track.file_path.split('?')[0]));
+        const ext = path.extname(requestedFile).toLowerCase();
+        const contentType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
+
+        const seekSec = req.query.t ? parseFloat(String(req.query.t)) : null;
+
+        const diskPath = resolveDiskPath(track.file_path);
+        if (diskPath && fs.existsSync(diskPath)) {
+            const stat = fs.statSync(diskPath);
+            const totalSize = stat.size;
+
+            let start = 0;
+            let end = totalSize - 1;
+            let isPartial = false;
+
+            const rangeHeader = req.headers.range;
+            if (rangeHeader) {
+                const parts = rangeHeader.replace(/bytes=/, "").split("-");
+                start = parseInt(parts[0], 10);
+                end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+                isPartial = true;
+            } else if (seekSec && seekSec > 0 && track.duration && track.duration > 0) {
+                const ratio = Math.min(0.99, Math.max(0, seekSec / track.duration));
+                start = Math.floor(ratio * totalSize);
+                end = totalSize - 1;
+                isPartial = true;
+            }
+
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Type', contentType);
+
+            if (isPartial) {
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+                res.setHeader('Content-Length', (end - start) + 1);
+            } else {
+                res.status(200);
+                res.setHeader('Content-Length', totalSize);
+            }
+
+            const stream = fs.createReadStream(diskPath, { start, end });
+            res.on('close', () => { stream.destroy(); });
+            return stream.pipe(res);
+        }
+
+        if (isB2Configured()) {
+            let b2Range = req.headers.range;
+            if (!b2Range && seekSec && seekSec > 0 && track.duration && track.duration > 0) {
+                b2Range = 'bytes=0-';
+            }
+            const b2Obj = await getB2ObjectStream(requestedFile, b2Range);
+            if (b2Obj) {
+                res.status(b2Obj.statusCode);
+                res.setHeader('Content-Type', b2Obj.contentType || contentType);
+                res.setHeader('Accept-Ranges', b2Obj.acceptRanges || 'bytes');
+                if (b2Obj.contentLength !== undefined) res.setHeader('Content-Length', b2Obj.contentLength);
+                if (b2Obj.contentRange) res.setHeader('Content-Range', b2Obj.contentRange);
+                res.on('close', () => { try { b2Obj.stream.destroy(); } catch {} });
+                return b2Obj.stream.pipe(res);
+            }
+        }
+
+        res.status(404).send('Audio file not found on disk or storage');
+    } catch (e: any) {
+        console.error("Error in /api/tracks/:id/stream:", e);
+        if (!res.headersSent) res.status(500).send("Streaming error");
+    }
+});
+
+// GET /api/albums (lista de álbumes agrupados con id estable)
+app.get('/api/albums', async (req: Request, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(`
+            SELECT 
+                t.album,
+                t.artist,
+                t.cover_path,
+                COUNT(*) as track_count,
+                MIN(t.track_number) as min_track,
+                MAX(t.genre) as genre
+            FROM tracks t
+            WHERE t.status = 'approved' AND t.album IS NOT NULL AND TRIM(t.album) != ''
+            GROUP BY t.album, t.artist
+            ORDER BY t.album ASC
+        `);
+
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const albums = (rows as any[]).map(row => {
+            const albumTitle = String(row.album).trim();
+            const stableId = crypto.createHash('md5').update(albumTitle.toLowerCase()).digest('hex').substring(0, 16);
+            return {
+                id: stableId,
+                title: albumTitle,
+                artist: row.artist,
+                cover_url: row.cover_path ? `${baseUrl}${row.cover_path}` : null,
+                track_count: Number(row.track_count),
+                genre: row.genre || null
+            };
+        });
+
+        res.json(albums);
+    } catch (e) {
+        console.error("Error in GET /api/albums:", e);
+        res.status(500).json({ error: "Error loading albums" });
+    }
+});
+
+// GET /api/albums/:id (obtiene un álbum y sus pistas por id estable o por título)
+app.get('/api/albums/:id', async (req: Request, res: Response) => {
+    try {
+        const paramId = String(req.params.id).trim();
+
+        const [rows]: any = await pool.execute(`
+            SELECT t.* FROM tracks t 
+            WHERE t.status = 'approved' AND t.album IS NOT NULL AND TRIM(t.album) != ''
+            ORDER BY t.album ASC, t.track_number ASC, t.title ASC
+        `);
+
+        const matchingTracks = (rows as any[]).filter(t => {
+            const alb = String(t.album).trim();
+            const md5 = crypto.createHash('md5').update(alb.toLowerCase()).digest('hex').substring(0, 16);
+            return md5 === paramId || alb.toLowerCase() === paramId.toLowerCase();
+        });
+
+        if (matchingTracks.length === 0) {
+            return res.status(404).json({ error: 'Album not found' });
+        }
+
+        const albumTitle = matchingTracks[0].album;
+        const mainArtist = matchingTracks[0].artist;
+        const albumCover = matchingTracks.find(t => t.cover_path)?.cover_path || matchingTracks[0].cover_path;
+        const stableId = crypto.createHash('md5').update(albumTitle.toLowerCase()).digest('hex').substring(0, 16);
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+        const tracks = matchingTracks.map(item => ({
+            ...item,
+            duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
+            genre: item.genre || null,
+            track_number: item.track_number !== null && item.track_number !== undefined ? Number(item.track_number) : null,
+            audio_url: item.file_path ? `${baseUrl}${item.file_path}` : null,
+            cover_url: item.cover_path ? `${baseUrl}${item.cover_path}` : null,
+            stream_url: `${baseUrl}/api/tracks/${item.id}/stream`
+        }));
+
+        res.json({
+            id: stableId,
+            title: albumTitle,
+            artist: mainArtist,
+            cover_url: albumCover ? `${baseUrl}${albumCover}` : null,
+            track_count: tracks.length,
+            genre: matchingTracks.find(t => t.genre)?.genre || null,
+            tracks: tracks
+        });
+    } catch (e) {
+        console.error("Error in GET /api/albums/:id:", e);
+        res.status(500).json({ error: "Error loading album" });
+    }
+});
+
 
 // Descarga directa de una canción al disco duro del usuario con nombre limpio "Artista - Título.ext"
 app.get('/api/tracks/:id/download', async (req: Request, res: Response) => {
