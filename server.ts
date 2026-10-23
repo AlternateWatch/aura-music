@@ -247,7 +247,7 @@ pool.execute(`
 });
 
 // Service API Key (para bot de Discord y servicios externos)
-const AURA_BOT_API_KEY = process.env.AURA_BOT_API_KEY || 'aura_bot_secret_service_key_2026';
+const AURA_BOT_API_KEY = process.env.AURA_BOT_API_KEY || 'aura_sec_a5e2c38d27c63004ab9ba384406aeec8d2e71ec30ea006bd73e9a2e28cf59826';
 
 const isServiceApiKey = (key: string | undefined | null): boolean => {
     if (!key) return false;
