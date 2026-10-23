@@ -62,6 +62,7 @@ const LazySleepTimerOverlay = lazy(() => import("./components/SleepTimerOverlay"
 const LazyAuraDjOverlay = lazy(() => import("./components/AuraDjOverlay").then(m => ({ default: m.AuraDjOverlay })));
 
 // MODULED IMPORTS AND HOOKS
+import { DiscordLinkModal } from "./components/DiscordLinkModal";
 import { fetchAndSyncGeminiKey } from "./services/aiDj";
 import { useAppUpdate } from "./hooks/useAppUpdate";
 import { UpdateModal } from "./components/UpdateModal";
@@ -268,6 +269,23 @@ export default function App() {
     }
   }, []);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [discordLinkCode, setDiscordLinkCode] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('code') || null;
+  });
+
+  useEffect(() => {
+    const isLinkPath = window.location.pathname === '/link' || window.location.pathname.startsWith('/link');
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code || isLinkPath) {
+      if (code) setDiscordLinkCode(code);
+      if (!user) {
+        setIsAuthModalOpen(true);
+      }
+    }
+  }, [user]);
   const [songs, setSongs] = useState<Song[]>([]);
   
 
@@ -5531,6 +5549,31 @@ getCurrentTime={audioObj.getCurrentTime}
       )}</AnimatePresence>
       <AnimatePresence>{socketObj.activeInvite && ( <div className="fixed top-20 right-8 z-[500]"><motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[#121212] border border-brand-primary/30 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-white"><p className="text-xs font-bold tabular-nums">{socketObj.activeInvite.from} invited you.</p><button onClick={() => { handleJoinSession(socketObj.activeInvite!.code); socketObj.setActiveInvite(null); }} className="bg-brand-primary text-black font-bold py-2 rounded-lg text-[10px]">Join</button></motion.div></div> )}</AnimatePresence>
       <AnimatePresence>{isAuthModalOpen && ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"><motion.div className="bg-[#121212] border border-white/10 rounded-2xl p-8 w-full max-w-sm relative text-white shadow-2xl"><AuthForm onSuccess={handleLoginSuccess} onCancel={() => setIsAuthModalOpen(false)} /></motion.div></div> )}</AnimatePresence>
+      <AnimatePresence>
+        {discordLinkCode && user && (
+          <DiscordLinkModal
+            code={discordLinkCode}
+            token={token}
+            user={user}
+            apiBase={API_BASE}
+            onClose={() => {
+              setDiscordLinkCode(null);
+              const params = new URLSearchParams(window.location.search);
+              params.delete('code');
+              const qs = params.toString();
+              const newPath = window.location.pathname === '/link' ? '/' : window.location.pathname;
+              window.history.replaceState({}, '', newPath + (qs ? '?' + qs : ''));
+            }}
+            onSuccess={() => {
+              if (user) {
+                const updated = { ...user, discord_linked: true };
+                setUser(updated);
+                localStorage.setItem('aura_user', JSON.stringify(updated));
+              }
+            }}
+          />
+        )}
+      </AnimatePresence>
       <Suspense fallback={null}>
         <AnimatePresence>
           {isPersonalizationOpen && (

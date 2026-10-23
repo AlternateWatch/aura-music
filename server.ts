@@ -235,6 +235,54 @@ pool.execute(`
     console.error('[DB] Error verificando/agregando columna gemini_api_key:', err);
 });
 
+// Auto-crear columnas discord_id y discord_username en la tabla users
+pool.execute(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME IN ('discord_id', 'discord_username')
+`).then(async ([rows]: any) => {
+    const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
+    if (!existingCols.has('discord_id')) {
+        await pool.execute('ALTER TABLE users ADD COLUMN discord_id VARCHAR(64) NULL UNIQUE');
+        console.log('[DB] Columna discord_id agregada a la tabla users.');
+    }
+    if (!existingCols.has('discord_username')) {
+        await pool.execute('ALTER TABLE users ADD COLUMN discord_username VARCHAR(255) NULL');
+        console.log('[DB] Columna discord_username agregada a la tabla users.');
+    }
+}).catch(err => {
+    console.error('[DB] Error verificando/agregando columnas discord a users:', err);
+});
+
+// Auto-crear tabla listen_pings si no existe
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS listen_pings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        track_id VARCHAR(64) NULL,
+        title VARCHAR(255) NOT NULL,
+        artist VARCHAR(255) NOT NULL,
+        album VARCHAR(255) NULL,
+        ms INT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_time (user_id, created_at),
+        INDEX idx_track (track_id)
+    )
+`).catch(err => console.error('[DB] Error creando tabla listen_pings:', err));
+
+// Auto-crear tabla discord_link_codes si no existe
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS discord_link_codes (
+        code VARCHAR(32) PRIMARY KEY,
+        discord_id VARCHAR(64) NOT NULL,
+        discord_username VARCHAR(255) NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        user_id INT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_discord_id (discord_id)
+    )
+`).catch(err => console.error('[DB] Error creando tabla discord_link_codes:', err));
+
 // Auto-crear columnas description y cover_path si no existen en la tabla playlists
 pool.execute(`
     SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
@@ -408,6 +456,18 @@ pool.execute(`
     console.error('[DB] Error verificando/agregando columnas a tracks:', err);
 });
 
+
+const authenticateBot = (req: any, res: Response, next: NextFunction) => {
+    const authHeader = req.headers['authorization'];
+    const apiKeyHeader = req.headers['x-api-key'] || req.query.api_key;
+    const bearerToken = authHeader && (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (authHeader.startsWith('bearer ') ? authHeader.slice(7) : authHeader));
+
+    if (isServiceApiKey(apiKeyHeader as string) || isServiceApiKey(bearerToken)) {
+        req.user = { userId: 0, username: 'DiscordBot', role: 'admin', isBot: true };
+        return next();
+    }
+    return res.status(401).json({ error: "Unauthorized: Invalid or missing X-Api-Key" });
+};
 
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
@@ -1179,6 +1239,364 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
         console.error("Error uploading track:", e);
         cleanupUploaded();
         res.status(500).json({ error: "Error guardando la pista en la base de datos." });
+    }
+});
+
+// ==========================================
+// BOT DE DISCORD & VINCULACIÓN DE USUARIOS
+// ==========================================
+
+// 1. POST /api/bot/link con { discord_id, discord_username } -> { code, url, expires_at }
+app.post('/api/bot/link', authenticateBot, async (req: Request, res: Response) => {
+    try {
+        const { discord_id, discord_username } = req.body || {};
+        if (!discord_id) {
+            return res.status(400).json({ error: "discord_id is required" });
+        }
+
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let part1 = '';
+        let part2 = '';
+        for (let i = 0; i < 4; i++) part1 += chars.charAt(Math.floor(Math.random() * chars.length));
+        for (let i = 0; i < 4; i++) part2 += chars.charAt(Math.floor(Math.random() * chars.length));
+        const code = `${part1}-${part2}`;
+
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+
+        await pool.execute(
+            'INSERT INTO discord_link_codes (code, discord_id, discord_username, status, expires_at) VALUES (?, ?, ?, ?, ?)',
+            [code, String(discord_id), discord_username ? String(discord_username) : null, 'pending', expiresAt]
+        );
+
+        const baseUrl = getRequestBaseUrl(req);
+        const url = `${baseUrl}/link?code=${code}`;
+
+        res.json({
+            code,
+            url,
+            expires_at: expiresAt.toISOString()
+        });
+    } catch (e) {
+        console.error("Error in POST /api/bot/link:", e);
+        res.status(500).json({ error: "Error generating link code" });
+    }
+});
+
+// 2. GET /api/bot/link/:code -> { status: "pending" | "linked" | "expired", user?: { id, username } }
+app.get('/api/bot/link/:code', authenticateBot, async (req: Request, res: Response) => {
+    try {
+        const code = String(req.params.code).trim().toUpperCase();
+        const [rows]: any = await pool.execute(
+            'SELECT d.*, u.username FROM discord_link_codes d LEFT JOIN users u ON d.user_id = u.id WHERE d.code = ? LIMIT 1',
+            [code]
+        );
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Code not found" });
+        }
+
+        const linkData = rows[0];
+        const isExpired = new Date(linkData.expires_at).getTime() < Date.now();
+
+        if (linkData.status === 'linked' && linkData.user_id) {
+            return res.json({
+                status: 'linked',
+                user: {
+                    id: linkData.user_id,
+                    username: linkData.username
+                }
+            });
+        }
+
+        if (isExpired || linkData.status === 'expired') {
+            return res.json({ status: 'expired' });
+        }
+
+        return res.json({ status: 'pending' });
+    } catch (e) {
+        console.error("Error in GET /api/bot/link/:code:", e);
+        res.status(500).json({ error: "Error checking link status" });
+    }
+});
+
+// 3. GET /api/link-info?code=... (información pública del código para la web)
+app.get('/api/link-info', async (req: Request, res: Response) => {
+    try {
+        const code = String(req.query.code || '').trim().toUpperCase();
+        if (!code) return res.status(400).json({ error: "code query parameter is required" });
+
+        const [rows]: any = await pool.execute(
+            'SELECT code, discord_username, status, expires_at FROM discord_link_codes WHERE code = ? LIMIT 1',
+            [code]
+        );
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Código de vinculación no encontrado" });
+        }
+
+        const row = rows[0];
+        const isExpired = new Date(row.expires_at).getTime() < Date.now();
+        const currentStatus = isExpired ? 'expired' : row.status;
+
+        res.json({
+            code: row.code,
+            discord_username: row.discord_username,
+            status: currentStatus,
+            expires_at: row.expires_at
+        });
+    } catch (e) {
+        console.error("Error in GET /api/link-info:", e);
+        res.status(500).json({ error: "Error checking link info" });
+    }
+});
+
+// 4. POST /api/link-confirm (usuario logueado confirma vinculación con su cuenta de Aura)
+app.post('/api/link-confirm', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId || userId === 0) {
+            return res.status(400).json({ error: "Debes iniciar sesión con tu cuenta de usuario para vincular Discord" });
+        }
+
+        const { code } = req.body || {};
+        if (!code) return res.status(400).json({ error: "Falta el código de vinculación" });
+
+        const cleanCode = String(code).trim().toUpperCase();
+        const [rows]: any = await pool.execute(
+            'SELECT * FROM discord_link_codes WHERE code = ? LIMIT 1',
+            [cleanCode]
+        );
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Código no encontrado" });
+        }
+
+        const linkData = rows[0];
+        if (new Date(linkData.expires_at).getTime() < Date.now()) {
+            return res.status(400).json({ error: "Este código ha caducado. Vuelve a escribir /link en Discord." });
+        }
+
+        if (linkData.status === 'linked') {
+            return res.status(400).json({ error: "Este código ya ha sido utilizado." });
+        }
+
+        // Desvincular de cualquier otra cuenta previa que tuviese este discord_id
+        await pool.execute('UPDATE users SET discord_id = NULL, discord_username = NULL WHERE discord_id = ?', [linkData.discord_id]);
+
+        // Vincular a la cuenta actual
+        await pool.execute(
+            'UPDATE users SET discord_id = ?, discord_username = ? WHERE id = ?',
+            [linkData.discord_id, linkData.discord_username, userId]
+        );
+
+        // Marcar el código como vinculado
+        await pool.execute(
+            'UPDATE discord_link_codes SET status = "linked", user_id = ? WHERE code = ?',
+            [userId, cleanCode]
+        );
+
+        res.json({
+            success: true,
+            message: "¡Cuenta de Discord vinculada con éxito!",
+            discord_username: linkData.discord_username
+        });
+    } catch (e) {
+        console.error("Error in POST /api/link-confirm:", e);
+        res.status(500).json({ error: "Error confirmando vinculación" });
+    }
+});
+
+// 5. POST /api/bot/plays con { plays: [{ discord_id, track_id, title, artist, album, ms, played_at }] }
+app.post('/api/bot/plays', authenticateBot, async (req: Request, res: Response) => {
+    try {
+        const { plays } = req.body || {};
+        if (!Array.isArray(plays)) {
+            return res.status(400).json({ error: "plays must be an array" });
+        }
+
+        let saved = 0;
+        const unlinkedSet = new Set<string>();
+        const userCache = new Map<string, number | null>();
+
+        for (const p of plays) {
+            if (!p || !p.discord_id) continue;
+            const discordId = String(p.discord_id);
+
+            let userId = userCache.get(discordId);
+            if (userId === undefined) {
+                const [uRows]: any = await pool.execute('SELECT id FROM users WHERE discord_id = ? LIMIT 1', [discordId]);
+                if (uRows && uRows.length > 0) {
+                    userId = uRows[0].id;
+                    userCache.set(discordId, userId);
+                } else {
+                    userId = null;
+                    userCache.set(discordId, null);
+                }
+            }
+
+            if (!userId) {
+                unlinkedSet.add(discordId);
+                continue;
+            }
+
+            const cleanMs = Math.max(1000, Number(p.ms) || 0);
+            const playedAt = p.played_at ? new Date(p.played_at) : new Date();
+
+            await pool.execute(
+                'INSERT INTO listen_pings (user_id, track_id, title, artist, album, ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    userId,
+                    p.track_id || null,
+                    String(p.title || 'Unknown').slice(0, 255),
+                    String(p.artist || 'Unknown').slice(0, 255),
+                    p.album ? String(p.album).slice(0, 255) : null,
+                    cleanMs,
+                    playedAt
+                ]
+            );
+            saved++;
+        }
+
+        res.json({
+            saved,
+            unlinked: Array.from(unlinkedSet)
+        });
+    } catch (e) {
+        console.error("Error in POST /api/bot/plays:", e);
+        res.status(500).json({ error: "Error saving bot plays" });
+    }
+});
+
+// 6. GET /api/bot/users/:discord_id?period=30d|year|all
+app.get('/api/bot/users/:discord_id', authenticateBot, async (req: Request, res: Response) => {
+    try {
+        const discordId = String(req.params.discord_id);
+        const [uRows]: any = await pool.execute(
+            'SELECT id, username, profile_pic_path, role FROM users WHERE discord_id = ? LIMIT 1',
+            [discordId]
+        );
+
+        if (!uRows || uRows.length === 0) {
+            return res.status(404).json({ error: "User not linked" });
+        }
+
+        const user = uRows[0];
+        const period = String(req.query.period || req.query.range || '30d').toLowerCase();
+        const wherePeriod =
+            period === 'year' ? 'YEAR(created_at) = YEAR(NOW())' :
+            period === 'all' ? '1=1' :
+            'created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+
+        const [likesRows]: any = await pool.execute('SELECT COUNT(*) as count FROM user_likes WHERE user_id = ?', [user.id]);
+        const [playlistsRows]: any = await pool.execute('SELECT COUNT(*) as count FROM playlists WHERE owner_id = ?', [user.id]);
+        const [uploadsRows]: any = await pool.execute('SELECT COUNT(*) as count FROM tracks WHERE added_by = ?', [user.id]);
+
+        const [totalsRows]: any = await pool.execute(
+            `SELECT COALESCE(SUM(ms),0) AS totalMs, COUNT(DISTINCT track_id) AS distinctTracks
+             FROM listen_pings WHERE user_id = ? AND ${wherePeriod}`,
+            [user.id]
+        );
+
+        const [topTracks]: any = await pool.execute(
+            `SELECT title, artist, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${wherePeriod}
+             GROUP BY title, artist ORDER BY totalMs DESC LIMIT 5`,
+            [user.id]
+        );
+
+        const [topArtists]: any = await pool.execute(
+            `SELECT artist, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${wherePeriod}
+             GROUP BY artist ORDER BY totalMs DESC LIMIT 5`,
+            [user.id]
+        );
+
+        const baseUrl = getRequestBaseUrl(req);
+        const avatarUrl = user.profile_pic_path ? (user.profile_pic_path.startsWith('http') ? user.profile_pic_path : `${baseUrl}${user.profile_pic_path}`) : null;
+
+        res.json({
+            id: user.id,
+            username: user.username,
+            avatar_url: avatarUrl,
+            likes: likesRows[0]?.count || 0,
+            playlists: playlistsRows[0]?.count || 0,
+            uploads: uploadsRows[0]?.count || 0,
+            stats: {
+                minutes: Math.round((totalsRows[0]?.totalMs || 0) / 60000),
+                distinct_tracks: totalsRows[0]?.distinctTracks || 0,
+                top_tracks: topTracks.map((t: any) => ({
+                    title: t.title,
+                    artist: t.artist,
+                    plays: Number(t.plays),
+                    minutes: Math.round((t.totalMs || 0) / 60000)
+                })),
+                top_artists: topArtists.map((a: any) => ({
+                    artist: a.artist,
+                    plays: Number(a.plays),
+                    minutes: Math.round((a.totalMs || 0) / 60000)
+                }))
+            }
+        });
+    } catch (e) {
+        console.error("Error in GET /api/bot/users/:discord_id:", e);
+        res.status(500).json({ error: "Error retrieving user bot stats" });
+    }
+});
+
+// 7. DELETE /api/bot/users/:discord_id
+app.delete('/api/bot/users/:discord_id', authenticateBot, async (req: Request, res: Response) => {
+    try {
+        const discordId = String(req.params.discord_id);
+        const [uRows]: any = await pool.execute('SELECT id, username FROM users WHERE discord_id = ? LIMIT 1', [discordId]);
+        if (!uRows || uRows.length === 0) {
+            return res.status(404).json({ error: "User not found or not linked" });
+        }
+
+        await pool.execute('UPDATE users SET discord_id = NULL, discord_username = NULL WHERE id = ?', [uRows[0].id]);
+        res.json({ success: true, message: `Discord unlinked for user ${uRows[0].username}` });
+    } catch (e) {
+        console.error("Error in DELETE /api/bot/users/:discord_id:", e);
+        res.status(500).json({ error: "Error unlinking discord user" });
+    }
+});
+
+// 8. GET /api/stats/wrapped (para la web de Aura)
+app.get('/api/stats/wrapped', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const range = String(req.query.range || req.query.period || 'month').toLowerCase();
+        const where =
+            (range === 'year') ? 'YEAR(created_at) = YEAR(NOW())' :
+            (range === 'all') ? '1=1' :
+            'created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+
+        const [totalsRows]: any = await pool.execute(
+            `SELECT COALESCE(SUM(ms),0) AS totalMs, COUNT(DISTINCT track_id) AS distinctTracks, COUNT(*) AS pings
+             FROM listen_pings WHERE user_id = ? AND ${where}`,
+            [req.user.userId]
+        );
+        const [topTracks]: any = await pool.execute(
+            `SELECT track_id AS trackId, title, artist, album, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${where}
+             GROUP BY track_id, title, artist, album ORDER BY totalMs DESC LIMIT 5`,
+            [req.user.userId]
+        );
+        const [topArtists]: any = await pool.execute(
+            `SELECT artist, SUM(ms) AS totalMs, COUNT(*) AS plays
+             FROM listen_pings WHERE user_id = ? AND ${where}
+             GROUP BY artist ORDER BY totalMs DESC LIMIT 5`,
+            [req.user.userId]
+        );
+
+        res.json({
+            range,
+            totalMinutes: Math.round((totalsRows[0]?.totalMs || 0) / 60000),
+            distinctTracks: totalsRows[0]?.distinctTracks || 0,
+            topTracks,
+            topArtists
+        });
+    } catch (err) {
+        console.error('stats/wrapped error:', err);
+        res.status(500).json({ error: 'No se pudo calcular el resumen' });
     }
 });
 
