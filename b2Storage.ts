@@ -195,6 +195,23 @@ export const downloadB2FileToDisk = async (key: string, destinationPath: string)
 /**
  * Comprueba si un archivo existe en B2
  */
+export const getB2ObjectMetadata = async (key: string): Promise<{ size: number; contentType?: string } | null> => {
+    if (!isB2Configured()) return null;
+    const client = getB2Client();
+    try {
+        const res = await client.send(new HeadObjectCommand({
+            Bucket: getBucketName(),
+            Key: key
+        }));
+        return {
+            size: res.ContentLength || 0,
+            contentType: res.ContentType
+        };
+    } catch {
+        return null;
+    }
+};
+
 export const checkB2FileExists = async (key: string): Promise<boolean> => {
     if (!isB2Configured()) return false;
     const client = getB2Client();

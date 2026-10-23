@@ -28,7 +28,7 @@ import axios from "axios";
 
 import config from './config.json' assert { type: 'json' };
 
-import { isB2Configured, getMissingB2EnvVars, uploadToB2, getB2ObjectStream, deleteFromB2, checkB2FileExists, downloadB2FileToDisk, listB2Files } from './b2Storage.js';
+import { isB2Configured, getMissingB2EnvVars, uploadToB2, getB2ObjectStream, deleteFromB2, checkB2FileExists, downloadB2FileToDisk, listB2Files, getB2ObjectMetadata } from './b2Storage.js';
 import { startDailyCacheScheduler, cacheTop100Tracks } from './cacheService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +62,13 @@ const syncFileToB2 = async (filename: string, localFilePath: string, mimetype?: 
 const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
 
 const app = express();
+app.set('trust proxy', true);
+
+const getRequestBaseUrl = (req: Request): string => {
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : (req.get('host')?.includes('localhost') ? 'http' : 'https'));
+    const host = req.get('host') || 'aura.basildo.me';
+    return `${proto}://${host}`;
+};
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -260,61 +267,93 @@ const isServiceApiKey = (key: string | undefined | null): boolean => {
     return false;
 };
 
-// Auto-extrae duration y genre para pistas existentes que tengan duration NULL
+// Auto-extrae duration y genre para TODAS las pistas de la biblioteca
 const backfillTrackMetadata = async () => {
     try {
-        const [tracks]: any = await pool.execute(
-            'SELECT id, file_path, format FROM tracks WHERE duration IS NULL OR duration = 0 LIMIT 150'
-        );
-        if (!tracks || tracks.length === 0) return;
-
         const mm: any = await import('music-metadata');
-        console.log(`[Metadata Backfill] Analizando ${tracks.length} pistas con duración pendiente...`);
+        console.log('[Metadata Backfill] Iniciando escaneo completo de biblioteca (duration y genre)...');
 
-        for (const track of tracks) {
-            try {
-                let duration: number | null = null;
-                let genre: string | null = null;
+        let totalUpdated = 0;
+        let hasMore = true;
 
-                const diskPath = resolveDiskPath(track.file_path);
-                if (diskPath && fs.existsSync(diskPath)) {
-                    const meta = await mm.parseFile(diskPath, { skipCovers: true });
-                    if (meta?.format?.duration) {
-                        duration = Math.round(meta.format.duration * 100) / 100;
-                    }
-                    if (meta?.common?.genre && meta.common.genre.length > 0) {
-                        genre = String(meta.common.genre[0]).slice(0, 255);
-                    }
-                } else if (isB2Configured()) {
-                    const audioFilename = path.basename(String(track.file_path).split('?')[0]);
-                    if (audioFilename && audioFilename !== '.' && audioFilename !== '..') {
-                        const b2Obj = await getB2ObjectStream(audioFilename);
-                        if (b2Obj?.stream) {
-                            const ext = path.extname(audioFilename).toLowerCase();
-                            const mimeType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
-                            const meta = await mm.parseStream(b2Obj.stream, { mimeType }, { skipCovers: true });
-                            if (meta?.format?.duration) {
-                                duration = Math.round(meta.format.duration * 100) / 100;
+        while (hasMore) {
+            // Buscar pistas que no tengan duración o no tengan género
+            const [tracks]: any = await pool.execute(
+                "SELECT id, file_path, format, duration, genre FROM tracks WHERE (duration IS NULL OR duration = 0 OR genre IS NULL OR genre = '') AND (duration IS NULL OR duration != -1) LIMIT 100"
+            );
+
+            if (!tracks || tracks.length === 0) {
+                hasMore = false;
+                break;
+            }
+
+            console.log(`[Metadata Backfill] Procesando bloque de ${tracks.length} canciones...`);
+
+            for (const track of tracks) {
+                try {
+                    let duration: number | null = track.duration && Number(track.duration) > 0 ? Number(track.duration) : null;
+                    let genre: string | null = track.genre ? String(track.genre).trim() : null;
+
+                    const diskPath = resolveDiskPath(track.file_path);
+                    if (diskPath && fs.existsSync(diskPath)) {
+                        const meta = await mm.parseFile(diskPath, { skipCovers: true });
+                        if (!duration && meta?.format?.duration) {
+                            duration = Math.round(meta.format.duration * 100) / 100;
+                        }
+                        if (!genre) {
+                            const raw = meta?.common?.genre;
+                            if (Array.isArray(raw) && raw.length > 0) {
+                                genre = raw.filter(Boolean).join(', ').slice(0, 255);
+                            } else if (typeof raw === 'string' && raw.trim()) {
+                                genre = raw.trim().slice(0, 255);
                             }
-                            if (meta?.common?.genre && meta.common.genre.length > 0) {
-                                genre = String(meta.common.genre[0]).slice(0, 255);
+                        }
+                    } else if (isB2Configured()) {
+                        const audioFilename = path.basename(String(track.file_path).split('?')[0]);
+                        if (audioFilename && audioFilename !== '.' && audioFilename !== '..') {
+                            const b2Obj = await getB2ObjectStream(audioFilename);
+                            if (b2Obj?.stream) {
+                                const ext = path.extname(audioFilename).toLowerCase();
+                                const mimeType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
+                                const meta = await mm.parseStream(b2Obj.stream, { mimeType }, { skipCovers: true });
+                                if (!duration && meta?.format?.duration) {
+                                    duration = Math.round(meta.format.duration * 100) / 100;
+                                }
+                                if (!genre) {
+                                    const raw = meta?.common?.genre;
+                                    if (Array.isArray(raw) && raw.length > 0) {
+                                        genre = raw.filter(Boolean).join(', ').slice(0, 255);
+                                    } else if (typeof raw === 'string' && raw.trim()) {
+                                        genre = raw.trim().slice(0, 255);
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                if (duration) {
-                    if (genre) {
-                        await pool.execute('UPDATE tracks SET duration = ?, genre = COALESCE(genre, ?) WHERE id = ?', [duration, genre, track.id]);
+                    if (duration || genre) {
+                        await pool.execute(
+                            'UPDATE tracks SET duration = COALESCE(?, duration), genre = COALESCE(?, genre) WHERE id = ?',
+                            [duration, genre, track.id]
+                        );
+                        totalUpdated++;
                     } else {
-                        await pool.execute('UPDATE tracks SET duration = ? WHERE id = ?', [duration, track.id]);
+                        // Marcar temporalmente con -1 para no bloquear el bucle infinito si el archivo es ilegible
+                        await pool.execute('UPDATE tracks SET duration = -1 WHERE id = ?', [track.id]);
                     }
+                } catch {
+                    await pool.execute('UPDATE tracks SET duration = -1 WHERE id = ?', [track.id]).catch(() => {});
                 }
-            } catch {}
+            }
+
+            await new Promise(r => setTimeout(r, 150));
         }
-        console.log(`[Metadata Backfill] Finalizada comprobación de metadatos.`);
+
+        // Restaurar pistas que no pudieron leerse
+        await pool.execute('UPDATE tracks SET duration = NULL WHERE duration = -1').catch(() => {});
+        console.log(`[Metadata Backfill] Escaneo completado. Total de pistas actualizadas: ${totalUpdated}.`);
     } catch (err) {
-        console.warn('[Metadata Backfill] Aviso durante el análisis:', err);
+        console.warn('[Metadata Backfill] Error durante el proceso:', err);
     }
 };
 
@@ -1004,7 +1043,7 @@ app.get('/api/tracks', async (req: any, res: Response) => {
 
         const [t]: any = await pool.execute(query, params);
 
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
         const enriched = t.map((item: any) => ({
             ...item,
             duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
@@ -3590,7 +3629,7 @@ app.get('/api/tracks/random', async (req: any, res: Response) => {
         query += ` ORDER BY RAND() LIMIT ${limit}`;
 
         const [rows]: any = await pool.execute(query, params);
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
         const enriched = rows.map((item: any) => ({
             ...item,
             duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
@@ -3632,7 +3671,7 @@ app.get('/api/tracks/:id', async (req: any, res: Response) => {
         }
 
         const item = rows[0];
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
         res.json({
             ...item,
             duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
@@ -3699,7 +3738,7 @@ app.get('/api/tracks/:id/similar', async (req: any, res: Response) => {
         scored.sort((a, b) => b.score - a.score);
         const top = scored.slice(0, limit).map(s => s.track);
 
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
         const enriched = top.map((item: any) => ({
             ...item,
             duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
@@ -3717,7 +3756,7 @@ app.get('/api/tracks/:id/similar', async (req: any, res: Response) => {
     }
 });
 
-// GET /api/tracks/:id/stream (con soporte de Range y parámetro ?t=<segundos> para seek en servidor)
+// GET /api/tracks/:id/stream (soporte estricto 206 Partial Content para Range y ?t=<segundos>)
 app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
     try {
         const [rows]: any = await pool.execute(
@@ -3733,12 +3772,25 @@ app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
         const ext = path.extname(requestedFile).toLowerCase();
         const contentType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
 
-        const seekSec = req.query.t ? parseFloat(String(req.query.t)) : null;
+        const seekSec = req.query.t !== undefined && req.query.t !== null ? parseFloat(String(req.query.t)) : null;
+        let trackDuration = track.duration && Number(track.duration) > 0 ? Number(track.duration) : 0;
 
         const diskPath = resolveDiskPath(track.file_path);
         if (diskPath && fs.existsSync(diskPath)) {
             const stat = fs.statSync(diskPath);
             const totalSize = stat.size;
+
+            // Si la duración no está en BD, extraerla al vuelo para responder al seek con exactitud
+            if (!trackDuration || trackDuration <= 0) {
+                try {
+                    const mm: any = await import('music-metadata');
+                    const meta = await mm.parseFile(diskPath, { skipCovers: true });
+                    if (meta?.format?.duration) {
+                        trackDuration = Math.round(meta.format.duration * 100) / 100;
+                        pool.execute('UPDATE tracks SET duration = ? WHERE id = ?', [trackDuration, req.params.id]).catch(() => {});
+                    }
+                } catch {}
+            }
 
             let start = 0;
             let end = totalSize - 1;
@@ -3750,8 +3802,9 @@ app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
                 start = parseInt(parts[0], 10);
                 end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
                 isPartial = true;
-            } else if (seekSec && seekSec > 0 && track.duration && track.duration > 0) {
-                const ratio = Math.min(0.99, Math.max(0, seekSec / track.duration));
+            } else if (seekSec !== null && !isNaN(seekSec) && seekSec > 0) {
+                const effectiveDur = trackDuration > 0 ? trackDuration : 210;
+                const ratio = Math.min(0.99, Math.max(0, seekSec / effectiveDur));
                 start = Math.floor(ratio * totalSize);
                 end = totalSize - 1;
                 isPartial = true;
@@ -3776,9 +3829,16 @@ app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
 
         if (isB2Configured()) {
             let b2Range = req.headers.range;
-            if (!b2Range && seekSec && seekSec > 0 && track.duration && track.duration > 0) {
-                b2Range = 'bytes=0-';
+            if (!b2Range && seekSec !== null && !isNaN(seekSec) && seekSec > 0) {
+                const meta = await getB2ObjectMetadata(requestedFile);
+                if (meta && meta.size > 0) {
+                    const effectiveDur = trackDuration > 0 ? trackDuration : 210;
+                    const ratio = Math.min(0.99, Math.max(0, seekSec / effectiveDur));
+                    const startByte = Math.floor(ratio * meta.size);
+                    b2Range = `bytes=${startByte}-${meta.size - 1}`;
+                }
             }
+
             const b2Obj = await getB2ObjectStream(requestedFile, b2Range);
             if (b2Obj) {
                 res.status(b2Obj.statusCode);
@@ -3838,7 +3898,7 @@ app.get('/api/albums', async (req: Request, res: Response) => {
             }
         }
 
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
         const albums = Array.from(albumMap.values()).map(alb => ({
             id: alb.id,
             title: alb.title,
@@ -3879,7 +3939,7 @@ app.get('/api/albums/:id', async (req: Request, res: Response) => {
         const mainArtist = matchingTracks[0].artist;
         const albumCover = matchingTracks.find(t => t.cover_path)?.cover_path || matchingTracks[0].cover_path;
         const stableId = crypto.createHash('md5').update(albumTitle.toLowerCase()).digest('hex').substring(0, 16);
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = getRequestBaseUrl(req);
 
         const tracks = matchingTracks.map(item => ({
             ...item,
@@ -3969,6 +4029,12 @@ app.post('/api/admin/cache-top-tracks', authenticateToken, async (req: any, res:
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
+});
+
+// Endpoint para forzar el escaneo y rellenado de metadatos (duration, genre) de todas las canciones
+app.post('/api/admin/backfill-metadata', authenticateToken, async (req: any, res: Response) => {
+    backfillTrackMetadata().catch(() => {});
+    res.json({ success: true, message: 'Escaneo de metadatos (duration y genre) iniciado en segundo plano.' });
 });
 
 // Endpoint administrativo para verificar el estado de Backblaze B2
