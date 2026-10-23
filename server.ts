@@ -3802,37 +3802,55 @@ app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
 app.get('/api/albums', async (req: Request, res: Response) => {
     try {
         const [rows]: any = await pool.execute(`
-            SELECT 
-                t.album,
-                t.artist,
-                t.cover_path,
-                COUNT(*) as track_count,
-                MIN(t.track_number) as min_track,
-                MAX(t.genre) as genre
-            FROM tracks t
-            WHERE t.status = 'approved' AND t.album IS NOT NULL AND TRIM(t.album) != ''
-            GROUP BY t.album, t.artist
-            ORDER BY t.album ASC
+            SELECT id, title, artist, album, cover_path, track_number
+            FROM tracks
+            WHERE status = 'approved' AND album IS NOT NULL AND TRIM(album) != ''
+            ORDER BY album ASC, track_number ASC, title ASC
         `);
 
+        const albumMap = new Map<string, {
+            id: string;
+            title: string;
+            artist: string;
+            cover_path: string | null;
+            track_count: number;
+        }>();
+
+        for (const row of (rows as any[])) {
+            const alb = String(row.album).trim();
+            if (!alb) continue;
+            const stableId = crypto.createHash('md5').update(alb.toLowerCase()).digest('hex').substring(0, 16);
+
+            if (!albumMap.has(alb)) {
+                albumMap.set(alb, {
+                    id: stableId,
+                    title: alb,
+                    artist: row.artist || 'Artista Desconocido',
+                    cover_path: row.cover_path || null,
+                    track_count: 1
+                });
+            } else {
+                const item = albumMap.get(alb)!;
+                item.track_count++;
+                if ((!item.cover_path || item.cover_path.includes('default')) && row.cover_path) {
+                    item.cover_path = row.cover_path;
+                }
+            }
+        }
+
         const baseUrl = `${req.protocol}://${req.get('host')}`;
-        const albums = (rows as any[]).map(row => {
-            const albumTitle = String(row.album).trim();
-            const stableId = crypto.createHash('md5').update(albumTitle.toLowerCase()).digest('hex').substring(0, 16);
-            return {
-                id: stableId,
-                title: albumTitle,
-                artist: row.artist,
-                cover_url: row.cover_path ? `${baseUrl}${row.cover_path}` : null,
-                track_count: Number(row.track_count),
-                genre: row.genre || null
-            };
-        });
+        const albums = Array.from(albumMap.values()).map(alb => ({
+            id: alb.id,
+            title: alb.title,
+            artist: alb.artist,
+            cover_url: alb.cover_path ? `${baseUrl}${alb.cover_path}` : null,
+            track_count: alb.track_count
+        }));
 
         res.json(albums);
-    } catch (e) {
+    } catch (e: any) {
         console.error("Error in GET /api/albums:", e);
-        res.status(500).json({ error: "Error loading albums" });
+        res.status(500).json({ error: "Error loading albums", details: e?.message });
     }
 });
 
