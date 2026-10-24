@@ -2525,7 +2525,17 @@ audioObj.seek(0);
     setIsCreatePlaylistOpen(true);
   };
 
+  const isPlaylistOwner = (playlist: any) => {
+    if (!playlist) return false;
+    const myId = String(user?.userId ?? user?.id ?? '');
+    return !playlist.owner_id || String(playlist.owner_id) === myId;
+  };
+
   const handleOpenEditPlaylist = (playlist: any) => {
+    if (!isPlaylistOwner(playlist)) {
+      alert("No puedes editar la playlist de otro usuario.");
+      return;
+    }
     setEditingPlaylist(playlist);
     setNewPlaylistName(playlist.name || "");
     setNewPlaylistDescription(playlist.description || "");
@@ -2598,6 +2608,11 @@ audioObj.seek(0);
   const handleCreatePlaylist = handleSavePlaylistModal;
 
   const handleDeletePlaylist = async (playlistId: string | number) => {
+    const pl = playlists.find(p => String(p.id) === String(playlistId));
+    if (pl && !isPlaylistOwner(pl)) {
+      alert("No puedes eliminar la playlist de otro usuario.");
+      return;
+    }
     if (!confirm("¿Eliminar esta playlist?")) return;
     const activeToken = token || localStorage.getItem('aura_token');
     await fetch(`${API_BASE}/api/playlists/${playlistId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
@@ -2607,6 +2622,11 @@ audioObj.seek(0);
   };
 
   const handleRemoveFromPlaylist = async (songId: string) => {
+    const currentPl = playlists.find(p => String(p.id) === String(activePlaylistId));
+    if (currentPl && !isPlaylistOwner(currentPl)) {
+      alert("No tienes permiso para modificar esta playlist.");
+      return;
+    }
     const activeToken = token || localStorage.getItem('aura_token');
     await fetch(`${API_BASE}/api/playlists/${activePlaylistId}/tracks/${songId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${activeToken}` } });
     loadContent();
@@ -3968,30 +3988,34 @@ transition={{
                       </div>
                     </button>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMobileMenuOpen(false);
-                        handleOpenEditPlaylist(p);
-                      }}
-                      className="p-2 rounded-md text-white/40 active:text-brand-primary transition-colors shrink-0"
-                      aria-label={`Editar playlist ${p.name}`}
-                      title="Editar playlist"
-                    >
-                      <Edit2 size={12} />
-                    </button>
+                    {isPlaylistOwner(p) && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsMobileMenuOpen(false);
+                            handleOpenEditPlaylist(p);
+                          }}
+                          className="p-2 rounded-md text-white/40 active:text-brand-primary transition-colors shrink-0"
+                          aria-label={`Editar playlist ${p.name}`}
+                          title="Editar playlist"
+                        >
+                          <Edit2 size={12} />
+                        </button>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeletePlaylist(p.id);
-                      }}
-                      className="mr-1.5 p-2 rounded-md text-red-500/50 active:text-red-500 active:bg-red-500/10 transition-colors shrink-0"
-                      aria-label={`Delete playlist ${p.name}`}
-                      title="Eliminar playlist"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePlaylist(p.id);
+                          }}
+                          className="mr-1.5 p-2 rounded-md text-red-500/50 active:text-red-500 active:bg-red-500/10 transition-colors shrink-0"
+                          aria-label={`Delete playlist ${p.name}`}
+                          title="Eliminar playlist"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))
               )}
@@ -4353,8 +4377,12 @@ transition={{
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2">
-                                  <button type="button" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }}><Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" /></button>
-                                  <button type="button" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }}><Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" /></button>
+                                  {isPlaylistOwner(p) && (
+                                    <>
+                                      <button type="button" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }}><Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" /></button>
+                                      <button type="button" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }}><Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" /></button>
+                                    </>
+                                  )}
                                 </div>
                             </li>
                         ))}
@@ -4636,9 +4664,9 @@ transition={{
 
                           <div className="z-20 flex flex-col md:flex-row items-center md:items-end gap-6">
                             <div 
-                              onClick={() => handleOpenEditPlaylist(currentPlaylist)} 
-                              className="relative group/cover w-32 h-32 md:w-44 md:h-44 rounded-2xl md:rounded-3xl overflow-hidden shrink-0 shadow-2xl border border-white/10 bg-white/5 cursor-pointer"
-                              title="Haz clic para cambiar la portada o editar la playlist"
+                              onClick={isPlaylistOwner(currentPlaylist) ? () => handleOpenEditPlaylist(currentPlaylist) : undefined} 
+                              className={`relative group/cover w-32 h-32 md:w-44 md:h-44 rounded-2xl md:rounded-3xl overflow-hidden shrink-0 shadow-2xl border border-white/10 bg-white/5 ${isPlaylistOwner(currentPlaylist) ? 'cursor-pointer' : ''}`}
+                              title={isPlaylistOwner(currentPlaylist) ? "Haz clic para cambiar la portada o editar la playlist" : currentPlaylist.name}
                             >
                               {currentPlaylist.cover_path || songs[0]?.coverUrl ? (
                                 <img 
@@ -4651,10 +4679,12 @@ transition={{
                                   <Music2 size={48} />
                                 </div>
                               )}
-                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/cover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 text-white">
-                                <Edit2 size={20} className="text-brand-primary" />
-                                <span className="text-[10px] font-bold uppercase tracking-wider">Cambiar foto</span>
-                              </div>
+                              {isPlaylistOwner(currentPlaylist) && (
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/cover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 text-white">
+                                  <Edit2 size={20} className="text-brand-primary" />
+                                  <span className="text-[10px] font-bold uppercase tracking-wider">Cambiar foto</span>
+                                </div>
+                              )}
                             </div>
 
                             <div className="flex-1 min-w-0 text-center md:text-left">
@@ -4663,27 +4693,29 @@ transition={{
                                 <h1 className="text-2xl md:text-5xl font-serif italic text-white mb-2 leading-tight truncate">
                                   {currentPlaylist.name}
                                 </h1>
-                                <button 
-                                  onClick={() => handleOpenEditPlaylist(currentPlaylist)} 
-                                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer"
-                                  title="Editar nombre, descripción y portada"
-                                >
-                                  <Edit2 size={16} />
-                                </button>
+                                {isPlaylistOwner(currentPlaylist) && (
+                                  <button 
+                                    onClick={() => handleOpenEditPlaylist(currentPlaylist)} 
+                                    className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer"
+                                    title="Editar nombre, descripción y portada"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                )}
                               </div>
                               
                               {currentPlaylist.description ? (
                                 <p className="text-white/70 text-xs md:text-sm line-clamp-2 max-w-2xl font-sans mb-4">
                                   {currentPlaylist.description}
                                 </p>
-                              ) : (
+                              ) : isPlaylistOwner(currentPlaylist) ? (
                                 <p 
                                   onClick={() => handleOpenEditPlaylist(currentPlaylist)}
                                   className="text-white/30 hover:text-white/60 text-xs italic cursor-pointer mb-4 transition-colors"
                                 >
                                   Añadir una descripción...
                                 </p>
-                              )}
+                              ) : null}
 
                               <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
                                 <button 
@@ -4776,13 +4808,15 @@ transition={{
                                   );
                                 })()}
 
-                                <button
-                                  onClick={() => handleOpenEditPlaylist(currentPlaylist)}
-                                  className="px-4 py-2 rounded-full bg-white/5 text-white/70 hover:text-white font-bold text-[10px] uppercase border border-white/10 hover:bg-white/15 transition-all cursor-pointer flex items-center gap-1.5"
-                                >
-                                  <Edit2 size={12} />
-                                  <span>Editar</span>
-                                </button>
+                                {isPlaylistOwner(currentPlaylist) && (
+                                  <button
+                                    onClick={() => handleOpenEditPlaylist(currentPlaylist)}
+                                    className="px-4 py-2 rounded-full bg-white/5 text-white/70 hover:text-white font-bold text-[10px] uppercase border border-white/10 hover:bg-white/15 transition-all cursor-pointer flex items-center gap-1.5"
+                                  >
+                                    <Edit2 size={12} />
+                                    <span>Editar</span>
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>

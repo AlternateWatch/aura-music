@@ -2239,9 +2239,11 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
 
 app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => {
     try {
-        let query = 'SELECT * FROM playlists WHERE owner_id = ?';
+        // Por defecto cada usuario (incluso los administradores) solo ve sus propias playlists en su biblioteca personal.
+        // Solo el bot de servicio o una petición administrativa explícita (?all=true) pueden consultar todas las playlists.
+        let query = 'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.owner_id = ? ORDER BY p.name ASC';
         let params: any[] = [req.user.userId];
-        if (req.user.isBot || req.user.role === 'admin') {
+        if (req.user.isBot || (req.user.role === 'admin' && req.query.all === 'true')) {
             query = 'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id ORDER BY p.name ASC';
             params = [];
         }
