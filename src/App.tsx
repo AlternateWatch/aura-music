@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore, FormEvent, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useSyncExternalStore, FormEvent, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Background } from "./components/Background";
 import { PlayerBar } from "./components/PlayerBar";
@@ -111,6 +111,20 @@ const parseArtists = (artistStr?: string | null): string[] => {
 const isVideoUrl = (url?: string | null) => {
   if (!url) return false;
   return /\.(mp4|webm|mov)($|\?)/i.test(url);
+};
+
+
+const getViewKey = (
+  album: string | null,
+  artist: string | null,
+  playlistId: string,
+  section: string,
+  search: string
+) => {
+  if (search.trim()) return 'search:' + search.trim();
+  if (album) return 'album:' + album;
+  if (artist) return 'artist:' + artist;
+  return 'lib:' + playlistId + ':' + section;
 };
 
 export default function App() {
@@ -584,45 +598,73 @@ export default function App() {
   });
 
   const navigationHistoryRef = useRef<
-  Array<{
-    playlistId: string;
-    albumName: string | null;
-    artistName: string | null;
-  }>
->([]);
+    Array<{
+      playlistId: string;
+      albumName: string | null;
+      artistName: string | null;
+      librarySection: 'songs' | 'albums' | 'artists';
+    }>
+  >([]);
 
-const previousNavigationRef = useRef({
-  playlistId: activePlaylistId,
-  albumName: selectedAlbumName,
-  artistName: selectedArtistName,
-});
-
-useEffect(() => {
-  const previous = previousNavigationRef.current;
-
-  const changed =
-    previous.playlistId !== activePlaylistId ||
-    previous.albumName !== selectedAlbumName ||
-    previous.artistName !== selectedArtistName;
-
-  if (!changed) return;
-
-  if (isGoingBackRef.current) {
-    isGoingBackRef.current = false;
-  } else {
-    navigationHistoryRef.current.push(previous);
-  }
-
-  previousNavigationRef.current = {
+  const previousNavigationRef = useRef({
     playlistId: activePlaylistId,
     albumName: selectedAlbumName,
     artistName: selectedArtistName,
-  };
-}, [
-  activePlaylistId,
-  selectedAlbumName,
-  selectedArtistName,
-]);
+    librarySection: librarySection,
+  });
+
+  useEffect(() => {
+    const previous = previousNavigationRef.current;
+
+    const changed =
+      previous.playlistId !== activePlaylistId ||
+      previous.albumName !== selectedAlbumName ||
+      previous.artistName !== selectedArtistName ||
+      previous.librarySection !== librarySection;
+
+    if (!changed) return;
+
+    if (isGoingBackRef.current) {
+      isGoingBackRef.current = false;
+    } else {
+      navigationHistoryRef.current.push(previous);
+    }
+
+    previousNavigationRef.current = {
+      playlistId: activePlaylistId,
+      albumName: selectedAlbumName,
+      artistName: selectedArtistName,
+      librarySection: librarySection,
+    };
+  }, [
+    activePlaylistId,
+    selectedAlbumName,
+    selectedArtistName,
+    librarySection,
+  ]);
+
+  const handleNavigateBack = useCallback(() => {
+    const previous = navigationHistoryRef.current.pop();
+
+    if (previous) {
+      isGoingBackRef.current = true;
+      setActivePlaylistId(previous.playlistId);
+      setSelectedAlbumName(previous.albumName);
+      setSelectedArtistName(previous.artistName);
+      if (previous.librarySection) {
+        setLibrarySection(previous.librarySection);
+      }
+      return;
+    }
+
+    if (selectedAlbumName) {
+      setSelectedAlbumName(null);
+    } else if (selectedArtistName) {
+      setSelectedArtistName(null);
+    } else if (activePlaylistId !== 'all') {
+      setActivePlaylistId('all');
+    }
+  }, [selectedAlbumName, selectedArtistName, activePlaylistId]);
   const [dynamicColor, setDynamicColor] = useState<string>('#6366f1');
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -882,17 +924,15 @@ useEffect(() => {
     }
 
     // 2. Si tenemos navegación anterior, volver a ella
-    const previous = navigationHistoryRef.current.pop();
+    if (navigationHistoryRef.current.length > 0) {
+      handleNavigateBack();
+      return;
+    }
 
-    if (previous) {
-  isGoingBackRef.current = true;
-
-  setActivePlaylistId(previous.playlistId);
-  setSelectedAlbumName(previous.albumName);
-  setSelectedArtistName(previous.artistName);
-
-  return;
-}
+    if (selectedAlbumName || selectedArtistName || activePlaylistId !== 'all') {
+      handleNavigateBack();
+      return;
+    }
 
     // 3. Si no hay navegación interna, comportamiento normal de Android
     CapacitorApp.exitApp();
@@ -2901,15 +2941,113 @@ audioObj.seek(0);
     return items;
   }, [flattenedSongs, songs, allArtists, allAlbums, artistFuse, albumFuse, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
 
-  // RENDERIZADO PROGRESIVO DE TARJETAS (evita saturar el DOM y la red con cientos de imágenes a la vez)
+  // RENDERIZADO PROGRESIVO DE TARJETAS Y MEMORIA DE SCROLL
   const [renderedCount, setRenderedCount] = useState(48);
-
+  const renderedCountRef = useRef(renderedCount);
   useEffect(() => {
-    setRenderedCount(48);
-  }, [activePlaylistId, searchQuery, librarySection, selectedArtistName, selectedAlbumName]);
+    renderedCountRef.current = renderedCount;
+  }, [renderedCount]);
+
+  const scrollPositionsRef = useRef<Map<string, { scrollTop: number; renderedCount: number }>>(new Map());
+  const isNavigatingRef = useRef(false);
+
+  const currentViewKey = useMemo(() => {
+    return getViewKey(selectedAlbumName, selectedArtistName, activePlaylistId, librarySection, searchQuery);
+  }, [selectedAlbumName, selectedArtistName, activePlaylistId, librarySection, searchQuery]);
+
+  const currentViewKeyRef = useRef(currentViewKey);
+  const previousViewKeyRef = useRef(currentViewKey);
+
+  // Antes del desmontaje del DOM durante el render, si la clave de vista cambió,
+  // guardamos la posición exacta de scroll de la vista previa y activamos
+  // isNavigatingRef para evitar que el colapso del DOM sobreescriba la posición con 0.
+  if (currentViewKey !== previousViewKeyRef.current && !isNavigatingRef.current) {
+    isNavigatingRef.current = true;
+    if (mainRef.current) {
+      scrollPositionsRef.current.set(previousViewKeyRef.current, {
+        scrollTop: mainRef.current.scrollTop,
+        renderedCount: renderedCountRef.current,
+      });
+    }
+  }
+
+  // Restauración de scroll y renderedCount cuando cambia la vista activa
+  useLayoutEffect(() => {
+    const prevKey = previousViewKeyRef.current;
+    const newKey = currentViewKey;
+
+    previousViewKeyRef.current = newKey;
+    currentViewKeyRef.current = newKey;
+
+    if (prevKey === newKey && !isNavigatingRef.current) return;
+
+    isNavigatingRef.current = true;
+
+    const saved = scrollPositionsRef.current.get(newKey);
+    const targetScroll = saved ? saved.scrollTop : 0;
+    const targetRendered = saved ? Math.max(48, saved.renderedCount) : 48;
+
+    if (targetRendered !== renderedCountRef.current) {
+      setRenderedCount(targetRendered);
+    }
+
+    const applyScroll = () => {
+      if (mainRef.current) {
+        if (Math.abs(mainRef.current.scrollTop - targetScroll) > 2) {
+          mainRef.current.scrollTop = targetScroll;
+        }
+      }
+    };
+
+    applyScroll();
+
+    let frameId1: number;
+    let frameId2: number;
+    let timerId: ReturnType<typeof setTimeout>;
+
+    frameId1 = requestAnimationFrame(() => {
+      applyScroll();
+      frameId2 = requestAnimationFrame(() => {
+        applyScroll();
+        isNavigatingRef.current = false;
+      });
+    });
+
+    timerId = setTimeout(() => {
+      applyScroll();
+      isNavigatingRef.current = false;
+    }, 120);
+
+    return () => {
+      cancelAnimationFrame(frameId1);
+      cancelAnimationFrame(frameId2);
+      clearTimeout(timerId);
+    };
+  }, [currentViewKey]);
+
+  // Si cambia el ordenamiento (sortBy), resetear la memoria de scroll de la biblioteca
+  useEffect(() => {
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+    }
+    const key = currentViewKeyRef.current;
+    if (key.startsWith('lib:')) {
+      scrollPositionsRef.current.delete(key);
+    }
+  }, [sortBy]);
 
   const handleMainScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
     const target = e.currentTarget;
+
+    // Solo guardamos si el usuario está scrolleando activamente (no en transición)
+    if (!isNavigatingRef.current) {
+      const key = currentViewKeyRef.current;
+      scrollPositionsRef.current.set(key, {
+        scrollTop: target.scrollTop,
+        renderedCount: renderedCountRef.current,
+      });
+    }
+
     if (target.scrollHeight - target.scrollTop - target.clientHeight < 900) {
       setRenderedCount(prev => (prev < displayItems.length ? prev + 36 : prev));
     }
@@ -3510,9 +3648,27 @@ useEffect(() => {
   }`}
 >
             <div className="flex items-center gap-4 md:gap-12 flex-1">
-              <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => { setSelectedAlbumName(null); setSelectedArtistName(null); }}>AURA<span className="text-brand-primary">.</span></span>
+              <span className="text-lg md:text-xl font-bold tracking-tighter uppercase cursor-pointer shrink-0" onClick={() => {
+                if (!showModeration && activePlaylistId === "all" && !selectedAlbumName && !selectedArtistName) {
+                  mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                  setShowModeration(false);
+                  setActivePlaylistId("all");
+                  setSelectedAlbumName(null);
+                  setSelectedArtistName(null);
+                }
+              }}>AURA<span className="text-brand-primary">.</span></span>
               <div className={`hidden lg:flex gap-8 text-[10px] font-bold uppercase`}>
-                <button onClick={() => {setShowModeration(false); setActivePlaylistId("all"); setSelectedAlbumName(null); setSelectedArtistName(null);}} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
+                <button onClick={() => {
+                  if (!showModeration && activePlaylistId === "all" && !selectedAlbumName && !selectedArtistName) {
+                    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                  } else {
+                    setShowModeration(false);
+                    setActivePlaylistId("all");
+                    setSelectedAlbumName(null);
+                    setSelectedArtistName(null);
+                  }
+                }} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
                 {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 transition-colors ${showModeration ? 'text-brand-primary border-b border-brand-primary pb-1' : 'text-white/40 hover:text-white'}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
@@ -4472,7 +4628,7 @@ transition={{
                         <Play size={14} fill="black" /> Reproducir Todo
                       </button>
                       <button 
-                        onClick={() => setSelectedArtistName(null)} 
+                        onClick={handleNavigateBack}
                         className="px-6 py-2.5 rounded-full bg-white/5 border border-white/10 text-white/60 hover:text-white font-bold text-[10px] uppercase tracking-wider hover:bg-white/10 transition-all cursor-pointer"
                       >
                         Volver a Biblioteca
@@ -4583,7 +4739,7 @@ transition={{
                         onPlayNext={() => handlePlayNext(song)}
                         onAddToQueue={() => handleAddToQueue(song)}
                         onEdit={() => setSongToEdit(song)}
-                        onOpenAlbum={(album) => setSelectedAlbumName(album)}
+                        onOpenAlbum={(album) => { setSelectedArtistName(null); setSelectedAlbumName(album); }}
                         onOpenArtist={(artist) => setSelectedArtistName(artist)}
                         onClick={() => handlePlaySong(song)} 
                       />
@@ -4612,7 +4768,7 @@ transition={{
                   }
                 }}
                 onAddAlbumToQueue={handleAddAlbumToQueue}
-                onBack={() => setSelectedAlbumName(null)}
+                onBack={handleNavigateBack}
                 onOpenArtist={(art) => {
                   setSelectedAlbumName(null);
                   setSelectedArtistName(art);
@@ -5063,7 +5219,7 @@ transition={{
                                 </button>
                               );
                             })()}
-                            <button onClick={() => setSelectedAlbumName(null)} className="cursor-pointer text-[10px] font-bold text-brand-primary uppercase tracking-widest">Back</button>
+                            <button onClick={handleNavigateBack} className="cursor-pointer text-[10px] font-bold text-brand-primary uppercase tracking-widest">Back</button>
                           </div>
                         )}
                     </div>
