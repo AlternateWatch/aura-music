@@ -283,10 +283,22 @@ pool.execute(`
     )
 `).catch(err => console.error('[DB] Error creando tabla discord_link_codes:', err));
 
-// Auto-crear columnas description y cover_path si no existen en la tabla playlists
+// Auto-crear tabla playlist_collaborators si no existe
+pool.execute(`
+    CREATE TABLE IF NOT EXISTS playlist_collaborators (
+        playlist_id INT NOT NULL,
+        user_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (playlist_id, user_id),
+        INDEX idx_user_playlists (user_id),
+        INDEX idx_playlist_users (playlist_id)
+    )
+`).catch(err => console.error('[DB] Error creando tabla playlist_collaborators:', err));
+
+// Auto-crear columnas description, cover_path, is_collaborative e invite_code si no existen en la tabla playlists
 pool.execute(`
     SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'playlists' AND COLUMN_NAME IN ('description', 'cover_path')
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'playlists' AND COLUMN_NAME IN ('description', 'cover_path', 'is_collaborative', 'invite_code')
 `).then(async ([rows]: any) => {
     const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
     if (!existingCols.has('description')) {
@@ -296,6 +308,14 @@ pool.execute(`
     if (!existingCols.has('cover_path')) {
         await pool.execute('ALTER TABLE playlists ADD COLUMN cover_path VARCHAR(500) NULL');
         console.log('[DB] Columna cover_path agregada a la tabla playlists.');
+    }
+    if (!existingCols.has('is_collaborative')) {
+        await pool.execute('ALTER TABLE playlists ADD COLUMN is_collaborative TINYINT(1) NOT NULL DEFAULT 0');
+        console.log('[DB] Columna is_collaborative agregada a la tabla playlists.');
+    }
+    if (!existingCols.has('invite_code')) {
+        await pool.execute('ALTER TABLE playlists ADD COLUMN invite_code VARCHAR(32) NULL UNIQUE');
+        console.log('[DB] Columna invite_code agregada a la tabla playlists.');
     }
 }).catch(err => {
     console.error('[DB] Error verificando/agregando columnas a playlists:', err);
@@ -2237,15 +2257,73 @@ app.post('/api/users/custom-bg', authenticateToken, upload.single('custom_bg'), 
 
 
 
+async function getPlaylistAccess(playlistId: any, userId: any, userRole: any, isBot: boolean): Promise<{
+    exists: boolean;
+    isOwner: boolean;
+    isCollaborator: boolean;
+    canView: boolean;
+    canEditTracks: boolean;
+    playlist?: any;
+}> {
+    if (isBot || userRole === 'admin') {
+        const [rows]: any = await pool.execute('SELECT * FROM playlists WHERE id = ? LIMIT 1', [playlistId]);
+        if (!rows || rows.length === 0) return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
+        return { exists: true, isOwner: true, isCollaborator: false, canView: true, canEditTracks: true, playlist: rows[0] };
+    }
+    const [rows]: any = await pool.execute(`
+        SELECT p.*,
+               (p.owner_id = ?) as is_owner,
+               (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id AND user_id = ?) as is_collab
+        FROM playlists p
+        WHERE p.id = ?
+        LIMIT 1
+    `, [userId, userId, playlistId]);
+    if (!rows || rows.length === 0) {
+        return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
+    }
+    const p = rows[0];
+    const isOwner = Boolean(p.is_owner);
+    const isCollaborator = Boolean(p.is_collab && p.is_collaborative);
+    return {
+        exists: true,
+        isOwner,
+        isCollaborator,
+        canView: isOwner || isCollaborator,
+        canEditTracks: isOwner || isCollaborator,
+        playlist: p
+    };
+}
+
 app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => {
     try {
-        // Por defecto cada usuario (incluso los administradores) solo ve sus propias playlists en su biblioteca personal.
-        // Solo el bot de servicio o una petición administrativa explícita (?all=true) pueden consultar todas las playlists.
-        let query = 'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.owner_id = ? ORDER BY p.name ASC';
-        let params: any[] = [req.user.userId];
+        let query = `
+            SELECT p.*, 
+                   u.username as owner_name,
+                   (p.owner_id = ?) as is_owner,
+                   (pc.user_id IS NOT NULL) as is_collaborator,
+                   (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+            FROM playlists p 
+            LEFT JOIN users u ON p.owner_id = u.id 
+            LEFT JOIN playlist_collaborators pc ON pc.playlist_id = p.id AND pc.user_id = ?
+            WHERE p.owner_id = ? OR pc.user_id = ?
+            GROUP BY p.id 
+            ORDER BY p.name ASC
+        `;
+        let params: any[] = [req.user.userId, req.user.userId, req.user.userId, req.user.userId];
         if (req.user.isBot || (req.user.role === 'admin' && req.query.all === 'true')) {
-            query = 'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id ORDER BY p.name ASC';
-            params = [];
+            query = `
+                SELECT p.*, 
+                       u.username as owner_name,
+                       (p.owner_id = ?) as is_owner,
+                       (pc.user_id IS NOT NULL) as is_collaborator,
+                       (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+                FROM playlists p 
+                LEFT JOIN users u ON p.owner_id = u.id 
+                LEFT JOIN playlist_collaborators pc ON pc.playlist_id = p.id AND pc.user_id = ?
+                GROUP BY p.id 
+                ORDER BY p.name ASC
+            `;
+            params = [req.user.userId, req.user.userId];
         }
         const [r] = await pool.execute(query, params);
         res.json(r);
@@ -2258,14 +2336,22 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
 app.get('/api/playlists/:id', authenticateToken, async (req: any, res: Response) => {
     try {
         const [rows]: any = await pool.execute(
-            'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.id = ? LIMIT 1',
-            [req.params.id]
+            `SELECT p.*, 
+                    u.username as owner_name,
+                    (p.owner_id = ?) as is_owner,
+                    (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id AND user_id = ?) as is_collaborator,
+                    (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+             FROM playlists p 
+             LEFT JOIN users u ON p.owner_id = u.id 
+             WHERE p.id = ? 
+             LIMIT 1`,
+            [req.user.userId, req.user.userId, req.params.id]
         );
         if (!rows || rows.length === 0) {
             return res.status(404).json({ error: 'Playlist not found' });
         }
         const pl = rows[0];
-        if (!req.user.isBot && req.user.role !== 'admin' && pl.owner_id !== req.user.userId) {
+        if (!req.user.isBot && req.user.role !== 'admin' && !pl.is_owner && !(pl.is_collaborator && pl.is_collaborative)) {
             return res.status(403).json({ error: 'Forbidden' });
         }
         res.json(pl);
@@ -2274,10 +2360,6 @@ app.get('/api/playlists/:id', authenticateToken, async (req: any, res: Response)
         res.status(500).json({ error: "Error loading playlist" });
     }
 });
-
-
-
-
 
 app.post('/api/playlists', authenticateToken, upload.single('cover'), async (req: any, res: Response) => {
     try {
@@ -2297,12 +2379,15 @@ app.post('/api/playlists', authenticateToken, upload.single('cover'), async (req
             }
         }
 
+        const isCollab = req.body.is_collaborative === 'true' || req.body.is_collaborative === true || req.body.is_collaborative === 1 || req.body.is_collaborative === '1' ? 1 : 0;
+        const inviteCode = isCollab ? crypto.randomBytes(6).toString('hex').toUpperCase() : null;
+
         const [result]: any = await pool.execute(
-            'INSERT INTO playlists (name, description, cover_path, owner_id) VALUES (?, ?, ?, ?)',
-            [name, description, cover_path, req.user.userId]
+            'INSERT INTO playlists (name, description, cover_path, owner_id, is_collaborative, invite_code) VALUES (?, ?, ?, ?, ?, ?)',
+            [name, description, cover_path, req.user.userId, isCollab, inviteCode]
         );
 
-        res.json({ id: result.insertId, name, description, cover_path });
+        res.json({ id: result.insertId, name, description, cover_path, is_collaborative: isCollab, invite_code: inviteCode, is_owner: 1, collaborator_count: 0 });
     } catch (e) {
         console.error("Create playlist error:", e);
         res.status(500).json({ error: "Error creating playlist" });
@@ -2359,15 +2444,123 @@ app.patch('/api/playlists/:id', authenticateToken, upload.single('cover'), async
             cover_path = null;
         }
 
+        let isCollab = current.is_collaborative ? 1 : 0;
+        let inviteCode = current.invite_code;
+
+        if (req.body.is_collaborative !== undefined) {
+            const val = req.body.is_collaborative === 'true' || req.body.is_collaborative === true || req.body.is_collaborative === 1 || req.body.is_collaborative === '1';
+            isCollab = val ? 1 : 0;
+            if (isCollab && !inviteCode) {
+                inviteCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+            }
+        }
+
+        if (req.body.regenerate_invite === 'true' || req.body.regenerate_invite === true) {
+            inviteCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+            isCollab = 1;
+        }
+
         await pool.execute(
-            'UPDATE playlists SET name = ?, description = ?, cover_path = ? WHERE id = ? AND owner_id = ?',
-            [name, description, cover_path, playlistId, req.user.userId]
+            'UPDATE playlists SET name = ?, description = ?, cover_path = ?, is_collaborative = ?, invite_code = ? WHERE id = ? AND owner_id = ?',
+            [name, description, cover_path, isCollab, inviteCode, playlistId, req.user.userId]
         );
 
-        res.json({ id: Number(playlistId), name, description, cover_path });
+        res.json({ id: Number(playlistId), name, description, cover_path, is_collaborative: isCollab, invite_code: inviteCode });
     } catch (e) {
         console.error("Update playlist error:", e);
         res.status(500).json({ error: "Error updating playlist" });
+    }
+});
+
+app.post('/api/playlists/:id/invite-code', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const playlistId = req.params.id;
+        const [rows]: any = await pool.execute('SELECT owner_id FROM playlists WHERE id = ? LIMIT 1', [playlistId]);
+        if (!rows || rows.length === 0) return res.status(404).json({ error: "Playlist no encontrada" });
+        if (rows[0].owner_id !== req.user.userId && req.user.role !== 'admin') {
+            return res.status(403).json({ error: "Solo el creador puede regenerar el enlace" });
+        }
+        const inviteCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+        await pool.execute('UPDATE playlists SET invite_code = ?, is_collaborative = 1 WHERE id = ?', [inviteCode, playlistId]);
+        res.json({ invite_code: inviteCode });
+    } catch (e) {
+        console.error("Regenerate invite error:", e);
+        res.status(500).json({ error: "Error regenerando enlace de invitación" });
+    }
+});
+
+app.post('/api/playlists/join/:code', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const code = String(req.params.code).trim().toUpperCase();
+        if (!code) {
+            return res.status(400).json({ error: "Código de invitación no proporcionado" });
+        }
+        const [rows]: any = await pool.execute(
+            'SELECT p.*, u.username as owner_name FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.invite_code = ? AND p.is_collaborative = 1 LIMIT 1',
+            [code]
+        );
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Playlist colaborativa no encontrada o invitación no válida/expirada" });
+        }
+        const pl = rows[0];
+        if (pl.owner_id === req.user.userId) {
+            return res.json({ success: true, playlistId: pl.id, name: pl.name, message: "Ya eres el dueño de esta playlist" });
+        }
+        await pool.execute(
+            'INSERT IGNORE INTO playlist_collaborators (playlist_id, user_id) VALUES (?, ?)',
+            [pl.id, req.user.userId]
+        );
+        res.json({ success: true, playlistId: pl.id, name: pl.name, message: `¡Te has unido como colaborador a "${pl.name}"!` });
+    } catch (e) {
+        console.error("Join playlist error:", e);
+        res.status(500).json({ error: "Error al unirse a la playlist" });
+    }
+});
+
+app.get('/api/playlists/:id/collaborators', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+        if (!access.exists || !access.canView) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const [collabs]: any = await pool.execute(`
+            SELECT u.id, u.username, pc.created_at
+            FROM playlist_collaborators pc
+            JOIN users u ON pc.user_id = u.id
+            WHERE pc.playlist_id = ?
+            ORDER BY pc.created_at ASC
+        `, [req.params.id]);
+        res.json(collabs);
+    } catch (e) {
+        console.error("Get collaborators error:", e);
+        res.status(500).json({ error: "Error al obtener colaboradores" });
+    }
+});
+
+app.delete('/api/playlists/:id/collaborators/:targetUserId', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const playlistId = req.params.id;
+        const targetUserId = parseInt(req.params.targetUserId, 10);
+        if (isNaN(targetUserId)) return res.status(400).json({ error: "ID de usuario inválido" });
+        const access = await getPlaylistAccess(playlistId, req.user.userId, req.user.role, req.user.isBot);
+        if (!access.exists) return res.status(404).json({ error: "Playlist no encontrada" });
+
+        const isOwner = access.isOwner;
+        const isSelf = targetUserId === req.user.userId;
+
+        if (!isOwner && !isSelf && req.user.role !== 'admin') {
+            return res.status(403).json({ error: "No tienes permiso para realizar esta acción" });
+        }
+
+        await pool.execute(
+            'DELETE FROM playlist_collaborators WHERE playlist_id = ? AND user_id = ?',
+            [playlistId, targetUserId]
+        );
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Delete collaborator error:", e);
+        res.status(500).json({ error: "Error al eliminar colaborador" });
     }
 });
 
@@ -2377,6 +2570,9 @@ app.delete('/api/playlists/:id', authenticateToken, async (req: any, res: Respon
             'SELECT cover_path FROM playlists WHERE id = ? AND owner_id = ?',
             [req.params.id, req.user.userId]
         );
+        if (!rows || rows.length === 0) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
         if (rows?.[0]?.cover_path) {
             const oldPath = resolveDiskPath(rows[0].cover_path);
             if (oldPath && fs.existsSync(oldPath)) {
@@ -2388,6 +2584,8 @@ app.delete('/api/playlists/:id', authenticateToken, async (req: any, res: Respon
             }
         }
 
+        await pool.execute('DELETE FROM playlist_collaborators WHERE playlist_id = ?', [req.params.id]);
+        await pool.execute('DELETE FROM playlist_tracks WHERE playlist_id = ?', [req.params.id]);
         await pool.execute(
             'DELETE FROM playlists WHERE id = ? AND owner_id = ?',
             [req.params.id, req.user.userId]
@@ -2400,248 +2598,106 @@ app.delete('/api/playlists/:id', authenticateToken, async (req: any, res: Respon
     }
 });
 
-
-
-
-
 app.get('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Response) => {
-
     try {
-
-        // Comprobar que la playlist pertenece al usuario (los bots y administradores tienen acceso global)
-        if (!req.user.isBot && req.user.role !== 'admin') {
-            const [playlistRows]: any = await pool.execute(
-                'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-                [req.params.id, req.user.userId]
-            );
-
-            if (playlistRows.length === 0) {
-                return res.status(403).json({ error: "Forbidden" });
-            }
+        const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+        if (!access.exists || !access.canView) {
+            return res.status(403).json({ error: "Forbidden" });
         }
-
-
 
         // Obtener canciones respetando el orden personalizado
-
         const [t] = await pool.execute(`
-
             SELECT 
-
                 t.*,
-
                 (
-
                     SELECT COUNT(*)
-
                     FROM user_likes
-
                     WHERE track_id = t.id
-
                     AND user_id = ?
-
                 ) as is_liked
-
             FROM tracks t
-
             JOIN playlist_tracks pt ON t.id = pt.track_id
-
             WHERE pt.playlist_id = ?
-
             ORDER BY pt.position ASC, pt.track_id ASC
-
         `, [
-
             req.user.userId,
-
             req.params.id
-
         ]);
 
-
-
         res.json(t);
-
-
-
     } catch (e) {
-
         console.error("Get playlist tracks error:", e);
-
         res.status(500).json({ error: "Error loading playlist tracks" });
-
     }
-
 });
 
-
-
-
-
 app.post('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Response) => {
-
     try {
-
-        // Comprobar propiedad de la playlist
-
-        const [playlistRows]: any = await pool.execute(
-
-            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-
-            [req.params.id, req.user.userId]
-
-        );
-
-
-
-        if (playlistRows.length === 0) {
-
+        const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+        if (!access.exists || !access.canEditTracks) {
             return res.status(403).json({ error: "Forbidden" });
-
         }
-
-
 
         // Evitar duplicados
-
         const [existingRows]: any = await pool.execute(
-
             'SELECT track_id FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?',
-
             [req.params.id, req.body.trackId]
-
         );
-
-
 
         if (existingRows.length > 0) {
-
             return res.status(409).json({ error: "Track already in playlist" });
-
         }
 
-
-
         // Poner la canción al final
-
         const [positionRows]: any = await pool.execute(
-
             `SELECT COALESCE(MAX(position), -1) + 1 AS next_position
-
              FROM playlist_tracks
-
              WHERE playlist_id = ?`,
-
             [req.params.id]
-
         );
-
-
 
         const nextPosition = positionRows[0].next_position;
 
-
-
         await pool.execute(
-
             `INSERT INTO playlist_tracks (playlist_id, track_id, position)
-
              VALUES (?, ?, ?)`,
-
             [
-
                 req.params.id,
-
                 req.body.trackId,
-
                 nextPosition
-
             ]
-
         );
 
-
-
         res.send();
-
-
-
     } catch (e) {
-
         console.error("Add track to playlist error:", e);
-
         res.status(500).json({ error: "Error adding track to playlist" });
-
     }
-
 });
-
-
-
-
 
 app.delete('/api/playlists/:id/tracks/:tid', authenticateToken, async (req: any, res: Response) => {
-
     try {
-
-        // Comprobar propiedad de la playlist
-
-        const [playlistRows]: any = await pool.execute(
-
-            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-
-            [req.params.id, req.user.userId]
-
-        );
-
-
-
-        if (playlistRows.length === 0) {
-
+        const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+        if (!access.exists || !access.canEditTracks) {
             return res.status(403).json({ error: "Forbidden" });
-
         }
 
-
-
         await pool.execute(
-
             `DELETE FROM playlist_tracks
-
              WHERE playlist_id = ?
-
              AND track_id = ?`,
-
             [
-
                 req.params.id,
-
                 req.params.tid
-
             ]
-
         );
 
-
-
         res.send();
-
-
-
     } catch (e) {
-
         console.error("Remove track from playlist error:", e);
-
         res.status(500).json({ error: "Error removing track from playlist" });
-
     }
-
 });
-
-
-
-
-
 
 // Reemplazar / sobrescribir todas las canciones de una playlist (ej. por Aura DJ)
 app.put('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Response) => {
@@ -2650,17 +2706,13 @@ app.put('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Re
         return res.status(400).json({ error: "trackIds must be an array" });
     }
 
+    const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+    if (!access.exists || !access.canEditTracks) {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+
     const connection = await pool.getConnection();
     try {
-        const [playlistRows]: any = await connection.execute(
-            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-            [req.params.id, req.user.userId]
-        );
-
-        if (playlistRows.length === 0) {
-            return res.status(403).json({ error: "Forbidden" });
-        }
-
         await connection.beginTransaction();
         await connection.execute('DELETE FROM playlist_tracks WHERE playlist_id = ?', [req.params.id]);
 
@@ -2683,116 +2735,52 @@ app.put('/api/playlists/:id/tracks', authenticateToken, async (req: any, res: Re
 });
 
 app.patch('/api/playlists/:id/tracks/reorder', authenticateToken, async (req: any, res: Response) => {
-
     const { trackIds } = req.body;
 
-
-
     if (!Array.isArray(trackIds)) {
-
         return res.status(400).json({
-
             error: "trackIds must be an array"
-
         });
-
     }
 
-
+    const access = await getPlaylistAccess(req.params.id, req.user.userId, req.user.role, req.user.isBot);
+    if (!access.exists || !access.canEditTracks) {
+        return res.status(403).json({ error: "Forbidden" });
+    }
 
     const connection = await pool.getConnection();
 
-
-
     try {
-
-        // Comprobar propiedad de la playlist
-
-        const [playlistRows]: any = await connection.execute(
-
-            'SELECT id FROM playlists WHERE id = ? AND owner_id = ?',
-
-            [req.params.id, req.user.userId]
-
-        );
-
-
-
-        if (playlistRows.length === 0) {
-            // release() lo hace el finally
-            return res.status(403).json({ error: "Forbidden" });
-
-        }
-
-
-
         await connection.beginTransaction();
 
-
-
         // Actualizar posición de cada canción
-
         for (let i = 0; i < trackIds.length; i++) {
-
             await connection.execute(
-
                 `UPDATE playlist_tracks
-
                  SET position = ?
-
                  WHERE playlist_id = ?
-
                  AND track_id = ?`,
-
                 [
-
                     i,
-
                     req.params.id,
-
                     trackIds[i]
-
                 ]
-
             );
-
         }
 
-
-
         await connection.commit();
-
-
-
         res.send();
-
-
-
     } catch (e) {
-
         await connection.rollback();
-
-
-
         console.error("Reorder playlist error:", e);
-
-
-
         res.status(500).json({
-
             error: "Error reordering playlist"
-
         });
-
-
-
     } finally {
-
         connection.release();
-
     }
-
 });
+
 
 app.post('/api/sessions/create', authenticateToken, async (req: any, res: Response) => {
     try {

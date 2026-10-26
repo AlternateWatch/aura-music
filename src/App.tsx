@@ -31,6 +31,8 @@ Copy,
   CheckCircle2,
   Loader2,
   Shuffle,
+  UserPlus,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FullPlayerOverlay } from "./components/FullPlayerOverlay";
@@ -433,6 +435,14 @@ export default function App() {
   const [playlistCoverPreview, setPlaylistCoverPreview] = useState<string | null>(null);
   const [playlistRemoveCover, setPlaylistRemoveCover] = useState(false);
   const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
+  const [newPlaylistIsCollaborative, setNewPlaylistIsCollaborative] = useState(false);
+  const [collaboratorsList, setCollaboratorsList] = useState<any[]>([]);
+  const [isLoadingCollaborators, setIsLoadingCollaborators] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [isJoinPlaylistModalOpen, setIsJoinPlaylistModalOpen] = useState(false);
+  const [manualJoinCode, setManualJoinCode] = useState("");
+  const [isJoiningPlaylist, setIsJoiningPlaylist] = useState(false);
+  const playlistInviteHandledRef = useRef<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isPersonalizationOpen, setIsPersonalizationOpen] = useState(false);
   const [mobilePlayerStyle, setMobilePlayerStyle] = useState<MobilePlayerStyle>(() => {
@@ -2555,6 +2565,41 @@ audioObj.seek(0);
     }
   };
 
+  const isPlaylistOwner = (playlist: any) => {
+    if (!playlist) return false;
+    if (playlist.is_owner !== undefined) return Boolean(playlist.is_owner);
+    const myId = String(user?.userId ?? user?.id ?? '');
+    return !playlist.owner_id || String(playlist.owner_id) === myId;
+  };
+
+  const isPlaylistCollaborator = (playlist: any) => {
+    if (!playlist) return false;
+    return Boolean(playlist.is_collaborator);
+  };
+
+  const canEditPlaylistContent = (playlist: any) => {
+    if (!playlist) return false;
+    return isPlaylistOwner(playlist) || isPlaylistCollaborator(playlist);
+  };
+
+  const fetchCollaborators = async (playlistId: string | number) => {
+    const activeToken = token || localStorage.getItem('aura_token');
+    setIsLoadingCollaborators(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/playlists/${playlistId}/collaborators`, {
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCollaboratorsList(data);
+      }
+    } catch (err) {
+      console.error("Error fetching collaborators:", err);
+    } finally {
+      setIsLoadingCollaborators(false);
+    }
+  };
+
   const handleOpenCreatePlaylist = () => {
     setEditingPlaylist(null);
     setNewPlaylistName("");
@@ -2562,18 +2607,15 @@ audioObj.seek(0);
     setPlaylistCoverFile(null);
     setPlaylistCoverPreview(null);
     setPlaylistRemoveCover(false);
+    setNewPlaylistIsCollaborative(false);
+    setCollaboratorsList([]);
+    setCopiedInvite(false);
     setIsCreatePlaylistOpen(true);
-  };
-
-  const isPlaylistOwner = (playlist: any) => {
-    if (!playlist) return false;
-    const myId = String(user?.userId ?? user?.id ?? '');
-    return !playlist.owner_id || String(playlist.owner_id) === myId;
   };
 
   const handleOpenEditPlaylist = (playlist: any) => {
     if (!isPlaylistOwner(playlist)) {
-      alert("No puedes editar la playlist de otro usuario.");
+      alert("No puedes editar la configuración de la playlist de otro usuario.");
       return;
     }
     setEditingPlaylist(playlist);
@@ -2582,8 +2624,125 @@ audioObj.seek(0);
     setPlaylistCoverFile(null);
     setPlaylistCoverPreview(playlist.cover_path ? (resolveApiUrl(playlist.cover_path) || null) : null);
     setPlaylistRemoveCover(false);
+    setNewPlaylistIsCollaborative(Boolean(playlist.is_collaborative));
+    setCopiedInvite(false);
     setIsCreatePlaylistOpen(true);
+
+    if (playlist.is_collaborative) {
+      fetchCollaborators(playlist.id);
+    } else {
+      setCollaboratorsList([]);
+    }
   };
+
+  const handleRegenerateInviteCode = async (playlistId: string | number) => {
+    if (!confirm("¿Regenerar el enlace de invitación? El enlace anterior dejará de funcionar.")) return;
+    const activeToken = token || localStorage.getItem('aura_token');
+    try {
+      const res = await fetch(`${API_BASE}/api/playlists/${playlistId}/invite-code`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEditingPlaylist((prev: any) => prev ? { ...prev, invite_code: data.invite_code, is_collaborative: 1 } : prev);
+        await loadPlaylists();
+      }
+    } catch (err) {
+      console.error("Error regenerating invite code:", err);
+    }
+  };
+
+  const handleRemoveCollaborator = async (playlistId: string | number, targetUserId: string | number) => {
+    const activeToken = token || localStorage.getItem('aura_token');
+    try {
+      const res = await fetch(`${API_BASE}/api/playlists/${playlistId}/collaborators/${targetUserId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        setCollaboratorsList(prev => prev.filter(c => String(c.id) !== String(targetUserId)));
+        await loadPlaylists();
+      }
+    } catch (err) {
+      console.error("Error removing collaborator:", err);
+    }
+  };
+
+  const handleLeavePlaylist = async (playlist: any) => {
+    if (!confirm(`¿Seguro que quieres dejar de colaborar en "${playlist.name}"?`)) return;
+    const myId = user?.userId ?? user?.id;
+    const activeToken = token || localStorage.getItem('aura_token');
+    try {
+      const res = await fetch(`${API_BASE}/api/playlists/${playlist.id}/collaborators/${myId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        if (activePlaylistId === String(playlist.id)) {
+          setActivePlaylistId('all');
+        }
+        await loadPlaylists();
+        await loadContent();
+      }
+    } catch (err) {
+      console.error("Error leaving playlist:", err);
+    }
+  };
+
+  const handleJoinPlaylistByCode = async (code: string) => {
+    const cleanCode = code.trim().toUpperCase();
+    if (!cleanCode) return;
+    const activeToken = token || localStorage.getItem('aura_token');
+    setIsJoiningPlaylist(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/playlists/join/${encodeURIComponent(cleanCode)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${activeToken}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsJoinPlaylistModalOpen(false);
+        setManualJoinCode("");
+        await loadPlaylists();
+        setActivePlaylistId(String(data.playlistId));
+        setShowModeration(false);
+        setSelectedAlbumName(null);
+        setSelectedArtistName(null);
+        alert(data.message || `Te has unido a "${data.name}"`);
+      } else {
+        alert(data.error || "No se ha podido unir a la playlist.");
+      }
+    } catch (err) {
+      console.error("Error joining playlist:", err);
+      alert("Error de conexión al unirse a la playlist.");
+    } finally {
+      setIsJoiningPlaylist(false);
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get('playlist_invite') || params.get('invite');
+    if (!inviteCode) return;
+    if (playlistInviteHandledRef.current === inviteCode) return;
+
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    playlistInviteHandledRef.current = inviteCode;
+    params.delete('playlist_invite');
+    params.delete('invite');
+    const qs = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+
+    void handleJoinPlaylistByCode(inviteCode);
+  }, [user]);
 
   const handleSavePlaylistModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2595,6 +2754,7 @@ audioObj.seek(0);
       const formData = new FormData();
       formData.append('name', newPlaylistName.trim());
       formData.append('description', newPlaylistDescription.trim());
+      formData.append('is_collaborative', String(newPlaylistIsCollaborative));
       if (playlistCoverFile) {
         formData.append('cover', playlistCoverFile);
       }
@@ -2632,6 +2792,7 @@ audioObj.seek(0);
           setNewPlaylistDescription("");
           setPlaylistCoverFile(null);
           setPlaylistCoverPreview(null);
+          setNewPlaylistIsCollaborative(false);
           await loadPlaylists();
         } else {
           alert('Error al crear la playlist.');
@@ -2650,6 +2811,9 @@ audioObj.seek(0);
   const handleDeletePlaylist = async (playlistId: string | number) => {
     const pl = playlists.find(p => String(p.id) === String(playlistId));
     if (pl && !isPlaylistOwner(pl)) {
+      if (pl.is_collaborative) {
+        return handleLeavePlaylist(pl);
+      }
       alert("No puedes eliminar la playlist de otro usuario.");
       return;
     }
@@ -2663,7 +2827,7 @@ audioObj.seek(0);
 
   const handleRemoveFromPlaylist = async (songId: string) => {
     const currentPl = playlists.find(p => String(p.id) === String(activePlaylistId));
-    if (currentPl && !isPlaylistOwner(currentPl)) {
+    if (currentPl && !canEditPlaylistContent(currentPl)) {
       alert("No tienes permiso para modificar esta playlist.");
       return;
     }
@@ -4068,16 +4232,28 @@ transition={{
                 Playlists
               </div>
 
-              <button
-                onClick={() => {
-                  handleOpenCreatePlaylist();
-                  setIsMobileMenuOpen(false);
-                }}
-                className="w-6 h-6 rounded-full bg-brand-primary text-black flex items-center justify-center hover:scale-105 transition-transform cursor-pointer"
-                title="Crear playlist"
-              >
-                <Plus size={13} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    setIsJoinPlaylistModalOpen(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-6 h-6 rounded-full bg-white/10 text-white flex items-center justify-center hover:scale-105 transition-transform cursor-pointer"
+                  title="Unirse a playlist colaborativa"
+                >
+                  <UserPlus size={12} />
+                </button>
+                <button
+                  onClick={() => {
+                    handleOpenCreatePlaylist();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-6 h-6 rounded-full bg-brand-primary text-black flex items-center justify-center hover:scale-105 transition-transform cursor-pointer"
+                  title="Crear playlist"
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
             </div>
 
             <div className="max-h-40 overflow-y-auto scrollbar-hide">
@@ -4138,13 +4314,16 @@ transition={{
                         <span className="truncate">
                           {p.name}
                         </span>
+                        {Boolean(p.is_collaborative) && (
+                          <Users size={11} className="text-indigo-400 shrink-0" title={p.owner_name ? `Colaborativa · de ${p.owner_name}` : "Colaborativa"} />
+                        )}
                         {offlinePlaylistIds.has(p.id.toString()) && (
                           <span title="Disponible sin conexión"><Download size={11} className="text-emerald-400 shrink-0 ml-auto" /></span>
                         )}
                       </div>
                     </button>
 
-                    {isPlaylistOwner(p) && (
+                    {isPlaylistOwner(p) ? (
                       <>
                         <button
                           onClick={(e) => {
@@ -4171,6 +4350,19 @@ transition={{
                           <Trash2 size={13} />
                         </button>
                       </>
+                    ) : (
+                      Boolean(p.is_collaborative) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLeavePlaylist(p);
+                          }}
+                          className="mr-1.5 p-2 rounded-md text-amber-400/50 active:text-amber-400 active:bg-amber-400/10 transition-colors shrink-0"
+                          title="Dejar de colaborar"
+                        >
+                          <LogOut size={12} />
+                        </button>
+                      )
                     )}
                   </div>
                 ))
@@ -4501,8 +4693,9 @@ transition={{
                     <div>
                       <div className="flex items-center justify-between mb-6">
                         <h3 className="text-[10px] uppercase font-bold text-white/30 tracking-widest">Playlists</h3>
-                        <div className="flex gap-3">
+                        <div className="flex items-center gap-2.5">
                           <button type="button" title="Crear playlist" onClick={handleOpenCreatePlaylist}><Plus size={14} className="hover:text-brand-primary cursor-pointer transition-all" /></button>
+                          <button type="button" title="Unirse a playlist colaborativa" onClick={() => setIsJoinPlaylistModalOpen(true)}><UserPlus size={14} className="hover:text-indigo-400 cursor-pointer transition-all" /></button>
                           <UploadIcon size={14} className="hover:text-brand-primary cursor-pointer transition-all" onClick={() => setIsImportOpen(true)} />
                         </div>
                       </div>
@@ -4528,16 +4721,23 @@ transition={{
                                     <Music2 size={13} className="shrink-0 opacity-40 group-hover:opacity-75 transition-opacity" />
                                   )}
                                   <span className={`truncate transition-all ${activePlaylistId === p.id.toString() ? "text-brand-primary font-bold" : "text-white/50 hover:text-white"}`}>{p.name}</span>
+                                  {Boolean(p.is_collaborative) && (
+                                    <Users size={11} className="text-indigo-400 shrink-0" title={p.owner_name ? `Colaborativa · de ${p.owner_name}` : "Colaborativa"} />
+                                  )}
                                   {offlinePlaylistIds.has(p.id.toString()) && (
                                     <span title="Disponible sin conexión"><Download size={11} className="text-emerald-400 shrink-0" /></span>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0 ml-2">
-                                  {isPlaylistOwner(p) && (
+                                  {isPlaylistOwner(p) ? (
                                     <>
                                       <button type="button" title="Editar playlist" onClick={(e) => { e.stopPropagation(); handleOpenEditPlaylist(p); }}><Edit2 size={12} className="opacity-50 hover:!opacity-100 text-white/70 hover:text-brand-primary transition-all cursor-pointer" /></button>
                                       <button type="button" title="Eliminar playlist" onClick={(e) => { e.stopPropagation(); handleDeletePlaylist(p.id); }}><Trash2 size={12} className="opacity-50 hover:!opacity-100 text-red-500 hover:text-red-400 transition-all cursor-pointer" /></button>
                                     </>
+                                  ) : (
+                                    Boolean(p.is_collaborative) && (
+                                      <button type="button" title="Dejar de colaborar" onClick={(e) => { e.stopPropagation(); handleLeavePlaylist(p); }}><LogOut size={12} className="opacity-50 hover:!opacity-100 text-amber-400 hover:text-amber-300 transition-all cursor-pointer" /></button>
+                                    )
                                   )}
                                 </div>
                             </li>
@@ -4844,7 +5044,18 @@ transition={{
                             </div>
 
                             <div className="flex-1 min-w-0 text-center md:text-left">
-                              <p className="text-[9px] md:text-[11px] uppercase tracking-[0.4em] text-brand-primary font-bold mb-2">Playlist</p>
+                              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-2">
+                                <p className="text-[9px] md:text-[11px] uppercase tracking-[0.4em] text-brand-primary font-bold">Playlist</p>
+                                {Boolean(currentPlaylist.is_collaborative) && (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                    <Users size={11} />
+                                    <span>Colaborativa</span>
+                                    {currentPlaylist.owner_name && !isPlaylistOwner(currentPlaylist) && (
+                                      <span className="text-white/50 text-[9px] font-normal">· Por {currentPlaylist.owner_name}</span>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center justify-center md:justify-start gap-3">
                                 <h1 className="text-2xl md:text-5xl font-serif italic text-white mb-2 leading-tight truncate">
                                   {currentPlaylist.name}
@@ -4964,7 +5175,22 @@ transition={{
                                   );
                                 })()}
 
-                                {isPlaylistOwner(currentPlaylist) && (
+                                {Boolean(currentPlaylist.is_collaborative) && currentPlaylist.invite_code && (
+                                  <button
+                                    onClick={() => {
+                                      const inviteUrl = `${window.location.origin}/?playlist_invite=${currentPlaylist.invite_code}`;
+                                      navigator.clipboard.writeText(inviteUrl);
+                                      alert("¡Enlace de invitación copiado al portapapeles!");
+                                    }}
+                                    className="px-4 py-2 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-bold text-[10px] uppercase border border-indigo-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+                                    title="Copiar enlace para invitar colaboradores"
+                                  >
+                                    <Copy size={12} />
+                                    <span>Invitar</span>
+                                  </button>
+                                )}
+
+                                {isPlaylistOwner(currentPlaylist) ? (
                                   <button
                                     onClick={() => handleOpenEditPlaylist(currentPlaylist)}
                                     className="px-4 py-2 rounded-full bg-white/5 text-white/70 hover:text-white font-bold text-[10px] uppercase border border-white/10 hover:bg-white/15 transition-all cursor-pointer flex items-center gap-1.5"
@@ -4972,6 +5198,17 @@ transition={{
                                     <Edit2 size={12} />
                                     <span>Editar</span>
                                   </button>
+                                ) : (
+                                  Boolean(currentPlaylist.is_collaborative) && (
+                                    <button
+                                      onClick={() => handleLeavePlaylist(currentPlaylist)}
+                                      className="px-4 py-2 rounded-full bg-white/5 text-amber-400 hover:text-amber-300 font-bold text-[10px] uppercase border border-amber-500/20 hover:bg-amber-500/10 transition-all cursor-pointer flex items-center gap-1.5"
+                                      title="Dejar de ser colaborador en esta playlist"
+                                    >
+                                      <LogOut size={12} />
+                                      <span>Salir</span>
+                                    </button>
+                                  )
                                 )}
                               </div>
                             </div>
@@ -6053,6 +6290,101 @@ getCurrentTime={audioObj.getCurrentTime}
                 />
               </div>
 
+              {/* TOGGLE PLAYLIST COLABORATIVA */}
+              <div className="pt-2 border-t border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <Users size={14} className="text-indigo-400" />
+                      <label className="text-xs font-bold text-white cursor-pointer" htmlFor="collab-toggle">
+                        Playlist Colaborativa
+                      </label>
+                    </div>
+                    <p className="text-[11px] text-white/40">
+                      Permite a otros usuarios añadir, quitar y reordenar canciones mediante un enlace.
+                    </p>
+                  </div>
+                  <input
+                    id="collab-toggle"
+                    type="checkbox"
+                    checked={newPlaylistIsCollaborative}
+                    onChange={(e) => setNewPlaylistIsCollaborative(e.target.checked)}
+                    className="w-4 h-4 rounded bg-white/10 border-white/20 accent-indigo-500 cursor-pointer"
+                  />
+                </div>
+
+                {/* SECCIÓN INVITACIÓN Y COLABORADORES SI ESTÁ ACTIVA */}
+                {newPlaylistIsCollaborative && editingPlaylist && (
+                  <div className="p-3.5 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 space-y-3 mt-2">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">
+                        Enlace de invitación
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code || ''}`}
+                          className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/80 select-all outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code || ''}`;
+                            navigator.clipboard.writeText(url);
+                            setCopiedInvite(true);
+                            setTimeout(() => setCopiedInvite(false), 2000);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          {copiedInvite ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+                          <span>{copiedInvite ? "¡Copiado!" : "Copiar"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerateInviteCode(editingPlaylist.id)}
+                          title="Regenerar enlace (invalida el anterior)"
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <RefreshCw size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* LISTA DE COLABORADORES */}
+                    <div className="space-y-1.5 pt-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+                        Colaboradores actuales ({collaboratorsList.length})
+                      </label>
+                      {isLoadingCollaborators ? (
+                        <div className="flex items-center gap-2 text-xs text-white/40 py-1">
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Cargando colaboradores...</span>
+                        </div>
+                      ) : collaboratorsList.length === 0 ? (
+                        <p className="text-xs text-white/30 italic py-1">Aún no se ha unido ningún colaborador.</p>
+                      ) : (
+                        <div className="max-h-28 overflow-y-auto space-y-1 pr-1 scrollbar-hide">
+                          {collaboratorsList.map((collab) => (
+                            <div key={collab.id} className="flex items-center justify-between py-1 px-2.5 rounded-lg bg-white/5 text-xs text-white/80">
+                              <span className="font-medium">{collab.username}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCollaborator(editingPlaylist.id, collab.id)}
+                                title="Expulsar colaborador"
+                                className="text-red-400 hover:text-red-300 p-1 cursor-pointer transition-colors"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* ACCIONES */}
               <div className="flex gap-3 pt-2">
                 <button 
@@ -6080,6 +6412,98 @@ getCurrentTime={audioObj.getCurrentTime}
             </form>
           </motion.div>
         </div> 
+      )}</AnimatePresence>
+
+      {/* MODAL UNIRSE A PLAYLIST COLABORATIVA */}
+      <AnimatePresence>{isJoinPlaylistModalOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md px-4 text-white">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-[#121212] border border-white/10 rounded-3xl p-6 sm:p-8 w-full max-w-md relative text-white shadow-2xl space-y-5"
+          >
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+                  <Users size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">Unirse a Playlist</h3>
+                  <p className="text-xs text-white/40">Colabora añadiendo tu música favorita</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsJoinPlaylistModalOpen(false)}
+                className="text-white/40 hover:text-white p-1 rounded-full transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                  Código o enlace de invitación
+                </label>
+                <input
+                  type="text"
+                  placeholder="Pega el enlace o introduce el código (ej. 3F8B1A...)"
+                  value={manualJoinCode}
+                  onChange={(e) => setManualJoinCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      let code = manualJoinCode.trim();
+                      if (code.includes('invite=')) {
+                        try {
+                          const url = new URL(code);
+                          code = url.searchParams.get('playlist_invite') || url.searchParams.get('invite') || code;
+                        } catch {}
+                      }
+                      handleJoinPlaylistByCode(code);
+                    }
+                  }}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-indigo-400 transition-all font-mono"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsJoinPlaylistModalOpen(false)}
+                  className="flex-1 text-[11px] font-bold uppercase py-3 rounded-xl border border-white/10 hover:bg-white/5 text-white/60 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isJoiningPlaylist || !manualJoinCode.trim()}
+                  onClick={() => {
+                    let code = manualJoinCode.trim();
+                    if (code.includes('invite=')) {
+                      try {
+                        const url = new URL(code);
+                        code = url.searchParams.get('playlist_invite') || url.searchParams.get('invite') || code;
+                      } catch {}
+                    }
+                    handleJoinPlaylistByCode(code);
+                  }}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold uppercase text-[11px] shadow-lg transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {isJoiningPlaylist ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Uniéndose...</span>
+                    </>
+                  ) : (
+                    <span>Unirse</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}</AnimatePresence>
 
       {/* MODAL EDITAR BIOGRAFÍA DE ARTISTA */}

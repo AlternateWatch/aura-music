@@ -20,14 +20,21 @@ export interface Song {
   video_url?: string | null;
 }
 export interface Playlist {
-  id: string;
+  id: string | number;
   name: string;
   songIds?: string[];
   color?: string;
   ownerId?: string;
+  owner_id?: number | string;
+  owner_name?: string;
   createdAt?: string;
   description?: string;
   cover_path?: string;
+  is_collaborative?: boolean | number;
+  invite_code?: string | null;
+  is_owner?: boolean | number;
+  is_collaborator?: boolean | number;
+  collaborator_count?: number;
 }
 
 
