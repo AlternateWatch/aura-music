@@ -316,6 +316,12 @@ pool.execute(`
         await pool.execute('ALTER TABLE playlists ADD COLUMN invite_code VARCHAR(32) NULL UNIQUE');
         console.log('[DB] Columna invite_code agregada a la tabla playlists.');
     }
+    // Auto-generar invite_code para playlists colaborativas existentes que no lo tengan
+    await pool.execute(`
+        UPDATE playlists 
+        SET invite_code = UPPER(SUBSTRING(MD5(CONCAT(id, RAND(), NOW())), 1, 12))
+        WHERE is_collaborative = 1 AND (invite_code IS NULL OR invite_code = '')
+    `).catch(() => {});
 }).catch(err => {
     console.error('[DB] Error verificando/agregando columnas a playlists:', err);
 });
@@ -2328,7 +2334,14 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
             `;
             params = [req.user.userId, req.user.userId];
         }
-        const [r] = await pool.execute(query, params);
+        const [r]: any = await pool.execute(query, params);
+        for (const pl of (r || [])) {
+            if (Boolean(pl.is_collaborative) && (!pl.invite_code || pl.invite_code === 'null')) {
+                const freshCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+                await pool.execute('UPDATE playlists SET invite_code = ? WHERE id = ?', [freshCode, pl.id]).catch(() => {});
+                pl.invite_code = freshCode;
+            }
+        }
         res.json(r);
     } catch (e) {
         console.error("Get playlists error, attempting safe fallback:", e);
@@ -2365,6 +2378,11 @@ app.get('/api/playlists/:id', authenticateToken, async (req: any, res: Response)
         const pl = rows[0];
         if (!req.user.isBot && req.user.role !== 'admin' && !pl.is_owner && !(pl.is_collaborator && pl.is_collaborative)) {
             return res.status(403).json({ error: 'Forbidden' });
+        }
+        if (Boolean(pl.is_collaborative) && (!pl.invite_code || pl.invite_code === 'null')) {
+            const freshCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+            await pool.execute('UPDATE playlists SET invite_code = ? WHERE id = ?', [freshCode, pl.id]).catch(() => {});
+            pl.invite_code = freshCode;
         }
         res.json(pl);
     } catch (e) {

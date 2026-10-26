@@ -2613,23 +2613,73 @@ audioObj.seek(0);
     setIsCreatePlaylistOpen(true);
   };
 
-  const handleOpenEditPlaylist = (playlist: any) => {
+  const handleSharePlaylistInvite = async (playlist: any) => {
+    if (!playlist) return;
+    let code = playlist.invite_code;
+    if (!code || code === 'null' || code === 'undefined') {
+      try {
+        const activeToken = token || localStorage.getItem('aura_token');
+        const res = await fetch(`${API_BASE}/api/playlists/${playlist.id}/invite-code`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${activeToken}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          code = data.invite_code;
+          setPlaylists(prev => prev.map(p => String(p.id) === String(playlist.id) ? { ...p, invite_code: code, is_collaborative: 1 } : p));
+        }
+      } catch (e) {
+        console.error("Error generating invite code on share:", e);
+      }
+    }
+    if (!code || code === 'null' || code === 'undefined') {
+      alert("No se ha podido generar el enlace de invitación. Inténtalo de nuevo.");
+      return;
+    }
+    const inviteUrl = `${window.location.origin}/?playlist_invite=${code}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      alert("¡Enlace de invitación copiado al portapapeles!\n" + inviteUrl);
+    } catch {
+      prompt("Copia este enlace de invitación:", inviteUrl);
+    }
+  };
+
+  const handleOpenEditPlaylist = async (playlist: any) => {
     if (!isPlaylistOwner(playlist)) {
       alert("No puedes editar la configuración de la playlist de otro usuario.");
       return;
     }
+    let currentPl = playlist;
+    const isCollab = Boolean(playlist.is_collaborative);
     setEditingPlaylist(playlist);
     setNewPlaylistName(playlist.name || "");
     setNewPlaylistDescription(playlist.description || "");
     setPlaylistCoverFile(null);
     setPlaylistCoverPreview(playlist.cover_path ? (resolveApiUrl(playlist.cover_path) || null) : null);
     setPlaylistRemoveCover(false);
-    setNewPlaylistIsCollaborative(Boolean(playlist.is_collaborative));
+    setNewPlaylistIsCollaborative(isCollab);
     setCopiedInvite(false);
     setIsCreatePlaylistOpen(true);
 
-    if (playlist.is_collaborative) {
+    if (isCollab) {
       fetchCollaborators(playlist.id);
+      if (!playlist.invite_code || playlist.invite_code === 'null') {
+        const activeToken = token || localStorage.getItem('aura_token');
+        try {
+          const res = await fetch(`${API_BASE}/api/playlists/${playlist.id}/invite-code`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${activeToken}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setEditingPlaylist((prev: any) => prev ? { ...prev, invite_code: data.invite_code, is_collaborative: 1 } : prev);
+            setPlaylists(prev => prev.map(p => String(p.id) === String(playlist.id) ? { ...p, invite_code: data.invite_code, is_collaborative: 1 } : p));
+          }
+        } catch (err) {
+          console.error("Error loading invite code on edit:", err);
+        }
+      }
     } else {
       setCollaboratorsList([]);
     }
@@ -2646,6 +2696,7 @@ audioObj.seek(0);
       if (res.ok) {
         const data = await res.json();
         setEditingPlaylist((prev: any) => prev ? { ...prev, invite_code: data.invite_code, is_collaborative: 1 } : prev);
+        setPlaylists(prev => prev.map(p => String(p.id) === String(playlistId) ? { ...p, invite_code: data.invite_code, is_collaborative: 1 } : p));
         await loadPlaylists();
       }
     } catch (err) {
@@ -5175,13 +5226,9 @@ transition={{
                                   );
                                 })()}
 
-                                {Boolean(currentPlaylist.is_collaborative) && currentPlaylist.invite_code && (
+                                {Boolean(currentPlaylist.is_collaborative) && (
                                   <button
-                                    onClick={() => {
-                                      const inviteUrl = `${window.location.origin}/?playlist_invite=${currentPlaylist.invite_code}`;
-                                      navigator.clipboard.writeText(inviteUrl);
-                                      alert("¡Enlace de invitación copiado al portapapeles!");
-                                    }}
+                                    onClick={() => handleSharePlaylistInvite(currentPlaylist)}
                                     className="px-4 py-2 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-bold text-[10px] uppercase border border-indigo-500/30 transition-all cursor-pointer flex items-center gap-1.5"
                                     title="Copiar enlace para invitar colaboradores"
                                   >
@@ -6308,7 +6355,26 @@ getCurrentTime={audioObj.getCurrentTime}
                     id="collab-toggle"
                     type="checkbox"
                     checked={newPlaylistIsCollaborative}
-                    onChange={(e) => setNewPlaylistIsCollaborative(e.target.checked)}
+                    onChange={async (e) => {
+                      const checked = e.target.checked;
+                      setNewPlaylistIsCollaborative(checked);
+                      if (checked && editingPlaylist && (!editingPlaylist.invite_code || editingPlaylist.invite_code === 'null')) {
+                        const activeToken = token || localStorage.getItem('aura_token');
+                        try {
+                          const res = await fetch(`${API_BASE}/api/playlists/${editingPlaylist.id}/invite-code`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${activeToken}` }
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            setEditingPlaylist((prev: any) => prev ? { ...prev, invite_code: data.invite_code, is_collaborative: 1 } : prev);
+                            setPlaylists(prev => prev.map(p => String(p.id) === String(editingPlaylist.id) ? { ...p, invite_code: data.invite_code, is_collaborative: 1 } : p));
+                          }
+                        } catch (err) {
+                          console.error("Error auto-generating invite code:", err);
+                        }
+                      }
+                    }}
                     className="w-4 h-4 rounded bg-white/10 border-white/20 accent-indigo-500 cursor-pointer"
                   />
                 </div>
@@ -6321,21 +6387,30 @@ getCurrentTime={audioObj.getCurrentTime}
                         Enlace de invitación
                       </label>
                       <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={`${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code || ''}`}
-                          className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/80 select-all outline-none"
-                        />
+                        {editingPlaylist?.invite_code && editingPlaylist.invite_code !== 'null' ? (
+                          <input
+                            type="text"
+                            readOnly
+                            value={`${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code}`}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/80 select-all outline-none"
+                          />
+                        ) : (
+                          <div className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/40 italic flex items-center gap-2">
+                            <Loader2 size={12} className="animate-spin text-indigo-400" />
+                            <span>Generando código de invitación...</span>
+                          </div>
+                        )}
                         <button
                           type="button"
+                          disabled={!editingPlaylist?.invite_code || editingPlaylist.invite_code === 'null'}
                           onClick={() => {
-                            const url = `${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code || ''}`;
+                            if (!editingPlaylist?.invite_code) return;
+                            const url = `${window.location.origin}/?playlist_invite=${editingPlaylist.invite_code}`;
                             navigator.clipboard.writeText(url);
                             setCopiedInvite(true);
                             setTimeout(() => setCopiedInvite(false), 2000);
                           }}
-                          className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                          className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-40"
                         >
                           {copiedInvite ? <CheckCircle2 size={13} /> : <Copy size={13} />}
                           <span>{copiedInvite ? "¡Copiado!" : "Copiar"}</span>
