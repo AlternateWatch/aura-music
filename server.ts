@@ -288,10 +288,9 @@ pool.execute(`
     CREATE TABLE IF NOT EXISTS playlist_collaborators (
         playlist_id INT NOT NULL,
         user_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (playlist_id, user_id),
-        INDEX idx_user_playlists (user_id),
-        INDEX idx_playlist_users (playlist_id)
+        INDEX idx_user_playlists (user_id)
     )
 `).catch(err => console.error('[DB] Error creando tabla playlist_collaborators:', err));
 
@@ -2270,28 +2269,36 @@ async function getPlaylistAccess(playlistId: any, userId: any, userRole: any, is
         if (!rows || rows.length === 0) return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
         return { exists: true, isOwner: true, isCollaborator: false, canView: true, canEditTracks: true, playlist: rows[0] };
     }
-    const [rows]: any = await pool.execute(`
-        SELECT p.*,
-               (p.owner_id = ?) as is_owner,
-               (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id AND user_id = ?) as is_collab
-        FROM playlists p
-        WHERE p.id = ?
-        LIMIT 1
-    `, [userId, userId, playlistId]);
-    if (!rows || rows.length === 0) {
-        return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
+    try {
+        const [rows]: any = await pool.execute(`
+            SELECT p.*,
+                   (p.owner_id = ?) as is_owner,
+                   EXISTS(SELECT 1 FROM playlist_collaborators pc WHERE pc.playlist_id = p.id AND pc.user_id = ?) as is_collab
+            FROM playlists p
+            WHERE p.id = ?
+            LIMIT 1
+        `, [userId, userId, playlistId]);
+        if (!rows || rows.length === 0) {
+            return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
+        }
+        const p = rows[0];
+        const isOwner = Boolean(p.is_owner);
+        const isCollaborator = Boolean(p.is_collab && p.is_collaborative);
+        return {
+            exists: true,
+            isOwner,
+            isCollaborator,
+            canView: isOwner || isCollaborator,
+            canEditTracks: isOwner || isCollaborator,
+            playlist: p
+        };
+    } catch (e) {
+        // Fallback si la tabla colaborativa tuviese cualquier problema
+        const [rows]: any = await pool.execute('SELECT *, 1 as is_owner, 0 as is_collab FROM playlists WHERE id = ? LIMIT 1', [playlistId]);
+        if (!rows || rows.length === 0) return { exists: false, isOwner: false, isCollaborator: false, canView: false, canEditTracks: false };
+        const isOwner = rows[0].owner_id === userId;
+        return { exists: true, isOwner, isCollaborator: false, canView: isOwner, canEditTracks: isOwner, playlist: rows[0] };
     }
-    const p = rows[0];
-    const isOwner = Boolean(p.is_owner);
-    const isCollaborator = Boolean(p.is_collab && p.is_collaborative);
-    return {
-        exists: true,
-        isOwner,
-        isCollaborator,
-        canView: isOwner || isCollaborator,
-        canEditTracks: isOwner || isCollaborator,
-        playlist: p
-    };
 }
 
 app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => {
@@ -2300,13 +2307,11 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
             SELECT p.*, 
                    u.username as owner_name,
                    (p.owner_id = ?) as is_owner,
-                   (pc.user_id IS NOT NULL) as is_collaborator,
-                   (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+                   EXISTS(SELECT 1 FROM playlist_collaborators pc WHERE pc.playlist_id = p.id AND pc.user_id = ?) as is_collaborator,
+                   (SELECT COUNT(*) FROM playlist_collaborators pc2 WHERE pc2.playlist_id = p.id) as collaborator_count
             FROM playlists p 
             LEFT JOIN users u ON p.owner_id = u.id 
-            LEFT JOIN playlist_collaborators pc ON pc.playlist_id = p.id AND pc.user_id = ?
-            WHERE p.owner_id = ? OR pc.user_id = ?
-            GROUP BY p.id 
+            WHERE p.owner_id = ? OR EXISTS(SELECT 1 FROM playlist_collaborators pc3 WHERE pc3.playlist_id = p.id AND pc3.user_id = ?)
             ORDER BY p.name ASC
         `;
         let params: any[] = [req.user.userId, req.user.userId, req.user.userId, req.user.userId];
@@ -2315,12 +2320,10 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
                 SELECT p.*, 
                        u.username as owner_name,
                        (p.owner_id = ?) as is_owner,
-                       (pc.user_id IS NOT NULL) as is_collaborator,
-                       (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+                       EXISTS(SELECT 1 FROM playlist_collaborators pc WHERE pc.playlist_id = p.id AND pc.user_id = ?) as is_collaborator,
+                       (SELECT COUNT(*) FROM playlist_collaborators pc2 WHERE pc2.playlist_id = p.id) as collaborator_count
                 FROM playlists p 
                 LEFT JOIN users u ON p.owner_id = u.id 
-                LEFT JOIN playlist_collaborators pc ON pc.playlist_id = p.id AND pc.user_id = ?
-                GROUP BY p.id 
                 ORDER BY p.name ASC
             `;
             params = [req.user.userId, req.user.userId];
@@ -2328,8 +2331,17 @@ app.get('/api/playlists', authenticateToken, async (req: any, res: Response) => 
         const [r] = await pool.execute(query, params);
         res.json(r);
     } catch (e) {
-        console.error("Get playlists error:", e);
-        res.status(500).json({ error: "Error loading playlists" });
+        console.error("Get playlists error, attempting safe fallback:", e);
+        try {
+            const [fallbackRows]: any = await pool.execute(
+                'SELECT p.*, u.username as owner_name, 1 as is_owner, 0 as is_collaborator, 0 as collaborator_count FROM playlists p LEFT JOIN users u ON p.owner_id = u.id WHERE p.owner_id = ? ORDER BY p.name ASC',
+                [req.user.userId]
+            );
+            return res.json(fallbackRows);
+        } catch (err2) {
+            console.error("Get playlists fatal error:", err2);
+            res.status(500).json({ error: "Error loading playlists" });
+        }
     }
 });
 
@@ -2339,8 +2351,8 @@ app.get('/api/playlists/:id', authenticateToken, async (req: any, res: Response)
             `SELECT p.*, 
                     u.username as owner_name,
                     (p.owner_id = ?) as is_owner,
-                    (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id AND user_id = ?) as is_collaborator,
-                    (SELECT COUNT(*) FROM playlist_collaborators WHERE playlist_id = p.id) as collaborator_count
+                    EXISTS(SELECT 1 FROM playlist_collaborators pc WHERE pc.playlist_id = p.id AND pc.user_id = ?) as is_collaborator,
+                    (SELECT COUNT(*) FROM playlist_collaborators pc2 WHERE pc2.playlist_id = p.id) as collaborator_count
              FROM playlists p 
              LEFT JOIN users u ON p.owner_id = u.id 
              WHERE p.id = ? 
