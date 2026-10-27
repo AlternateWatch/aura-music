@@ -47,17 +47,30 @@ const syncFileToB2 = async (filename: string, localFilePath: string, mimetype?: 
         console.warn(`⚠️ [B2] Archivo local "${localFilePath}" no encontrado para sincronizar con B2.`);
         return;
     }
-    try {
-        console.log(`☁️ [B2] Subiendo "${filename}" a Backblaze B2...`);
-        await uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size);
-        console.log(`✅ [B2] "${filename}" sincronizado con Backblaze B2 correctamente.`);
-        if (deleteLocalAfter) {
-            try { fs.unlinkSync(localFilePath); } catch {}
+
+    const maxRetries = 3;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`☁️ [B2] Subiendo "${filename}" a Backblaze B2 (intento ${attempt}/${maxRetries})...`);
+            await uploadToB2(filename, fs.createReadStream(localFilePath), mimetype, size);
+            console.log(`✅ [B2] "${filename}" sincronizado con Backblaze B2 correctamente.`);
+            if (deleteLocalAfter) {
+                try { fs.unlinkSync(localFilePath); } catch {}
+            }
+            return;
+        } catch (err: any) {
+            lastError = err;
+            console.error(`❌ [B2] Intento ${attempt}/${maxRetries} fallido sincronizando ${filename} con B2:`, err.message);
+            if (attempt < maxRetries) {
+                const delayMs = attempt * 1200;
+                await new Promise(res => setTimeout(res, delayMs));
+            }
         }
-    } catch (err: any) {
-        console.error(`❌ [B2] Error sincronizando ${filename} con B2:`, err.message);
-        throw err;
     }
+
+    throw lastError;
 };
 const DIST_DIR = path.basename(__dirname) === 'dist' ? __dirname : path.join(__dirname, 'dist');
 
@@ -462,10 +475,10 @@ const backfillTrackMetadata = async () => {
     }
 };
 
-// Auto-crear columnas duration y genre si no existen en la tabla tracks
+// Auto-crear columnas duration, genre y created_at si no existen en la tabla tracks
 pool.execute(`
     SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre')
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre', 'created_at')
 `).then(async ([rows]: any) => {
     const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
     if (!existingCols.has('duration')) {
@@ -476,6 +489,57 @@ pool.execute(`
         await pool.execute('ALTER TABLE tracks ADD COLUMN genre VARCHAR(255) NULL DEFAULT NULL');
         console.log('[DB] Columna genre agregada a la tabla tracks.');
     }
+    if (!existingCols.has('created_at')) {
+        await pool.execute('ALTER TABLE tracks ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+        console.log('[DB] Columna created_at agregada a la tabla tracks.');
+    }
+
+    // Auto-limpieza de pistas duplicadas accidentales existentes (mismo título, artista, álbum y track_number)
+    try {
+        const [duplicateGroups]: any = await pool.execute(`
+            SELECT 
+                MIN(id) AS keep_id,
+                GROUP_CONCAT(id ORDER BY id ASC) AS all_ids,
+                COUNT(*) AS cnt
+            FROM tracks
+            GROUP BY 
+                LOWER(TRIM(title)),
+                LOWER(TRIM(artist)),
+                LOWER(TRIM(COALESCE(album, ''))),
+                COALESCE(track_number, -1)
+            HAVING cnt > 1
+        `);
+
+        if (duplicateGroups && duplicateGroups.length > 0) {
+            console.log(`🧹 [Deduplication] Detectados ${duplicateGroups.length} grupos de pistas duplicadas. Iniciando limpieza...`);
+            for (const group of duplicateGroups) {
+                const keepId = group.keep_id;
+                const allIds = String(group.all_ids).split(',').map((id: string) => parseInt(id.trim(), 10)).filter(Boolean);
+                const dropIds = allIds.filter((id: number) => id !== keepId);
+
+                for (const dropId of dropIds) {
+                    try {
+                        await pool.execute('UPDATE IGNORE user_likes SET track_id = ? WHERE track_id = ?', [keepId, dropId]);
+                        await pool.execute('DELETE FROM user_likes WHERE track_id = ?', [dropId]);
+
+                        await pool.execute('UPDATE IGNORE playlist_tracks SET track_id = ? WHERE track_id = ?', [keepId, dropId]);
+                        await pool.execute('DELETE FROM playlist_tracks WHERE track_id = ?', [dropId]);
+
+                        await pool.execute('UPDATE IGNORE listen_pings SET track_id = ? WHERE track_id = ?', [keepId, dropId]);
+                        await pool.execute('UPDATE users SET last_track_id = ? WHERE last_track_id = ?', [keepId, dropId]);
+
+                        await pool.execute('DELETE FROM tracks WHERE id = ?', [dropId]);
+                        console.log(`✅ [Deduplication] Eliminada pista duplicada ID ${dropId} (conservada ID ${keepId})`);
+                    } catch (dropErr: any) {
+                        console.warn(`⚠️ [Deduplication] Error eliminando duplicado ID ${dropId}:`, dropErr?.message);
+                    }
+                }
+            }
+        }
+    } catch (dedupErr: any) {
+        console.error('[DB] Error ejecutando auto-limpieza de duplicados:', dedupErr?.message);
+    }
+
     setTimeout(backfillTrackMetadata, 4000);
 }).catch(err => {
     console.error('[DB] Error verificando/agregando columnas a tracks:', err);
@@ -1240,30 +1304,134 @@ app.post('/api/tracks', authenticateToken, upload.fields([{ name: 'audio' }, { n
             console.warn("No se pudo extraer metadata/duración del archivo de audio:", mmErr);
         }
 
-        const [result]: any = await pool.execute(
-            'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number, duration, genre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, track_number || null, duration, genre]
+        // Comprobar si ya existe una pista idéntica subida recientemente (< 2 horas) por este usuario
+        // (por ejemplo si el cliente sufrió un timeout de red pero el servidor la procesó)
+        const cleanTitle = String(title || '').trim();
+        const cleanArtist = String(artist || '').trim();
+        const cleanAlbum = album ? String(album).trim() : null;
+        const parsedTrackNum = track_number !== undefined && track_number !== null && track_number !== '' ? parseInt(String(track_number), 10) : null;
+
+        const [existingTracks]: any = await pool.execute(
+            `SELECT id, file_path FROM tracks 
+             WHERE added_by = ? 
+               AND LOWER(TRIM(title)) = LOWER(?)
+               AND LOWER(TRIM(artist)) = LOWER(?)
+               AND (
+                 (? IS NOT NULL AND album IS NOT NULL AND LOWER(TRIM(album)) = LOWER(?))
+                 OR (? IS NULL AND (album IS NULL OR album = ''))
+               )
+               AND (
+                 (? IS NOT NULL AND track_number IS NOT NULL AND track_number = ?)
+                 OR (? IS NULL AND track_number IS NULL)
+               )
+               AND created_at >= NOW() - INTERVAL 2 HOUR
+             ORDER BY id DESC LIMIT 1`,
+            [
+                req.user.userId,
+                cleanTitle,
+                cleanArtist,
+                cleanAlbum, cleanAlbum,
+                cleanAlbum,
+                parsedTrackNum, parsedTrackNum,
+                parsedTrackNum
+            ]
         );
 
-        // Subir directamente a Backblaze B2 y limpiar el archivo temporal local
-        if (isB2Configured()) {
-            const aFile = req.files['audio'][0];
-            await syncFileToB2(aFile.filename, aFile.path, aFile.mimetype, aFile.size);
-            if (req.files?.['cover']?.[0]) {
-                const cFile = req.files['cover'][0];
-                await syncFileToB2(cFile.filename, cFile.path, cFile.mimetype, cFile.size);
-            } else if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
-                await syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
-            }
-        } else {
-            console.warn(`⚠️ [Upload] Backblaze B2 no está configurado en .env. La pista "${title}" se guardó únicamente en el disco local (${uploadDir}).`);
+        if (existingTracks && existingTracks.length > 0) {
+            console.log(`ℹ️ [Upload] Pista ya existente detectada (ID ${existingTracks[0].id}) para "${cleanTitle}". Evitando duplicado.`);
+            cleanupUploaded();
+            return res.status(200).json({ id: existingTracks[0].id, alreadyExists: true });
         }
 
-        res.status(201).json({ id: result.insertId });
+        let insertedTrackId: number | null = null;
+        try {
+            const [result]: any = await pool.execute(
+                'INSERT INTO tracks (title, artist, album, file_path, cover_path, added_by, status, format, tabs_url, video_url, track_number, duration, genre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [title, artist, album, `/uploads/${req.files['audio'][0].filename}`, coverPath, req.user.userId, initialStatus, format, tabs_url || null, video_url || null, parsedTrackNum, duration, genre]
+            );
+            insertedTrackId = result.insertId;
+
+            // Subir directamente a Backblaze B2 y limpiar el archivo temporal local
+            if (isB2Configured()) {
+                const aFile = req.files['audio'][0];
+                await syncFileToB2(aFile.filename, aFile.path, aFile.mimetype, aFile.size);
+                if (req.files?.['cover']?.[0]) {
+                    const cFile = req.files['cover'][0];
+                    await syncFileToB2(cFile.filename, cFile.path, cFile.mimetype, cFile.size);
+                } else if (downloadedCoverFile && fs.existsSync(downloadedCoverFile)) {
+                    await syncFileToB2(path.basename(downloadedCoverFile), downloadedCoverFile, 'image/jpeg');
+                }
+            } else {
+                console.warn(`⚠️ [Upload] Backblaze B2 no está configurado en .env. La pista "${title}" se guardó únicamente en el disco local (${uploadDir}).`);
+            }
+
+            return res.status(201).json({ id: insertedTrackId });
+        } catch (innerErr) {
+            // Revertir atómicamente la inserción en la base de datos si la sincronización con B2 o procesamiento falla
+            if (insertedTrackId) {
+                try {
+                    await pool.execute('DELETE FROM tracks WHERE id = ?', [insertedTrackId]);
+                    console.log(`🧹 [Upload] Revertida inserción en DB para track ID ${insertedTrackId} tras fallo en procesamiento/sincronización B2.`);
+                } catch (cleanupDbErr) {
+                    console.error(`Error revirtiendo inserción de track ID ${insertedTrackId}:`, cleanupDbErr);
+                }
+            }
+            throw innerErr;
+        }
     } catch (e) {
         console.error("Error uploading track:", e);
         cleanupUploaded();
         res.status(500).json({ error: "Error guardando la pista en la base de datos." });
+    }
+});
+
+// Endpoint para verificar si una pista ya fue registrada recientemente por este usuario
+// Evita falsos errores cuando la conexión del cliente o Cloudflare corta la respuesta antes de recibirla
+app.get('/api/tracks/verify', authenticateToken, async (req: any, res: Response) => {
+    const { title, artist, album, track_number } = req.query;
+    if (!title || !artist) {
+        return res.status(400).json({ error: "title y artist son requeridos" });
+    }
+    try {
+        const cleanTitle = String(title).trim();
+        const cleanArtist = String(artist).trim();
+        const cleanAlbum = album ? String(album).trim() : null;
+        const parsedTrackNum = track_number !== undefined && track_number !== null && track_number !== '' ? parseInt(String(track_number), 10) : null;
+
+        const [rows]: any = await pool.execute(
+            `SELECT id, title, artist, album, track_number, file_path 
+             FROM tracks 
+             WHERE added_by = ? 
+               AND LOWER(TRIM(title)) = LOWER(?)
+               AND LOWER(TRIM(artist)) = LOWER(?)
+               AND (
+                 (? IS NOT NULL AND album IS NOT NULL AND LOWER(TRIM(album)) = LOWER(?))
+                 OR (? IS NULL AND (album IS NULL OR album = ''))
+               )
+               AND (
+                 (? IS NOT NULL AND track_number IS NOT NULL AND track_number = ?)
+                 OR (? IS NULL AND track_number IS NULL)
+               )
+               AND created_at >= NOW() - INTERVAL 2 HOUR
+             ORDER BY id DESC LIMIT 1`,
+            [
+                req.user.userId,
+                cleanTitle,
+                cleanArtist,
+                cleanAlbum, cleanAlbum,
+                cleanAlbum,
+                parsedTrackNum, parsedTrackNum,
+                parsedTrackNum
+            ]
+        );
+
+        if (rows && rows.length > 0) {
+            return res.json({ exists: true, id: rows[0].id });
+        }
+        return res.json({ exists: false });
+    } catch (err: any) {
+        console.error("Error verificando track:", err);
+        return res.status(500).json({ error: "Error verificando estado de la pista" });
     }
 });
 

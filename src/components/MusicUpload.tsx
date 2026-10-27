@@ -535,11 +535,38 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
           }
         );
 
-        if (data?.id) {
+        if (data?.id && !uploadedTrackIds.includes(data.id)) {
           uploadedTrackIds.push(data.id);
         }
         i++;
       } catch(err: any) {
+        // Verificar si la canción realmente se guardó en el servidor
+        // (por ejemplo si el cliente experimentó timeout o corte de respuesta, pero el servidor la procesó)
+        try {
+          const verifyParams = new URLSearchParams({
+            title: track.trackName || '',
+            artist: track.artistName || '',
+            album: track.collectionName || '',
+            track_number: (track.globalTrackNumber || track.trackNumber || '').toString()
+          });
+          const verifyRes = await fetch(`${API_BASE}/api/tracks/verify?${verifyParams.toString()}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('aura_token')}` }
+          });
+          if (verifyRes.ok) {
+            const verifyData = await verifyRes.json();
+            if (verifyData.exists && verifyData.id) {
+              console.log(`✅ Pista "${track.trackName}" confirmada en servidor tras aviso de error (ID ${verifyData.id}). Continuando automáticamente...`);
+              if (!uploadedTrackIds.includes(verifyData.id)) {
+                uploadedTrackIds.push(verifyData.id);
+              }
+              i++;
+              continue;
+            }
+          }
+        } catch (vErr) {
+          console.warn('No se pudo verificar el estado en el servidor tras el error de subida:', vErr);
+        }
+
         const errorMsg = err?.message || 'Error de conexión o fallo del servidor al subir el archivo.';
 
         // Notificar de inmediato al usuario y ofrecer las 3 opciones requeridas:
