@@ -146,6 +146,23 @@ public class AuraMediaPlayer extends SimpleBasePlayer {
         invalidateState();
     }
 
+    public void setArtworkData(byte[] artworkData) {
+        if (currentMetadata == null) {
+            return;
+        }
+        currentMetadata = currentMetadata.buildUpon()
+                .setArtworkData(artworkData, androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build();
+
+        if (currentMediaItem != null) {
+            currentMediaItem = currentMediaItem.buildUpon()
+                    .setMediaMetadata(currentMetadata)
+                    .build();
+        }
+
+        invalidateState();
+    }
+
     public void setPlaying(
             boolean playing
     ) {

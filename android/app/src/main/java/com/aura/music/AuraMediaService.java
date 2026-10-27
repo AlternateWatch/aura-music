@@ -16,6 +16,14 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.core.app.NotificationCompat;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
@@ -51,6 +59,10 @@ public class AuraMediaService extends MediaSessionService {
 
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
+
+    private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
+    private Bitmap currentArtworkBitmap = null;
+    private String currentArtworkUrl = null;
 
     @Override
     public void onCreate() {
@@ -411,6 +423,10 @@ public class AuraMediaService extends MediaSessionService {
                         CHANNEL_ID
                 );
 
+        if (currentArtworkBitmap != null) {
+            builder.setLargeIcon(currentArtworkBitmap);
+        }
+
         builder
                 .setSmallIcon(
                         android.R.drawable.ic_media_play
@@ -533,6 +549,11 @@ public class AuraMediaService extends MediaSessionService {
                 return;
             }
 
+            if (artworkUrl == null || !artworkUrl.equals(currentArtworkUrl)) {
+                currentArtworkBitmap = null;
+                currentArtworkUrl = artworkUrl;
+            }
+
             player.setMedia(
                     id,
                     title,
@@ -545,6 +566,50 @@ public class AuraMediaService extends MediaSessionService {
             updateMediaButtonPreferences();
 
             updateNotificationImmediately();
+
+            // Descargar carátula de forma asíncrona y actualizar inmediatamente la notificación
+            if (artworkUrl != null && !artworkUrl.isEmpty()) {
+                final String targetUrl = artworkUrl;
+                imageExecutor.execute(() -> {
+                    Bitmap bmp = null;
+                    byte[] artworkBytes = null;
+                    try {
+                        URL url = new URL(targetUrl);
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(8000);
+                        conn.setInstanceFollowRedirects(true);
+                        conn.setDoInput(true);
+                        conn.connect();
+                        if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                            InputStream is = conn.getInputStream();
+                            bmp = BitmapFactory.decodeStream(is);
+                            is.close();
+                            if (bmp != null) {
+                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 90, baos);
+                                artworkBytes = baos.toByteArray();
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.w("AuraMediaService", "No se pudo descargar la carátula desde " + targetUrl + ": " + e.getMessage());
+                    }
+
+                    if (bmp != null) {
+                        final Bitmap finalBmp = bmp;
+                        final byte[] finalBytes = artworkBytes;
+                        mainHandler.post(() -> {
+                            if (targetUrl.equals(currentArtworkUrl)) {
+                                currentArtworkBitmap = finalBmp;
+                                if (player != null && finalBytes != null) {
+                                    player.setArtworkData(finalBytes);
+                                }
+                                updateNotificationImmediately();
+                            }
+                        });
+                    }
+                });
+            }
         });
     }
 

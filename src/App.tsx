@@ -3598,7 +3598,7 @@ audioObj.seek(0);
   };
 }, []);
 
-const lastNativeTrackSentRef = useRef<{ id: string; durationMs: number } | null>(null);
+const lastNativeTrackSentRef = useRef<{ id: string; durationMs: number; artworkUrl?: string } | null>(null);
 
 useEffect(() => {
   if (!Capacitor.isNativePlatform()) {
@@ -3611,6 +3611,8 @@ useEffect(() => {
 
   const songIdStr = String(currentSong.id);
   const isNewTrackForNative = lastNativeTrackSentRef.current?.id !== songIdStr;
+  const artworkUrl = currentSong.coverUrl || undefined;
+  const isArtworkChanged = lastNativeTrackSentRef.current?.artworkUrl !== artworkUrl;
 
   const effectiveDur = isNewTrackForNative
     ? (currentSong.duration && currentSong.duration > 0 ? currentSong.duration : (Number.isFinite(audioObj.duration) && audioObj.duration > 0 ? audioObj.duration : 0))
@@ -3623,13 +3625,13 @@ useEffect(() => {
 
   if (
     !isNewTrackForNative &&
+    !isArtworkChanged &&
     Math.abs(lastNativeTrackSentRef.current.durationMs - durationMs) < 1000
   ) {
     return;
   }
-  lastNativeTrackSentRef.current = { id: songIdStr, durationMs };
+  lastNativeTrackSentRef.current = { id: songIdStr, durationMs, artworkUrl };
 
-  const artworkUrl = currentSong.coverUrl || undefined;
   AuraMedia.setTrack({
     id: songIdStr,
     title: currentSong.title || 'Aura Music',
@@ -3648,6 +3650,7 @@ useEffect(() => {
   currentSong?.title,
   currentSong?.artist,
   currentSong?.album,
+  currentSong?.coverUrl,
   currentSong?.duration,
   audioObj.duration
 ]);

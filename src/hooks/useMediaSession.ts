@@ -58,9 +58,9 @@ export function useMediaSession({
       album: currentSong.album || "",
       artwork: currentSong.coverUrl
         ? [
-            { src: currentSong.coverUrl, sizes: "96x96", type: "image/jpeg" },
-            { src: currentSong.coverUrl, sizes: "256x256", type: "image/jpeg" },
-            { src: currentSong.coverUrl, sizes: "512x512", type: "image/jpeg" },
+            { src: currentSong.coverUrl, sizes: "96x96" },
+            { src: currentSong.coverUrl, sizes: "256x256" },
+            { src: currentSong.coverUrl, sizes: "512x512" },
           ]
         : [],
     });
