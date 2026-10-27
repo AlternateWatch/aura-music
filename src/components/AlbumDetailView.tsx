@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, Shuffle, Download, CheckCircle2, Loader2, 
   ChevronLeft, Disc, Heart, MoreVertical, ListPlus, ListMusic, 
-  Guitar, Trash2, Edit2, User, Music2, Check
+  Guitar, Trash2, Edit2, User, Music2, Check, X
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useFileUrl } from '../hooks/useFileUrl';
@@ -39,6 +39,9 @@ interface AlbumDetailViewProps {
   onEditSong: (song: Song) => void;
   onDeleteSong: (songId: string) => void;
   onOpenTabs: (song: Song) => void;
+  showModeration?: boolean;
+  onModerateSong?: (songId: string, status: 'approved' | 'rejected') => void;
+  onModerateAlbum?: (status: 'approved' | 'rejected') => void;
 }
 
 export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
@@ -62,6 +65,9 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
   onEditSong,
   onDeleteSong,
   onOpenTabs,
+  showModeration,
+  onModerateSong,
+  onModerateAlbum,
 }) => {
   const [activeMenuSongId, setActiveMenuSongId] = useState<string | null>(null);
   const [playlistSubmenuSongId, setPlaylistSubmenuSongId] = useState<string | null>(null);
@@ -487,11 +493,33 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   </span>
                 </div>
 
-                {/* 4. ACCIONES (LIKE Y MENÚ CONTEXTUAL) */}
+                {/* 4. ACCIONES (MODERACIÓN, LIKE Y MENÚ CONTEXTUAL) */}
                 <div
                   className="flex items-center justify-end gap-1 shrink-0"
                   onClick={(e) => e.stopPropagation()}
                 >
+                  {(showModeration || userRole === 'admin' || userRole === 'moderator' || track.status === 'pending') && onModerateSong && (
+                    <div className="flex items-center gap-1 mr-1">
+                      <button
+                        type="button"
+                        onClick={() => onModerateSong(String(track.id), 'approved')}
+                        className="px-2.5 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-black border border-emerald-500/30 transition-all font-bold text-[9px] uppercase flex items-center gap-1 cursor-pointer"
+                        title="Aprobar canción"
+                      >
+                        <Check size={11} className="stroke-[2.5]" />
+                        <span className="hidden sm:inline">Aprobar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onModerateSong(String(track.id), 'rejected')}
+                        className="px-2.5 py-1 rounded-full bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white border border-red-500/30 transition-all font-bold text-[9px] uppercase flex items-center gap-1 cursor-pointer"
+                        title="Rechazar canción"
+                      >
+                        <X size={11} className="stroke-[2.5]" />
+                        <span className="hidden sm:inline">Rechazar</span>
+                      </button>
+                    </div>
+                  )}
                   {/* Botón Like */}
                   <button
                     type="button"
@@ -643,6 +671,35 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   </div>
 
                   {/* Opciones de Moderación / Edición */}
+                  {(showModeration || userRole === 'admin' || userRole === 'moderator' || activeTrack.status === 'pending') && onModerateSong && (
+                    <div className="border-t border-white/5 pt-1 mt-1 space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onModerateSong(String(activeTrack.id), 'approved');
+                          setActiveMenuSongId(null);
+                          setMenuPlacement(null);
+                        }}
+                        className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-emerald-400 hover:text-black hover:bg-emerald-500 transition-colors cursor-pointer text-left`}
+                      >
+                        <Check size={iconSize} className="stroke-[2.5]" />
+                        <span>Aprobar canción</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onModerateSong(String(activeTrack.id), 'rejected');
+                          setActiveMenuSongId(null);
+                          setMenuPlacement(null);
+                        }}
+                        className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-red-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer text-left`}
+                      >
+                        <X size={iconSize} className="stroke-[2.5]" />
+                        <span>Rechazar canción</span>
+                      </button>
+                    </div>
+                  )}
+
                   {(userRole === 'admin' || userRole === 'moderator') && (
                     <>
                       <button

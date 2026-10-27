@@ -2496,6 +2496,20 @@ audioObj.seek(0);
       loadContent();
   };
 
+  const handleModerateAlbum = async (albumName: string, status: string) => {
+      const activeToken = token || localStorage.getItem('aura_token');
+      const albumTracks = songs.filter(s => s.album === albumName);
+      if (albumTracks.length === 0) return;
+      for (const track of albumTracks) {
+          await fetch(`${API_BASE}/api/moderation/${track.id}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` },
+              body: JSON.stringify({ status })
+          });
+      }
+      loadContent();
+  };
+
   const handleUpdateMetadata = async (e: FormEvent) => {
     e.preventDefault();
     if (!songToEdit) return;
@@ -3884,7 +3898,7 @@ useEffect(() => {
                     setSelectedArtistName(null);
                   }
                 }} className={`transition-colors ${!showModeration && activePlaylistId === "all" ? (activeTheme === 'light' ? 'text-black border-b border-brand-primary' : 'text-white border-b border-brand-primary pb-1') : ""}`}>Library</button>
-                {(userRole === "admin" || userRole === "moderator") && <button onClick={() => setShowModeration(true)} className={`flex items-center gap-2 transition-colors ${showModeration ? 'text-brand-primary border-b border-brand-primary pb-1' : 'text-white/40 hover:text-white'}`}><ShieldCheck size={12}/> Moderation</button>}
+                {(userRole === "admin" || userRole === "moderator") && <button onClick={() => { setShowModeration(true); setSelectedAlbumName(null); setSelectedArtistName(null); }} className={`flex items-center gap-2 transition-colors ${showModeration ? 'text-brand-primary border-b border-brand-primary pb-1' : 'text-white/40 hover:text-white'}`}><ShieldCheck size={12}/> Moderation</button>}
                 <button onClick={() => setIsSessionOpen(true)} className={`flex items-center gap-2 transition-colors ${socketObj.currentSession ? 'text-brand-primary animate-pulse font-black' : 'text-white/40'}`}><Users size={12} /> Session</button>
                 {token && <button onClick={() => setIsSocialHubOpen(true)} className="relative flex items-center gap-2 text-white/40 hover:text-white transition-colors cursor-pointer"><Users size={12} /> Social{socketObj.unreadSenders.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-xl" />}</button>}
               </div>
@@ -5007,6 +5021,9 @@ transition={{
                 likedIds={likedIds}
                 playlists={playlists}
                 userRole={userRole}
+                showModeration={showModeration}
+                onModerateSong={handleModerate}
+                onModerateAlbum={(status) => handleModerateAlbum(selectedAlbumName, status)}
                 onPlaySong={(song) => handlePlaySong(song, false, 0, false, selectedAlbumName)}
                 onPlayAll={(tracks) => {
                   if (tracks.length > 0) handlePlaySong(tracks[0], false, 0, false, selectedAlbumName);
@@ -5596,6 +5613,28 @@ transition={{
                                 )}
                               </div>
                             </div>
+                            {showModeration && (
+                              <div className="flex items-center gap-2 pt-2.5 mt-2 border-t border-white/10 z-20" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleModerateAlbum(alb.title, 'approved')}
+                                  className="flex-1 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[9px] uppercase tracking-wider hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer shadow-lg"
+                                  title="Aprobar todas las canciones de este álbum"
+                                >
+                                  <Check size={11} className="stroke-[3]" />
+                                  <span>Aprobar ({alb.trackCount})</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleModerateAlbum(alb.title, 'rejected')}
+                                  className="flex-1 py-1.5 rounded-full bg-red-500 hover:bg-red-400 text-white font-black text-[9px] uppercase tracking-wider hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer shadow-lg"
+                                  title="Rechazar todas las canciones de este álbum"
+                                >
+                                  <X size={11} className="stroke-[3]" />
+                                  <span>Rechazar</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
                         {filteredAlbums.length === 0 && (
