@@ -402,6 +402,29 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                 </>
               )}
             </button>
+
+            {(Boolean(showModeration) || sortedTracks.some(t => t.status === 'pending')) && (userRole === 'admin' || userRole === 'moderator') && onModerateAlbum && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onModerateAlbum('approved')}
+                  className="px-5 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-xl cursor-pointer flex items-center gap-2"
+                  title="Aprobar todas las canciones de este álbum"
+                >
+                  <Check size={14} className="stroke-[3]" />
+                  <span>Aprobar Álbum ({sortedTracks.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onModerateAlbum('rejected')}
+                  className="px-5 py-3 rounded-full bg-red-500 hover:bg-red-400 text-white font-bold text-xs uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-xl cursor-pointer flex items-center gap-2"
+                  title="Rechazar todas las canciones de este álbum"
+                >
+                  <X size={14} className="stroke-[3]" />
+                  <span>Rechazar Álbum</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -498,7 +521,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   className="flex items-center justify-end gap-1 shrink-0"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {(showModeration || userRole === 'admin' || userRole === 'moderator' || track.status === 'pending') && onModerateSong && (
+                  {(Boolean(showModeration) || track.status === 'pending') && (userRole === 'admin' || userRole === 'moderator') && onModerateSong && (
                     <div className="flex items-center gap-1 mr-1">
                       <button
                         type="button"
@@ -671,7 +694,7 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   </div>
 
                   {/* Opciones de Moderación / Edición */}
-                  {(showModeration || userRole === 'admin' || userRole === 'moderator' || activeTrack.status === 'pending') && onModerateSong && (
+                  {(Boolean(showModeration) || activeTrack.status === 'pending') && (userRole === 'admin' || userRole === 'moderator') && onModerateSong && (
                     <div className="border-t border-white/5 pt-1 mt-1 space-y-1">
                       <button
                         type="button"
