@@ -376,7 +376,9 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     }
 
     try {
-      const res = await fetch(`https://itunes.apple.com/lookup?id=${albumItem.collectionId}&entity=song`);
+      // iTunes Lookup API: por defecto limita a 50 resultados si no se especifica.
+      // Añadimos limit=200 para permitir álbumes extensos, compilaciones y bandas sonoras completas.
+      const res = await fetch(`https://itunes.apple.com/lookup?id=${albumItem.collectionId}&entity=song&limit=200`);
       const data = await res.json();
       const songsOnly: ITunesTrack[] = (data.results || [])
         .filter((r: any) => r.wrapperType === 'track')
@@ -396,10 +398,30 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
           collectionName: r.collectionName
         }));
 
-      setAlbumTracks(songsOnly);
+      let finalTracks = songsOnly;
+      if (selectedFiles.length > songsOnly.length) {
+        const extraCount = selectedFiles.length - songsOnly.length;
+        const lastTrackNum = songsOnly[songsOnly.length - 1]?.trackNumber || songsOnly.length;
+        const extended = [...songsOnly];
+        for (let idx = 0; idx < extraCount; idx++) {
+          const newNum = lastTrackNum + idx + 1;
+          extended.push({
+            id: `extra_${newNum}_${Date.now()}_${idx}`,
+            trackNumber: newNum,
+            discNumber: 1,
+            globalTrackNumber: extended.length + 1,
+            trackName: `Pista ${newNum}`,
+            artistName: albumItem.artistName || songsOnly[0]?.artistName || '',
+            collectionName: albumItem.collectionName || songsOnly[0]?.collectionName || ''
+          });
+        }
+        finalTracks = extended;
+      }
+
+      setAlbumTracks(finalTracks);
 
       if (selectedFiles.length > 0) {
-        applyMatchingStrategy('order', selectedFiles, songsOnly);
+        applyMatchingStrategy('order', selectedFiles, finalTracks);
       }
     } catch(e) {
       setError("Error al obtener las pistas del álbum.");
@@ -473,7 +495,25 @@ export const MusicUpload: React.FC<MusicUploadProps> = ({ onClose, onUploadCompl
     setSelectedFiles(files);
 
     if (albumTracks.length > 0) {
-      applyMatchingStrategy('order', files, albumTracks);
+      let currentTracks = [...albumTracks];
+      if (files.length > currentTracks.length) {
+        const extraCount = files.length - currentTracks.length;
+        const lastTrackNum = currentTracks[currentTracks.length - 1]?.trackNumber || currentTracks.length;
+        for (let idx = 0; idx < extraCount; idx++) {
+          const newNum = lastTrackNum + idx + 1;
+          currentTracks.push({
+            id: `extra_${newNum}_${Date.now()}_${idx}`,
+            trackNumber: newNum,
+            discNumber: 1,
+            globalTrackNumber: currentTracks.length + 1,
+            trackName: `Pista ${newNum}`,
+            artistName: selectedAlbum?.artistName || currentTracks[0]?.artistName || '',
+            collectionName: selectedAlbum?.collectionName || currentTracks[0]?.collectionName || ''
+          });
+        }
+        setAlbumTracks(currentTracks);
+      }
+      applyMatchingStrategy('order', files, currentTracks);
     }
   };
 
