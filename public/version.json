@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.11",
-  "versionCode": 12,
-  "releaseNotes": "• Cola de reproducción de álbumes: Nuevo botón para añadir álbumes enteros a la cola en orden correlativo desde el detalle del disco y tarjetas de la biblioteca.\n• Transición fluida entre álbumes: Al terminar un álbum sin modo aleatorio, la reproducción continúa de forma natural por los siguientes álbumes alfabéticamente (evitando saltar al inicio de la biblioteca).\n• Resistencia en segundo plano: Wake Lock parcial y Wifi Lock en servicio nativo para evitar congelaciones o audio bloqueado a 0:00 mientras juegas o bloqueas la pantalla.\n• Firma unificada para compilaciones debug entre múltiples dispositivos.",
+  "latestVersion": "1.0.12",
+  "versionCode": 13,
+  "releaseNotes": "• Portada instantánea en la notificación de Android: Descarga asíncrona dedicada y refresco automático de la notificación y del carrusel multimedia sin requerir pausa/reanudación.\n• Soporte para álbumes masivos y deluxe: Eliminación del límite de 50 pistas en el explorador oficial (ampliado hasta 200 canciones) y autogeneración de slots para bonus tracks o temas extra.\n• Deduplicación atómica en subidas: Detección inteligente de pistas ya procesadas ante timeouts o reintentos, con reversión limpia en base de datos para evitar canciones duplicadas.\n• Moderación y playlists: Botones de moderación integrados en álbumes pendientes y corrección en la generación de enlaces de invitación en playlists colaborativas.",
   "history": [
+    {
+      "version": "1.0.12",
+      "versionCode": 13,
+      "notes": "• Portada instantánea en la notificación de Android: Descarga asíncrona dedicada y refresco automático de la notificación y del carrusel multimedia sin requerir pausa/reanudación.\n• Soporte para álbumes masivos y deluxe: Eliminación del límite de 50 pistas en el explorador oficial (ampliado hasta 200 canciones) y autogeneración de slots para bonus tracks o temas extra.\n• Deduplicación atómica en subidas: Detección inteligente de pistas ya procesadas ante timeouts o reintentos, con reversión limpia en base de datos para evitar canciones duplicadas.\n• Moderación y playlists: Botones de moderación integrados en álbumes pendientes y corrección en la generación de enlaces de invitación en playlists colaborativas."
+    },
     {
       "version": "1.0.11",
       "versionCode": 12,
@@ -65,7 +70,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.10",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.12",
   "mandatory": false,
-  "publishedAt": "2026-10-22T09:30:02.063Z"
+  "publishedAt": "2026-11-03T10:31:56.562Z"
 }
