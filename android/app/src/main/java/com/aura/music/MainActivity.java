@@ -1,6 +1,8 @@
 package com.aura.music;
 
 import android.os.Bundle;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -15,6 +17,11 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AuraMediaPlugin.class);
 
         super.onCreate(savedInstanceState);
+
+        // Desactivar el requisito de interacción de usuario para la reproducción multimedia.
+        // Permite que la música continúe reproduciéndose automáticamente en segundo plano
+        // al terminar una pista y pasar a la siguiente sin requerir tocar la pantalla.
+        configureWebView();
 
         WindowCompat.enableEdgeToEdge(getWindow());
 
@@ -37,5 +44,24 @@ public class MainActivity extends BridgeActivity {
         controller.hide(WindowInsetsCompat.Type.systemBars());
 
         getWindow().setNavigationBarContrastEnforced(false);
+    }
+
+    private void configureWebView() {
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            try {
+                WebView webView = getBridge().getWebView();
+                WebSettings settings = webView.getSettings();
+                settings.setMediaPlaybackRequiresUserGesture(false);
+                settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            } catch (Exception e) {
+                android.util.Log.e("MainActivity", "Error configurando WebSettings", e);
+            }
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        configureWebView();
     }
 }

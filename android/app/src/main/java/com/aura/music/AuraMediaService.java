@@ -74,11 +74,17 @@ public class AuraMediaService extends MediaSessionService {
         if (pm != null) {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AuraMusic:PlaybackWakeLock");
             wakeLock.setReferenceCounted(false);
+            try {
+                wakeLock.acquire();
+            } catch (Exception ignored) {}
         }
         WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wm != null) {
             wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AuraMusic:WifiLock");
             wifiLock.setReferenceCounted(false);
+            try {
+                wifiLock.acquire();
+            } catch (Exception ignored) {}
         }
 
         createNotificationChannel();
@@ -626,20 +632,13 @@ public class AuraMediaService extends MediaSessionService {
                     playing
             );
 
-            if (playing) {
-                if (wakeLock != null && !wakeLock.isHeld()) {
-                    try { wakeLock.acquire(); } catch (Exception ignored) {}
-                }
-                if (wifiLock != null && !wifiLock.isHeld()) {
-                    try { wifiLock.acquire(); } catch (Exception ignored) {}
-                }
-            } else {
-                if (wakeLock != null && wakeLock.isHeld()) {
-                    try { wakeLock.release(); } catch (Exception ignored) {}
-                }
-                if (wifiLock != null && wifiLock.isHeld()) {
-                    try { wifiLock.release(); } catch (Exception ignored) {}
-                }
+            // Mantener siempre despierta la CPU y Wi-Fi mientras el servicio de música esté activo,
+            // garantizando que las transiciones de canciones en segundo plano nunca se congelen.
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                try { wakeLock.acquire(); } catch (Exception ignored) {}
+            }
+            if (wifiLock != null && !wifiLock.isHeld()) {
+                try { wifiLock.acquire(); } catch (Exception ignored) {}
             }
 
             updateNotificationImmediately();

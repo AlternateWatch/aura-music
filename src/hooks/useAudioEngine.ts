@@ -407,12 +407,12 @@ export function useAudioEngine(
     };
 
     const onEndA = () => {
-      if (audioRef.current === a1 || (!a1.paused && a2.paused)) {
+      if (activePlayerRef.current === "A" || audioRef.current === a1) {
         handleEnded("A");
       }
     };
     const onEndB = () => {
-      if (audioRef.current === a2 || (!a2.paused && a1.paused)) {
+      if (activePlayerRef.current === "B" || audioRef.current === a2) {
         handleEnded("B");
       }
     };
@@ -685,11 +685,9 @@ export function useAudioEngine(
 
       const graph = graphRef.current;
       if (graph && graph.ctx.state !== "running") {
-        try {
-          await graph.resume();
-        } catch (e) {
-          console.error("Error resuming AudioContext:", e);
-        }
+        void graph.resume().catch((e) => {
+          console.warn("Non-fatal: Error resuming AudioContext in background:", e);
+        });
       }
 
       applyPlaybackRate(audio);
@@ -705,8 +703,18 @@ export function useAudioEngine(
             await audio.play();
           } catch (e: any) {
             if (e?.name === "NotAllowedError") {
-              console.warn("Autoplay bloqueado: requiere interacción del usuario");
-              setIsPlaying(false);
+              console.warn("Autoplay en segundo plano pausado por WebView/navegador. Manteniendo intención y reintentando...");
+              // NUNCA detener isPlaying: el usuario desea escuchar música continuamente.
+              if (isPlayingRef.current) {
+                const onAutoplayRetry = () => {
+                  if (isPlayingRef.current && audio.paused) {
+                    void audio.play().catch(() => {});
+                  }
+                };
+                audio.addEventListener("canplay", onAutoplayRetry, { once: true });
+                audio.addEventListener("loadeddata", onAutoplayRetry, { once: true });
+                setTimeout(onAutoplayRetry, 350);
+              }
             } else if (e?.name === "AbortError") {
               // Play interrumpido por cambio de buffer/red; reintentar cuando los datos lleguen
               if (isPlayingRef.current) {
@@ -719,6 +727,7 @@ export function useAudioEngine(
                 };
                 audio.addEventListener("canplay", onReadyRetry, { once: true });
                 audio.addEventListener("loadeddata", onReadyRetry, { once: true });
+                setTimeout(onReadyRetry, 350);
               }
             } else {
               console.error("Playback failed", e);
@@ -891,21 +900,22 @@ export function useAudioEngine(
       if (!audio) return;
 
       if (isPlayingRef.current && !isChangingTrackRef.current) {
-        if (audio.paused && audio.readyState >= 1) {
+        if (audio.paused) {
           if (graphRef.current && graphRef.current.ctx.state !== "running") {
             void graphRef.current.resume().catch(() => {});
           }
-          void audio.play().catch((err: any) => {
-            if (err?.name === "NotAllowedError") {
-              setIsPlaying(false);
-            }
-          });
+          if (audio.readyState >= 1) {
+            void audio.play().catch(() => {});
+          } else if (audio.src && audio.src !== "" && audio.src !== "about:blank") {
+            try { audio.load(); } catch {}
+            void audio.play().catch(() => {});
+          }
         }
       }
     }, 350);
 
     return () => clearInterval(watchdog);
-  }, [isPlaying, setIsPlaying]);
+  }, [isPlaying]);
 
   const subscribeToTime = useCallback((listener: () => void) => {
     timeListenersRef.current.add(listener);

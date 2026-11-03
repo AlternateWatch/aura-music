@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.12",
-  "versionCode": 13,
-  "releaseNotes": "• Portada instantánea en la notificación de Android: Descarga asíncrona dedicada y refresco automático de la notificación y del carrusel multimedia sin requerir pausa/reanudación.\n• Soporte para álbumes masivos y deluxe: Eliminación del límite de 50 pistas en el explorador oficial (ampliado hasta 200 canciones) y autogeneración de slots para bonus tracks o temas extra.\n• Deduplicación atómica en subidas: Detección inteligente de pistas ya procesadas ante timeouts o reintentos, con reversión limpia en base de datos para evitar canciones duplicadas.\n• Moderación y playlists: Botones de moderación integrados en álbumes pendientes y corrección en la generación de enlaces de invitación en playlists colaborativas.",
+  "latestVersion": "1.0.13",
+  "versionCode": 14,
+  "releaseNotes": "• Erradicación definitiva del bloqueo de reproducción automática: Soporte integral para transiciones continuas de audio en segundo plano con pantalla bloqueada o en otras apps.\n• Configuración nativa de WebView: Desactivación permanente de la política de restricción por gesto de usuario (User Gesture Policy) en Android.\n• CPU y Wi-Fi WakeLock continuo: Servicio en primer plano persistente para mantener el procesador y la red activos durante los cambios de canción, evitando que el sistema suspenda la app entre pistas.\n• Watchdog resiliente y AudioContext no bloqueante: Prevención de pausas accidentales y reintento inteligente de reproducción sin interrupción.",
   "history": [
+    {
+      "version": "1.0.13",
+      "versionCode": 14,
+      "notes": "• Erradicación definitiva del bloqueo de reproducción automática: Soporte integral para transiciones continuas de audio en segundo plano con pantalla bloqueada o en otras apps.\n• Configuración nativa de WebView: Desactivación permanente de la política de restricción por gesto de usuario (User Gesture Policy) en Android.\n• CPU y Wi-Fi WakeLock continuo: Servicio en primer plano persistente para mantener el procesador y la red activos durante los cambios de canción, evitando que el sistema suspenda la app entre pistas.\n• Watchdog resiliente y AudioContext no bloqueante: Prevención de pausas accidentales y reintento inteligente de reproducción sin interrupción."
+    },
     {
       "version": "1.0.12",
       "versionCode": 13,
@@ -70,7 +75,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.12",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.13",
   "mandatory": false,
-  "publishedAt": "2026-11-03T10:31:56.562Z"
+  "publishedAt": "2026-11-03T10:44:58.980Z"
 }
