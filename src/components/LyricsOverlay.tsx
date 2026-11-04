@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useAudioPlaybackTime } from '../hooks/useAudioEngine';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Music2, Loader2, Play, Pause, RotateCcw, Plus, Trash2, 
-  Check, Clock, Edit3, AlignLeft, Save, Sparkles, ChevronRight,
-  Volume2, FastForward, Rewind, FileText, ArrowDown
+  Check, Clock, Edit3, Save, Sparkles, ChevronRight,
+  FastForward, Rewind, FileText, BookOpen, Quote, ExternalLink,
+  MessageSquarePlus, User
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { type Song } from '../constants';
@@ -36,7 +37,41 @@ export interface EditableLyricLine {
   text: string;
 }
 
-const lyricsSessionCache = new Map<string, { synced?: string; plain?: string }>();
+export interface TrackInterviewQuote {
+  id: string;
+  quote: string;
+  source: string;
+  url?: string;
+}
+
+export interface LineAnnotation {
+  key: string;
+  lineIndex?: number;
+  lineText: string;
+  content: string;
+  quote?: string;
+  quoteSource?: string;
+  quoteUrl?: string;
+  updatedAt?: string;
+}
+
+export interface TrackLoreData {
+  summary?: string;
+  artistReflection?: string;
+  interviews?: TrackInterviewQuote[];
+  annotations?: Record<string, LineAnnotation>;
+  updatedAt?: string;
+}
+
+const lyricsSessionCache = new Map<string, { synced?: string; plain?: string; lore?: TrackLoreData | null }>();
+
+const normalizeVerseKey = (text: string): string => {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 
 const cleanSongTitle = (str: string): string => {
   if (!str) return '';
@@ -125,6 +160,23 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   const [retryTrigger, setRetryTrigger] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
 
+  // Estado del Lore / Trasfondo y Anotaciones estilo Genius
+  const [loreData, setLoreData] = useState<TrackLoreData>({});
+  const [isLoreDrawerOpen, setIsLoreDrawerOpen] = useState(false);
+  const [isEditingLore, setIsEditingLore] = useState(false);
+  const [draftSummary, setDraftSummary] = useState('');
+  const [draftArtistReflection, setDraftArtistReflection] = useState('');
+  const [draftInterviews, setDraftInterviews] = useState<TrackInterviewQuote[]>([]);
+  const [isSavingLore, setIsSavingLore] = useState(false);
+
+  // Estado de la anotación por frase seleccionada (estilo Genius)
+  const [activeAnnotationLine, setActiveAnnotationLine] = useState<{ index: number; text: string; time: number } | null>(null);
+  const [isEditingAnnotation, setIsEditingAnnotation] = useState(false);
+  const [draftAnnotationContent, setDraftAnnotationContent] = useState('');
+  const [draftAnnotationQuote, setDraftAnnotationQuote] = useState('');
+  const [draftAnnotationQuoteSource, setDraftAnnotationQuoteSource] = useState('');
+  const [draftAnnotationQuoteUrl, setDraftAnnotationQuoteUrl] = useState('');
+
   // Estado del editor manual frase a frase
   const [editorLines, setEditorLines] = useState<EditableLyricLine[]>([]);
   const [selectedLineIndex, setSelectedLineIndex] = useState<number>(0);
@@ -160,6 +212,31 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     const tenths = Math.floor((secs - wholeSecs) * 10);
     return `${mins.toString().padStart(2, '0')}:${wholeSecs.toString().padStart(2, '0')}.${tenths}`;
   };
+
+  // Obtener la anotación de una frase si existe
+  const getLineAnnotation = (index: number, text: string): LineAnnotation | null => {
+    const map = loreData?.annotations;
+    if (!map) return null;
+    const norm = normalizeVerseKey(text);
+    if (!norm) return null;
+    const exactKey = `${index}::${norm}`;
+    if (map[exactKey] && map[exactKey].content?.trim()) return map[exactKey];
+    if (map[norm] && map[norm].content?.trim()) return map[norm];
+    return null;
+  };
+
+  const hasLoreContent = useMemo(() => {
+    return Boolean(
+      (loreData?.summary && loreData.summary.trim().length > 0) ||
+      (loreData?.artistReflection && loreData.artistReflection.trim().length > 0) ||
+      (loreData?.interviews && loreData.interviews.length > 0)
+    );
+  }, [loreData]);
+
+  const annotationsCount = useMemo(() => {
+    if (!loreData?.annotations) return 0;
+    return Object.values(loreData.annotations).filter(a => a && a.content?.trim()).length;
+  }, [loreData]);
 
   // Parsear formato LRC a líneas
   const parseLRC = (lrcContent: string): LyricLine[] => {
@@ -209,16 +286,24 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       .join('\n');
   };
 
-  // Cargar letras con hasta 4 intentos y múltiples estrategias (Aura DB -> lrclib get -> lrclib search estructurado -> lrclib search libre -> nombres limpios)
+  // Cargar letras y lore con hasta 4 intentos
   useEffect(() => {
     if (!isOpen || !currentSong) return;
 
     let isMounted = true;
     const MAX_ATTEMPTS = 4;
 
-    const applySyncedLyrics = (rawSynced: string) => {
+    setActiveAnnotationLine(null);
+    setIsEditingAnnotation(false);
+    setIsLoreDrawerOpen(false);
+    setIsEditingLore(false);
+
+    const applySyncedLyrics = (rawSynced: string, remoteLore?: TrackLoreData | null) => {
       if (!isMounted) return;
-      lyricsSessionCache.set(currentSong.id, { synced: rawSynced });
+      const prevCache = lyricsSessionCache.get(currentSong.id);
+      const mergedLore = remoteLore !== undefined ? remoteLore : (prevCache?.lore || {});
+      lyricsSessionCache.set(currentSong.id, { synced: rawSynced, lore: mergedLore });
+      if (mergedLore) setLoreData(mergedLore);
       const parsed = parseLRC(rawSynced);
       setLyrics(parsed);
       initEditorFromLyrics(parsed);
@@ -226,9 +311,12 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       setIsLoading(false);
     };
 
-    const applyPlainLyrics = (rawPlain: string) => {
+    const applyPlainLyrics = (rawPlain: string, remoteLore?: TrackLoreData | null) => {
       if (!isMounted) return;
-      lyricsSessionCache.set(currentSong.id, { plain: rawPlain });
+      const prevCache = lyricsSessionCache.get(currentSong.id);
+      const mergedLore = remoteLore !== undefined ? remoteLore : (prevCache?.lore || {});
+      lyricsSessionCache.set(currentSong.id, { plain: rawPlain, lore: mergedLore });
+      if (mergedLore) setLoreData(mergedLore);
       const plainLines = rawPlain
         .split('\n')
         .map((t: string) => sanitizeText(t))
@@ -257,38 +345,45 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       setIsLoading(true);
       setError(null);
       setRetryAttempt(1);
+      setLoreData({});
 
       // 0. Comprobar caché en memoria de la sesión (si no es un reintento manual forzado)
       if (retryTrigger === 0 && lyricsSessionCache.has(currentSong.id)) {
         const cached = lyricsSessionCache.get(currentSong.id)!;
+        if (cached.lore) setLoreData(cached.lore);
         if (cached.synced) {
-          applySyncedLyrics(cached.synced);
+          applySyncedLyrics(cached.synced, cached.lore);
           return;
         }
         if (cached.plain) {
-          applyPlainLyrics(cached.plain);
+          applyPlainLyrics(cached.plain, cached.lore);
           return;
         }
       }
 
       let plainFallbackCandidate: string | null = null;
+      let loadedLore: TrackLoreData | null = null;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         if (!isMounted) return;
         setRetryAttempt(attempt);
 
-        // 1. Consultar la API de Aura (incluye letras personalizadas y búsqueda desde el servidor)
+        // 1. Consultar la API de Aura (incluye letras personalizadas, lore/anotaciones y búsqueda desde el servidor)
         const auraData = await fetchJsonWithTimeout(`${API_BASE}/api/tracks/${currentSong.id}/lyrics`, 6000);
         if (!isMounted) return;
+        if (auraData?.lore && typeof auraData.lore === 'object') {
+          loadedLore = auraData.lore;
+          setLoreData(auraData.lore);
+        }
         if (auraData?.lyrics && String(auraData.lyrics).trim().length > 0) {
-          applySyncedLyrics(auraData.lyrics);
+          applySyncedLyrics(auraData.lyrics, loadedLore);
           return;
         }
         if (auraData?.plainLyrics && String(auraData.plainLyrics).trim().length > 0) {
           plainFallbackCandidate = auraData.plainLyrics;
         }
 
-        // 2. Intentar lrclib /api/get (con y sin álbum/duración por si difieren los metadatos)
+        // 2. Intentar lrclib /api/get
         const getParams = new URLSearchParams({
           artist_name: currentSong.artist,
           track_name: currentSong.title
@@ -303,7 +398,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         const getData = await fetchJsonWithTimeout(`https://lrclib.net/api/get?${getParams.toString()}`, 5000);
         if (!isMounted) return;
         if (getData?.syncedLyrics) {
-          applySyncedLyrics(getData.syncedLyrics);
+          applySyncedLyrics(getData.syncedLyrics, loadedLore);
           return;
         }
         if (getData?.plainLyrics && !plainFallbackCandidate) {
@@ -319,7 +414,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         if (!isMounted) return;
         const bestStructured = pickBestSearchResult(structuredResults);
         if (bestStructured?.synced) {
-          applySyncedLyrics(bestStructured.synced);
+          applySyncedLyrics(bestStructured.synced, loadedLore);
           return;
         }
         if (bestStructured?.plain && !plainFallbackCandidate) {
@@ -334,14 +429,14 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         if (!isMounted) return;
         const bestRaw = pickBestSearchResult(rawQueryResults);
         if (bestRaw?.synced) {
-          applySyncedLyrics(bestRaw.synced);
+          applySyncedLyrics(bestRaw.synced, loadedLore);
           return;
         }
         if (bestRaw?.plain && !plainFallbackCandidate) {
           plainFallbackCandidate = bestRaw.plain;
         }
 
-        // 5. Intentar con título y artista limpios (sin "(feat. ...)", "[Official Video]", "- Remastered", etc.)
+        // 5. Intentar con título y artista limpios
         const cleanedTitle = cleanSongTitle(currentSong.title);
         const cleanedArtist = cleanArtistName(currentSong.artist);
         if (cleanedTitle && cleanedArtist && (cleanedTitle !== currentSong.title || cleanedArtist !== currentSong.artist)) {
@@ -352,7 +447,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           if (!isMounted) return;
           const bestClean = pickBestSearchResult(cleanResults);
           if (bestClean?.synced) {
-            applySyncedLyrics(bestClean.synced);
+            applySyncedLyrics(bestClean.synced, loadedLore);
             return;
           }
           if (bestClean?.plain && !plainFallbackCandidate) {
@@ -360,13 +455,11 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           }
         }
 
-        // Si ya tenemos al menos la letra en texto plano tras el 2º intento, mostrarla sin hacer esperar más
         if (plainFallbackCandidate && attempt >= 2) {
-          applyPlainLyrics(plainFallbackCandidate);
+          applyPlainLyrics(plainFallbackCandidate, loadedLore);
           return;
         }
 
-        // Esperar antes del siguiente reintento si aún quedan intentos disponibles
         if (attempt < MAX_ATTEMPTS) {
           await new Promise(resolve => setTimeout(resolve, 650 * attempt));
         }
@@ -375,7 +468,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       if (!isMounted) return;
 
       if (plainFallbackCandidate) {
-        applyPlainLyrics(plainFallbackCandidate);
+        applyPlainLyrics(plainFallbackCandidate, loadedLore);
         return;
       }
 
@@ -392,9 +485,139 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     };
   }, [currentSong?.id, isOpen, retryTrigger]);
 
+  // Guardar objeto Lore completo en el servidor
+  const saveLoreToServer = async (updatedLore: TrackLoreData): Promise<boolean> => {
+    if (!currentSong) return false;
+    setIsSavingLore(true);
+    try {
+      const token = localStorage.getItem('aura_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/api/tracks/${currentSong.id}/lore`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ lore: updatedLore })
+      });
+
+      if (!res.ok) throw new Error("Error guardando lore");
+
+      setLoreData(updatedLore);
+      const cached = lyricsSessionCache.get(currentSong.id) || {};
+      lyricsSessionCache.set(currentSong.id, { ...cached, lore: updatedLore });
+      return true;
+    } catch (e) {
+      console.error("Error guardando lore/anotación:", e);
+      return false;
+    } finally {
+      setIsSavingLore(false);
+    }
+  };
+
+  // Abrir panel de Trasfondo / Lore
+  const handleOpenLoreDrawer = (startInEdit = false) => {
+    setDraftSummary(loreData?.summary || '');
+    setDraftArtistReflection(loreData?.artistReflection || '');
+    setDraftInterviews(loreData?.interviews ? [...loreData.interviews] : []);
+    setIsEditingLore(startInEdit && canEditLyrics);
+    setActiveAnnotationLine(null);
+    setIsLoreDrawerOpen(true);
+  };
+
+  const handleSaveLore = async () => {
+    const cleanedInterviews = draftInterviews
+      .map(i => ({ ...i, quote: i.quote.trim(), source: i.source.trim(), url: i.url?.trim() || undefined }))
+      .filter(i => i.quote.length > 0);
+
+    const updated: TrackLoreData = {
+      ...loreData,
+      summary: draftSummary.trim() || undefined,
+      artistReflection: draftArtistReflection.trim() || undefined,
+      interviews: cleanedInterviews,
+      updatedAt: new Date().toISOString()
+    };
+
+    const ok = await saveLoreToServer(updated);
+    if (ok) {
+      setIsEditingLore(false);
+    }
+  };
+
+  // Abrir anotación de una frase (estilo Genius)
+  const handleOpenLineAnnotation = (index: number, line: LyricLine, startInEdit = false) => {
+    const existing = getLineAnnotation(index, line.text);
+    setActiveAnnotationLine({ index, text: line.text, time: line.time });
+    setDraftAnnotationContent(existing?.content || '');
+    setDraftAnnotationQuote(existing?.quote || '');
+    setDraftAnnotationQuoteSource(existing?.quoteSource || '');
+    setDraftAnnotationQuoteUrl(existing?.quoteUrl || '');
+    setIsEditingAnnotation((startInEdit || !existing) && canEditLyrics);
+    setIsLoreDrawerOpen(false);
+  };
+
+  const handleSaveLineAnnotation = async () => {
+    if (!activeAnnotationLine) return;
+    const norm = normalizeVerseKey(activeAnnotationLine.text);
+    const exactKey = `${activeAnnotationLine.index}::${norm}`;
+    const nextAnnotations = { ...(loreData.annotations || {}) };
+
+    if (!draftAnnotationContent.trim()) {
+      delete nextAnnotations[exactKey];
+      delete nextAnnotations[norm];
+    } else {
+      const annotationObj: LineAnnotation = {
+        key: exactKey,
+        lineIndex: activeAnnotationLine.index,
+        lineText: activeAnnotationLine.text,
+        content: draftAnnotationContent.trim(),
+        quote: draftAnnotationQuote.trim() || undefined,
+        quoteSource: draftAnnotationQuoteSource.trim() || undefined,
+        quoteUrl: draftAnnotationQuoteUrl.trim() || undefined,
+        updatedAt: new Date().toISOString()
+      };
+      nextAnnotations[exactKey] = annotationObj;
+      nextAnnotations[norm] = annotationObj;
+    }
+
+    const updated: TrackLoreData = {
+      ...loreData,
+      annotations: nextAnnotations,
+      updatedAt: new Date().toISOString()
+    };
+
+    const ok = await saveLoreToServer(updated);
+    if (ok) {
+      if (!draftAnnotationContent.trim()) {
+        setActiveAnnotationLine(null);
+      } else {
+        setIsEditingAnnotation(false);
+      }
+    }
+  };
+
+  const handleDeleteLineAnnotation = async () => {
+    if (!activeAnnotationLine) return;
+    const norm = normalizeVerseKey(activeAnnotationLine.text);
+    const exactKey = `${activeAnnotationLine.index}::${norm}`;
+    const nextAnnotations = { ...(loreData.annotations || {}) };
+    delete nextAnnotations[exactKey];
+    delete nextAnnotations[norm];
+
+    const updated: TrackLoreData = {
+      ...loreData,
+      annotations: nextAnnotations,
+      updatedAt: new Date().toISOString()
+    };
+
+    const ok = await saveLoreToServer(updated);
+    if (ok) {
+      setActiveAnnotationLine(null);
+      setIsEditingAnnotation(false);
+    }
+  };
+
   // Inicializar editor desde letras parseadas
   const initEditorFromLyrics = (parsed: LyricLine[]) => {
-    // Si hay un borrador en progreso guardado en localStorage, ofrecer o cargar
     try {
       const draft = localStorage.getItem(`aura_lyrics_draft_${currentSong?.id}`);
       if (draft) {
@@ -512,13 +735,11 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   const handleSyncCurrentLine = () => {
     if (editorLines.length === 0) return;
     const index = Math.min(Math.max(0, selectedLineIndex), editorLines.length - 1);
-    const targetLine = editorLines[index];
 
     const stampTime = Number(liveCurrentTime.toFixed(2));
 
     setEditorLines(prev => prev.map((l, i) => i === index ? { ...l, time: stampTime } : l));
 
-    // Si aún hay líneas siguientes, avanzar a la siguiente automáticamente
     if (index + 1 < editorLines.length) {
       const nextIndex = index + 1;
       setSelectedLineIndex(nextIndex);
@@ -526,12 +747,10 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     }
   };
 
-  // Fijar tiempo específico a una línea
   const handleSetLineTime = (id: string, time: number) => {
     setEditorLines(prev => prev.map(l => l.id === id ? { ...l, time: Number(time.toFixed(2)) } : l));
   };
 
-  // Micro-ajustes de tiempo (+/- 0.3s o 0.5s)
   const handleNudgeTime = (id: string, delta: number) => {
     setEditorLines(prev => prev.map(l => {
       if (l.id !== id) return l;
@@ -541,7 +760,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     }));
   };
 
-  // Limpiar todos los tiempos para sincronizar desde cero
   const handleResetTimings = () => {
     if (window.confirm("¿Seguro que deseas reiniciar todos los tiempos y sincronizarlos desde cero?")) {
       setEditorLines(prev => prev.map(l => ({ ...l, time: null })));
@@ -550,7 +768,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     }
   };
 
-  // Pegar texto completo en masa
   const handleApplyPastedText = () => {
     if (!pastedText.trim()) return;
 
@@ -561,7 +778,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
     if (rawLines.length === 0) return;
 
-    // Verificar si el texto pegado ya contiene marcas LRC de tiempo [mm:ss.xx]
     const hasLrcTags = /\[\d+:\d+(?:\.\d+)?\]/.test(pastedText);
 
     if (hasLrcTags) {
@@ -622,19 +838,17 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         throw new Error(errData.error || "Error al guardar en el servidor");
       }
 
-      // Actualizar caché de sesión y vista local de karaoke
-      lyricsSessionCache.set(currentSong.id, { synced: lrcString });
+      const prevCache = lyricsSessionCache.get(currentSong.id);
+      lyricsSessionCache.set(currentSong.id, { synced: lrcString, lore: prevCache?.lore || loreData });
       const newParsed = parseLRC(lrcString);
       setLyrics(newParsed);
       setError(null);
       setSaveSuccess(true);
 
-      // Limpiar borrador temporal guardado
       try {
         localStorage.removeItem(`aura_lyrics_draft_${currentSong.id}`);
       } catch {}
 
-      // Después de 1 segundo, volver a la pestaña de vista karaoke para disfrutar el resultado
       setTimeout(() => {
         setActiveTab('view');
         setSaveSuccess(false);
@@ -642,7 +856,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
     } catch (err: any) {
       console.error("Error guardando letras:", err);
-      setSaveError(err.message || "Error al guardar las letras. Asegúrate de haber iniciado sesión.");
+      setSaveError(err.message || "Error al guardar las letras.");
     } finally {
       setIsSaving(false);
     }
@@ -655,9 +869,10 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     return curr.time <= liveCurrentTime ? idx : prev;
   }, -1);
 
-  // Estadísticas del sincronizador
   const syncedCount = editorLines.filter(l => l.time !== null).length;
-  const totalCount = editorLines.filter(l => l.text.trim().length > 0).length;
+  const activeAnnotationObj = activeAnnotationLine
+    ? getLineAnnotation(activeAnnotationLine.index, activeAnnotationLine.text)
+    : null;
 
   return (
     <motion.div 
@@ -669,7 +884,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       {/* Header */}
       <div className="h-20 md:h-24 flex items-center justify-between px-4 md:px-10 shrink-0 border-b border-white/10 bg-black/40">
         {/* Info Canción */}
-        <div className="flex items-center gap-3 md:gap-5 min-w-0 max-w-[70%]">
+        <div className="flex items-center gap-3 md:gap-5 min-w-0 max-w-[60%]">
           <img 
             src={currentSong?.coverUrl || DEFAULT_COVER} 
             onError={(e) => {
@@ -690,8 +905,28 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           </div>
         </div>
 
-        {/* Acciones Derecha (Volver a letras si estamos en el editor + Cerrar) */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Acciones Derecha (Botón Trasfondo/Lore + Volver a letras + Cerrar) */}
+        <div className="flex items-center gap-2.5 md:gap-3 shrink-0">
+          {(hasLoreContent || canEditLyrics) && activeTab === 'view' && (
+            <button
+              onClick={() => handleOpenLoreDrawer(false)}
+              className={`flex items-center gap-2 px-3.5 py-2 md:px-4 md:py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                isLoreDrawerOpen
+                  ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 shadow-lg shadow-amber-500/10'
+                  : hasLoreContent
+                  ? 'bg-white/10 hover:bg-white/15 border-amber-400/30 text-amber-200/90 hover:text-white'
+                  : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/60 hover:text-white'
+              }`}
+              title="Trasfondo de la canción, entrevistas y reflexión sobre el artista"
+            >
+              <BookOpen size={15} className={hasLoreContent ? "text-amber-400" : ""} />
+              <span className="hidden sm:inline">Trasfondo</span>
+              {hasLoreContent && (
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              )}
+            </button>
+          )}
+
           {canEditLyrics && activeTab === 'editor' && (
             <button
               onClick={() => setActiveTab('view')}
@@ -702,6 +937,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               <span>Ver letras</span>
             </button>
           )}
+
           <button 
             onClick={onClose} 
             className="p-2.5 md:p-3 bg-white/5 hover:bg-white/10 active:scale-95 rounded-full transition-all text-white/60 hover:text-white cursor-pointer shrink-0"
@@ -712,11 +948,11 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         </div>
       </div>
 
-      {/* CUERPO: VISTA KARAOKE */}
+      {/* CUERPO: VISTA KARAOKE + ANOTACIONES ESTILO GENIUS */}
       {activeTab === 'view' && (
         <div 
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto px-6 md:px-10 py-32 flex flex-col items-center scrollbar-hide relative"
+          className="flex-1 overflow-y-auto px-6 md:px-10 py-28 flex flex-col items-center scrollbar-hide relative"
         >
           {isLoading ? (
             <div className="flex flex-col items-center justify-center gap-4 my-auto opacity-60">
@@ -736,7 +972,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               <p className="text-sm text-white/50 mb-6 leading-relaxed">
                 No se encontraron letras tras 4 intentos de búsqueda.
               </p>
-              <div className="flex items-center justify-center w-full">
+              <div className="flex items-center justify-center gap-3 w-full">
                 <button
                   onClick={() => setRetryTrigger(prev => prev + 1)}
                   className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm transition-all cursor-pointer"
@@ -744,33 +980,129 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                   <RotateCcw size={16} />
                   <span>Reintentar</span>
                 </button>
+                {hasLoreContent && (
+                  <button
+                    onClick={() => handleOpenLoreDrawer(false)}
+                    className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-200 font-bold text-sm transition-all cursor-pointer"
+                  >
+                    <BookOpen size={16} />
+                    <span>Ver trasfondo</span>
+                  </button>
+                )}
               </div>
             </div>
           ) : (
-            <div className="w-full max-w-4xl space-y-10 md:space-y-12 pb-16">
+            <div className="w-full max-w-4xl space-y-10 md:space-y-12 pb-20">
+              {annotationsCount > 0 && (
+                <div className="flex justify-center mb-4">
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-400/20 text-amber-200/80 text-[11px] font-semibold tracking-wide">
+                    <Sparkles size={12} className="text-amber-400" />
+                    <span>Toca los versos subrayados para leer su análisis y referencias</span>
+                  </div>
+                </div>
+              )}
+
               {lyrics.map((line, index) => {
                 const isActive = index === activeKaraokeIndex;
                 const isPast = index < activeKaraokeIndex;
+                const annotation = getLineAnnotation(index, line.text);
+                const isAnnotated = Boolean(annotation);
 
                 return (
                   <div
                     key={line.id || index}
                     ref={isActive ? activeLineRef : null}
-                    onClick={() => onSeek(line.time)}
+                    onClick={() => {
+                      if (isAnnotated) {
+                        handleOpenLineAnnotation(index, line, false);
+                      } else {
+                        onSeek(line.time);
+                      }
+                    }}
                     className={`
-                      cursor-pointer transition-all duration-500 ease-out text-center select-none py-1
-                      ${isActive ? 'text-white scale-105 md:scale-110 drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]' : isPast ? 'text-white/20 hover:text-white/40' : 'text-white/40 hover:text-white/70'}
+                      group relative cursor-pointer transition-all duration-500 ease-out text-center select-none py-1.5 flex flex-col items-center justify-center
+                      ${isActive ? 'text-white scale-105 md:scale-110 drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]' : isPast ? 'text-white/25 hover:text-white/50' : 'text-white/45 hover:text-white/80'}
                     `}
                   >
-                    <p className={`
-                      text-2xl md:text-4xl lg:text-5xl font-black tracking-tight leading-snug
-                      ${isActive ? 'opacity-100 blur-none font-black' : 'opacity-80 blur-[0.5px] font-bold'}
+                    <div className={`
+                      relative inline-flex items-center gap-3 px-4 py-1.5 rounded-2xl transition-all
+                      ${isAnnotated 
+                        ? 'bg-amber-500/[0.12] hover:bg-amber-500/[0.22] border-b-2 border-amber-400/70 shadow-lg shadow-amber-500/5' 
+                        : ''
+                      }
                     `}>
-                      {line.text}
-                    </p>
+                      <p className={`
+                        text-2xl md:text-4xl lg:text-5xl font-black tracking-tight leading-snug
+                        ${isActive ? 'opacity-100 blur-none font-black' : 'opacity-85 blur-[0.4px] font-bold'}
+                        ${isAnnotated && !isActive ? 'text-amber-100/90' : ''}
+                      `}>
+                        {line.text}
+                      </p>
+
+                      {isAnnotated && (
+                        <span 
+                          className="shrink-0 w-6 h-6 md:w-7 md:h-7 rounded-lg bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shadow-sm"
+                          title="Este verso tiene una anotación / análisis"
+                        >
+                          <BookOpen size={13} />
+                        </span>
+                      )}
+
+                      {/* Botón rápido en hover para Admins/Moderadores en Web/Escritorio para anotar cualquier frase */}
+                      {canEditLyrics && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenLineAnnotation(index, line, true);
+                          }}
+                          className={`
+                            opacity-0 group-hover:opacity-100 transition-opacity ml-2 p-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer
+                            ${isAnnotated 
+                              ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 hover:bg-amber-500/30' 
+                              : 'bg-white/10 border-white/15 text-white/70 hover:text-white hover:bg-white/20'
+                            }
+                          `}
+                          title={isAnnotated ? "Editar anotación de esta frase" : "Añadir anotación estilo Genius a esta frase"}
+                        >
+                          <MessageSquarePlus size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
+
+              {/* Ficha resumen de Trasfondo al final de las letras si existe contenido */}
+              {hasLoreContent && (
+                <div className="pt-16 max-w-2xl mx-auto w-full">
+                  <div 
+                    onClick={() => handleOpenLoreDrawer(false)}
+                    className="p-6 md:p-8 rounded-3xl bg-gradient-to-br from-amber-500/[0.08] via-white/[0.03] to-purple-500/[0.08] border border-amber-400/20 hover:border-amber-400/40 transition-all cursor-pointer shadow-2xl group"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2.5 text-amber-300 text-xs font-bold uppercase tracking-[0.2em]">
+                        <BookOpen size={16} />
+                        <span>Trasfondo y Reflexión</span>
+                      </div>
+                      <span className="text-xs text-white/40 group-hover:text-white/80 flex items-center gap-1 font-semibold transition-colors">
+                        Leer completo <ChevronRight size={14} />
+                      </span>
+                    </div>
+                    {loreData.summary && (
+                      <p className="text-sm md:text-base text-white/80 leading-relaxed line-clamp-3 font-normal">
+                        {loreData.summary}
+                      </p>
+                    )}
+                    {loreData.interviews && loreData.interviews.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-white/10 flex items-center gap-2 text-xs text-amber-200/70">
+                        <Quote size={13} className="shrink-0" />
+                        <span className="truncate italic">"{loreData.interviews[0].quote}" — {loreData.interviews[0].source}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -786,6 +1118,448 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           )}
         </div>
       )}
+
+      {/* PANEL LATERAL / DRAWER: ANOTACIÓN POR FRASE (ESTILO GENIUS) */}
+      <AnimatePresence>
+        {activeAnnotationLine && (
+          <div className="fixed inset-0 z-[180] flex justify-end bg-black/60 backdrop-blur-sm" onClick={() => setActiveAnnotationLine(null)}>
+            <motion.div
+              initial={{ x: '100%', opacity: 0.5 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg h-full bg-[#121216] border-l border-white/10 shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Cabecera de la anotación */}
+              <div className="p-6 border-b border-white/10 bg-gradient-to-b from-amber-500/10 to-transparent flex items-start justify-between gap-4 shrink-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-amber-400 text-[11px] font-bold uppercase tracking-[0.2em] mb-2">
+                    <Sparkles size={13} />
+                    <span>Anotación del verso</span>
+                  </div>
+                  <blockquote className="text-lg md:text-xl font-serif italic font-bold text-white leading-snug border-l-2 border-amber-400 pl-3.5 py-0.5">
+                    "{activeAnnotationLine.text}"
+                  </blockquote>
+                  <button
+                    type="button"
+                    onClick={() => onSeek(activeAnnotationLine.time)}
+                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-semibold text-white/70 hover:text-white transition-all cursor-pointer"
+                  >
+                    <Play size={11} fill="currentColor" />
+                    <span>Escuchar este momento ({formatTimestamp(activeAnnotationLine.time)})</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {canEditLyrics && !isEditingAnnotation && (
+                    <button
+                      onClick={() => setIsEditingAnnotation(true)}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 text-white/70 hover:text-white transition-all cursor-pointer"
+                      title="Editar anotación"
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setActiveAnnotationLine(null)}
+                    className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Cuerpo de la anotación */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 select-text">
+                {isEditingAnnotation && canEditLyrics ? (
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-white/60 mb-2">
+                        Significado / Reflexión sobre este verso
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={draftAnnotationContent}
+                        onChange={(e) => setDraftAnnotationContent(e.target.value)}
+                        placeholder="Explica el significado de esta frase, la historia detrás, metáforas o contexto..."
+                        className="w-full p-4 rounded-2xl bg-black/50 border border-white/10 text-white text-sm leading-relaxed outline-none focus:border-amber-400/60 transition-colors resize-none"
+                      />
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-300/80">
+                        <Quote size={13} />
+                        <span>Referencia a entrevista / Cita (Opcional)</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={draftAnnotationQuote}
+                        onChange={(e) => setDraftAnnotationQuote(e.target.value)}
+                        placeholder="Cita textual del artista o entrevista relacionada con este verso..."
+                        className="w-full p-3 rounded-xl bg-black/40 border border-white/10 text-white text-xs leading-relaxed outline-none focus:border-amber-400/50 resize-none"
+                      />
+                      <input
+                        type="text"
+                        value={draftAnnotationQuoteSource}
+                        onChange={(e) => setDraftAnnotationQuoteSource(e.target.value)}
+                        placeholder="Fuente (ej. Entrevista con Jordi Wild / Genius Verified, 2023)"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-amber-400/50"
+                      />
+                      <input
+                        type="url"
+                        value={draftAnnotationQuoteUrl}
+                        onChange={(e) => setDraftAnnotationQuoteUrl(e.target.value)}
+                        placeholder="Enlace opcional (https://youtube.com/...)"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-amber-400/50"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      {activeAnnotationObj ? (
+                        <button
+                          type="button"
+                          onClick={handleDeleteLineAnnotation}
+                          disabled={isSavingLore}
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold transition-all cursor-pointer"
+                        >
+                          <Trash2 size={14} />
+                          <span>Borrar nota</span>
+                        </button>
+                      ) : <div />}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeAnnotationObj) setIsEditingAnnotation(false);
+                            else setActiveAnnotationLine(null);
+                          }}
+                          className="px-4 py-2 rounded-xl text-xs font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveLineAnnotation}
+                          disabled={isSavingLore}
+                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          {isSavingLore ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                          <span>Guardar anotación</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : activeAnnotationObj ? (
+                  <div className="space-y-6">
+                    <div className="text-sm md:text-base text-white/90 leading-relaxed whitespace-pre-line font-normal">
+                      {activeAnnotationObj.content}
+                    </div>
+
+                    {activeAnnotationObj.quote && (
+                      <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 to-white/[0.02] border border-amber-400/25 space-y-2.5">
+                        <Quote size={20} className="text-amber-400/70" />
+                        <p className="text-sm italic text-amber-100/95 leading-relaxed">
+                          "{activeAnnotationObj.quote}"
+                        </p>
+                        <div className="flex items-center justify-between pt-1 text-xs text-white/50">
+                          {activeAnnotationObj.quoteSource && (
+                            <span className="font-semibold text-amber-300/80">— {activeAnnotationObj.quoteSource}</span>
+                          )}
+                          {activeAnnotationObj.quoteUrl && (
+                            <a
+                              href={activeAnnotationObj.quoteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-amber-400 hover:underline font-semibold"
+                            >
+                              <span>Ver fuente</span>
+                              <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* PANEL LATERAL / DRAWER: FICHA DE "TRASFONDO / LORE" DE LA CANCIÓN Y ARTISTA */}
+      <AnimatePresence>
+        {isLoreDrawerOpen && (
+          <div className="fixed inset-0 z-[180] flex justify-end bg-black/65 backdrop-blur-sm" onClick={() => setIsLoreDrawerOpen(false)}>
+            <motion.div
+              initial={{ x: '100%', opacity: 0.5 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-2xl h-full bg-[#121216] border-l border-white/10 shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Cabecera del Trasfondo */}
+              <div className="p-6 border-b border-white/10 bg-gradient-to-b from-purple-500/10 via-amber-500/5 to-transparent flex items-center justify-between gap-4 shrink-0">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-300 shrink-0">
+                    <BookOpen size={22} />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400 block">
+                      Editorial & Lore
+                    </span>
+                    <h3 className="text-lg md:text-xl font-bold text-white truncate">
+                      Trasfondo: {currentSong?.title}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {canEditLyrics && !isEditingLore && (
+                    <button
+                      onClick={() => setIsEditingLore(true)}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 text-white/70 hover:text-white transition-all cursor-pointer"
+                      title="Editar trasfondo, reflexión y entrevistas"
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsLoreDrawerOpen(false)}
+                    className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-all cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenido del Trasfondo */}
+              <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 select-text">
+                {isEditingLore && canEditLyrics ? (
+                  <div className="space-y-6">
+                    {/* 1. Reflexión sobre la canción */}
+                    <div>
+                      <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-300 mb-2">
+                        <Music2 size={14} />
+                        <span>Sobre la canción (Reflexión, historia y contexto)</span>
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={draftSummary}
+                        onChange={(e) => setDraftSummary(e.target.value)}
+                        placeholder="Escribe tu reflexión sobre esta canción, su historia, de qué trata, detalles de producción..."
+                        className="w-full p-4 rounded-2xl bg-black/50 border border-white/10 text-white text-sm leading-relaxed outline-none focus:border-amber-400/60 resize-none"
+                      />
+                    </div>
+
+                    {/* 2. Reflexión sobre el artista */}
+                    <div>
+                      <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">
+                        <User size={14} />
+                        <span>Sobre {currentSong?.artist} y esta etapa</span>
+                      </label>
+                      <textarea
+                        rows={5}
+                        value={draftArtistReflection}
+                        onChange={(e) => setDraftArtistReflection(e.target.value)}
+                        placeholder="Habla sobre el artista, el momento vital o creativo en el que lanzó este tema o álbum, su evolución..."
+                        className="w-full p-4 rounded-2xl bg-black/50 border border-white/10 text-white text-sm leading-relaxed outline-none focus:border-purple-400/60 resize-none"
+                      />
+                    </div>
+
+                    {/* 3. Citas de entrevistas y referencias */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white/70">
+                          <Quote size={14} className="text-amber-400" />
+                          <span>Referencias a entrevistas y citas</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setDraftInterviews(prev => [
+                            ...prev,
+                            { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, quote: '', source: '', url: '' }
+                          ])}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white transition-all cursor-pointer"
+                        >
+                          <Plus size={13} />
+                          <span>Añadir entrevista / cita</span>
+                        </button>
+                      </div>
+
+                      {draftInterviews.length === 0 ? (
+                        <p className="text-xs text-white/40 italic py-2">
+                          Aún no has añadido referencias a entrevistas. Pulsa "Añadir entrevista / cita" para agregar declaraciones del artista.
+                        </p>
+                      ) : (
+                        <div className="space-y-4">
+                          {draftInterviews.map((item, idx) => (
+                            <div key={item.id || idx} className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3 relative">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-amber-300/80 uppercase tracking-wider">
+                                  Cita #{idx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDraftInterviews(prev => prev.filter((_, i) => i !== idx))}
+                                  className="p-1 text-white/30 hover:text-red-400 transition-colors cursor-pointer"
+                                  title="Eliminar cita"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                              <textarea
+                                rows={3}
+                                value={item.quote}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDraftInterviews(prev => prev.map((q, i) => i === idx ? { ...q, quote: val } : q));
+                                }}
+                                placeholder="Declaración o cita de la entrevista..."
+                                className="w-full p-3 rounded-xl bg-black/40 border border-white/10 text-white text-xs leading-relaxed outline-none focus:border-amber-400/50 resize-none"
+                              />
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <input
+                                  type="text"
+                                  value={item.source}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftInterviews(prev => prev.map((q, i) => i === idx ? { ...q, source: val } : q));
+                                  }}
+                                  placeholder="Fuente (ej. Entrevista GQ, 2024)"
+                                  className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-amber-400/50"
+                                />
+                                <input
+                                  type="url"
+                                  value={item.url || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftInterviews(prev => prev.map((q, i) => i === idx ? { ...q, url: val } : q));
+                                  }}
+                                  placeholder="Link opcional (YouTube, web...)"
+                                  className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-amber-400/50"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingLore(false)}
+                        className="px-4 py-2.5 rounded-xl text-xs font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveLore}
+                        disabled={isSavingLore}
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isSavingLore ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                        <span>Guardar trasfondo</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : !hasLoreContent ? (
+                  <div className="text-center py-16 space-y-4">
+                    <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-white/40">
+                      <BookOpen size={26} />
+                    </div>
+                    <h4 className="text-base font-bold text-white">Sin trasfondo redactado</h4>
+                    <p className="text-xs text-white/50 max-w-sm mx-auto leading-relaxed">
+                      Aún no se ha escrito una reflexión o recopilación de entrevistas para esta canción.
+                    </p>
+                    {canEditLyrics && (
+                      <button
+                        onClick={() => setIsEditingLore(true)}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer"
+                      >
+                        <Edit3 size={14} />
+                        <span>Escribir trasfondo y referencias</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {/* Sección 1: Reflexión de la canción */}
+                    {loreData.summary && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-[0.2em]">
+                          <Music2 size={14} />
+                          <span>Sobre la canción</span>
+                        </div>
+                        <div className="text-sm md:text-base text-white/90 leading-relaxed whitespace-pre-line font-normal bg-white/[0.02] p-5 md:p-6 rounded-2xl border border-white/5">
+                          {loreData.summary}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sección 2: Sobre el Artista */}
+                    {loreData.artistReflection && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-purple-400 text-xs font-bold uppercase tracking-[0.2em]">
+                          <User size={14} />
+                          <span>Sobre {currentSong?.artist}</span>
+                        </div>
+                        <div className="text-sm md:text-base text-white/90 leading-relaxed whitespace-pre-line font-normal bg-purple-500/[0.04] p-5 md:p-6 rounded-2xl border border-purple-500/15">
+                          {loreData.artistReflection}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sección 3: Entrevistas y citas */}
+                    {loreData.interviews && loreData.interviews.length > 0 && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-amber-300 text-xs font-bold uppercase tracking-[0.2em]">
+                          <Quote size={14} />
+                          <span>Entrevistas y Referencias</span>
+                        </div>
+                        <div className="space-y-4">
+                          {loreData.interviews.map((item, idx) => (
+                            <div
+                              key={item.id || idx}
+                              className="p-5 md:p-6 rounded-2xl bg-gradient-to-br from-amber-500/10 via-white/[0.02] to-transparent border border-amber-400/20 space-y-3"
+                            >
+                              <Quote size={20} className="text-amber-400/60" />
+                              <p className="text-sm md:text-base italic text-amber-50/95 leading-relaxed font-serif">
+                                "{item.quote}"
+                              </p>
+                              <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs">
+                                <span className="font-bold text-amber-300/90">
+                                  {item.source ? `— ${item.source}` : `— ${currentSong?.artist}`}
+                                </span>
+                                {item.url && (
+                                  <a
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 font-semibold transition-all"
+                                  >
+                                    <span>Ver entrevista</span>
+                                    <ExternalLink size={12} />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* CUERPO: EDITOR / SINCRONIZADOR MANUAL (Solo Admins/Moderadores en Web/Escritorio) */}
       {canEditLyrics && activeTab === 'editor' && (
@@ -927,7 +1701,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
                   {/* Botones de acción por línea */}
                   <div className="flex items-center gap-1 shrink-0">
-                    {/* Micro-ajustes de tiempo */}
                     {isSynced && (
                       <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/5 text-[11px] font-mono">
                         <button
@@ -950,7 +1723,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                       </div>
                     )}
 
-                    {/* Fijar tiempo actual */}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -963,7 +1735,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                       <Clock size={15} />
                     </button>
 
-                    {/* Borrar línea */}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -980,7 +1751,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               );
             })}
 
-            {/* Botón rápido para añadir línea al final */}
             <div className="pt-2 pb-24">
               <button
                 onClick={() => handleAddLine(editorLines.length - 1)}
@@ -995,7 +1765,6 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           {/* BARRA FLOTANTE INFERIOR DE REPRODUCCIÓN Y SINCRONIZACIÓN EN VIVO */}
           <div className="shrink-0 p-3 md:p-4 bg-gradient-to-t from-black via-black/95 to-black/80 border-t border-white/10 backdrop-blur-xl shadow-2xl z-20">
             <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-              {/* Controles de audio */}
               <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
                 <div className="flex items-center gap-2">
                   <button
@@ -1023,14 +1792,12 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                   </button>
                 </div>
 
-                {/* Display de tiempo actual */}
                 <div className="font-mono text-xs md:text-sm text-white/80 font-bold bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
                   <span className="text-purple-400">{formatTimestamp(liveCurrentTime)}</span>
                   {duration > 0 && <span className="text-white/40"> / {formatTimestamp(duration)}</span>}
                 </div>
               </div>
 
-              {/* BOTÓN GIGANTE DE SINCRONIZACIÓN */}
               <div className="w-full sm:flex-1 sm:max-w-md flex items-center">
                 <button
                   onClick={handleSyncCurrentLine}

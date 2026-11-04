@@ -478,7 +478,7 @@ const backfillTrackMetadata = async () => {
 // Auto-crear columnas duration, genre y created_at si no existen en la tabla tracks
 pool.execute(`
     SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre', 'created_at', 'lyrics')
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre', 'created_at', 'lyrics', 'lore_data')
 `).then(async ([rows]: any) => {
     const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
     if (!existingCols.has('duration')) {
@@ -496,6 +496,10 @@ pool.execute(`
     if (!existingCols.has('lyrics')) {
         await pool.execute('ALTER TABLE tracks ADD COLUMN lyrics MEDIUMTEXT NULL DEFAULT NULL');
         console.log('[DB] Columna lyrics agregada a la tabla tracks.');
+    }
+    if (!existingCols.has('lore_data')) {
+        await pool.execute('ALTER TABLE tracks ADD COLUMN lore_data MEDIUMTEXT NULL DEFAULT NULL');
+        console.log('[DB] Columna lore_data agregada a la tabla tracks.');
     }
 
     // Auto-limpieza de pistas duplicadas accidentales existentes (mismo título, artista, álbum y track_number)
@@ -2006,17 +2010,30 @@ const fetchLrclibFromServer = async (artist: string, title: string, album?: stri
     return null;
 };
 
+const parseTrackLoreData = (raw: any) => {
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try {
+        return JSON.parse(String(raw));
+    } catch {
+        return null;
+    }
+};
+
 app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
     try {
-        const [rows]: any = await pool.execute('SELECT id, lyrics, title, artist, album, duration FROM tracks WHERE id = ?', [req.params.id]);
+        const [rows]: any = await pool.execute('SELECT id, lyrics, lore_data, title, artist, album, duration FROM tracks WHERE id = ?', [req.params.id]);
         if (!rows || rows.length === 0) {
             return res.status(404).json({ error: "Track not found" });
         }
         const track = rows[0];
+        const lore = parseTrackLoreData(track.lore_data);
+
         if (track.lyrics && String(track.lyrics).trim().length > 0) {
             return res.json({
                 trackId: track.id,
                 lyrics: track.lyrics,
+                lore,
                 source: 'custom'
             });
         }
@@ -2031,6 +2048,7 @@ app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
             return res.json({
                 trackId: track.id,
                 lyrics: remote.syncedLyrics,
+                lore,
                 source: 'lrclib_synced'
             });
         } else if (remote?.plainLyrics) {
@@ -2038,17 +2056,53 @@ app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
                 trackId: track.id,
                 lyrics: null,
                 plainLyrics: remote.plainLyrics,
+                lore,
                 source: 'lrclib_plain'
             });
         }
 
         res.json({
             trackId: track.id,
-            lyrics: null
+            lyrics: null,
+            lore
         });
     } catch (e: any) {
         console.error("Error fetching lyrics:", e);
         res.status(500).json({ error: "Error fetching lyrics" });
+    }
+});
+
+app.get('/api/tracks/:id/lore', async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute('SELECT id, lore_data FROM tracks WHERE id = ?', [req.params.id]);
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+        res.json({
+            trackId: rows[0].id,
+            lore: parseTrackLoreData(rows[0].lore_data)
+        });
+    } catch (e: any) {
+        console.error("Error fetching lore:", e);
+        res.status(500).json({ error: "Error fetching lore" });
+    }
+});
+
+app.put('/api/tracks/:id/lore', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
+    try {
+        const { lore } = req.body;
+        if (lore !== null && typeof lore !== 'object') {
+            return res.status(400).json({ error: "Invalid lore format" });
+        }
+        const serialized = lore ? JSON.stringify(lore) : null;
+        await pool.execute('UPDATE tracks SET lore_data = ? WHERE id = ?', [serialized, req.params.id]);
+        res.json({ success: true, lore });
+    } catch (e: any) {
+        console.error("Error saving lore:", e);
+        res.status(500).json({ error: "Error saving lore" });
     }
 });
 
