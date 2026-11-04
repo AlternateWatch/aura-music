@@ -34,6 +34,37 @@ export interface EditableLyricLine {
   text: string;
 }
 
+const lyricsSessionCache = new Map<string, { synced?: string; plain?: string }>();
+
+const cleanSongTitle = (str: string): string => {
+  if (!str) return '';
+  return str
+    .replace(/\s*[\(\[](?:feat\.?|ft\.?|with|prod\.?|official|video|audio|lyrics|visualizer|remaster(?:ed)?|live|version|edit)[^\)\]]*[\)\]]/gi, '')
+    .replace(/\s*-\s*(?:remaster(?:ed)?|live|single|version|edit|mix).*$/gi, '')
+    .trim();
+};
+
+const cleanArtistName = (artist: string): string => {
+  if (!artist) return '';
+  return artist
+    .split(/,|&|\bfeat\.?\b|\bft\.?\b|\bx\b|\bwith\b/i)[0]
+    .trim();
+};
+
+const fetchJsonWithTimeout = async (url: string, timeoutMs = 5500): Promise<any> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({ 
   isOpen, 
   onClose, 
@@ -54,6 +85,8 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   // Estado de letras en vista karaoke
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState<number>(1);
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
 
   // Estado del editor manual frase a frase
@@ -140,99 +173,188 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       .join('\n');
   };
 
-  // Cargar letras: primero de la base de datos de Aura, y si no hay, de lrclib
+  // Cargar letras con hasta 4 intentos y múltiples estrategias (Aura DB -> lrclib get -> lrclib search estructurado -> lrclib search libre -> nombres limpios)
   useEffect(() => {
     if (!isOpen || !currentSong) return;
 
     let isMounted = true;
+    const MAX_ATTEMPTS = 4;
 
-    const fetchLyrics = async () => {
-      setIsLoading(true);
+    const applySyncedLyrics = (rawSynced: string) => {
+      if (!isMounted) return;
+      lyricsSessionCache.set(currentSong.id, { synced: rawSynced });
+      const parsed = parseLRC(rawSynced);
+      setLyrics(parsed);
+      initEditorFromLyrics(parsed);
       setError(null);
-      setLyrics([]);
-
-      // 1. Intentar cargar letras personalizadas guardadas en Aura
-      try {
-        const auraRes = await fetch(`${API_BASE}/api/tracks/${currentSong.id}/lyrics`);
-        if (auraRes.ok) {
-          const auraData = await auraRes.json();
-          if (auraData?.lyrics && auraData.lyrics.trim().length > 0) {
-            if (!isMounted) return;
-            const parsed = parseLRC(auraData.lyrics);
-            setLyrics(parsed);
-            initEditorFromLyrics(parsed);
-            setIsLoading(false);
-            return;
-          }
-        }
-      } catch (err) {
-        // Fallback silencioso a lrclib si falla la API interna
-      }
-
-      // 2. Si no hay letras en Aura, buscar en lrclib
-      try {
-        const lrclibUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(currentSong.artist)}&track_name=${encodeURIComponent(currentSong.title)}&album_name=${encodeURIComponent(currentSong.album || '')}`;
-        const response = await fetch(lrclibUrl);
-        
-        if (!response.ok) {
-          // Búsqueda alternativa por texto libre en lrclib
-          const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${currentSong.artist} ${currentSong.title}`)}`);
-          if (searchRes.ok) {
-            const results = await searchRes.json();
-            if (results && results.length > 0) {
-              const bestMatch = results[0];
-              const bestLrc = bestMatch.syncedLyrics || bestMatch.plainLyrics;
-              if (bestLrc && isMounted) {
-                const parsed = parseLRC(bestLrc);
-                setLyrics(parsed);
-                initEditorFromLyrics(parsed);
-                setIsLoading(false);
-                return;
-              }
-            }
-          }
-          throw new Error("No lyrics found");
-        }
-
-        const data = await response.json();
-        if (!isMounted) return;
-
-        if (data.syncedLyrics) {
-          const parsed = parseLRC(data.syncedLyrics);
-          setLyrics(parsed);
-          initEditorFromLyrics(parsed);
-        } else if (data.plainLyrics) {
-          const plainLines = data.plainLyrics
-            .split('\n')
-            .map((t: string) => sanitizeText(t))
-            .filter(Boolean);
-          
-          const parsed = plainLines.map((t: string, idx: number) => ({
-            id: `plain-${idx}`,
-            time: 0,
-            text: t
-          }));
-          setLyrics(parsed);
-          initEditorFromPlainLines(plainLines);
-        } else {
-          setError("No se encontraron letras para esta canción.");
-          initEmptyEditor();
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        setError("No se encontraron letras para esta canción.");
-        initEmptyEditor();
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+      setIsLoading(false);
     };
 
-    fetchLyrics();
+    const applyPlainLyrics = (rawPlain: string) => {
+      if (!isMounted) return;
+      lyricsSessionCache.set(currentSong.id, { plain: rawPlain });
+      const plainLines = rawPlain
+        .split('\n')
+        .map((t: string) => sanitizeText(t))
+        .filter(Boolean);
+      const parsed = plainLines.map((t: string, idx: number) => ({
+        id: `plain-${idx}`,
+        time: idx * 4,
+        text: t
+      }));
+      setLyrics(parsed);
+      initEditorFromPlainLines(plainLines);
+      setError(null);
+      setIsLoading(false);
+    };
+
+    const pickBestSearchResult = (results: any[]): { synced?: string; plain?: string } | null => {
+      if (!Array.isArray(results) || results.length === 0) return null;
+      const syncedMatch = results.find(r => r && typeof r.syncedLyrics === 'string' && r.syncedLyrics.trim().length > 0);
+      if (syncedMatch) return { synced: syncedMatch.syncedLyrics };
+      const plainMatch = results.find(r => r && typeof r.plainLyrics === 'string' && r.plainLyrics.trim().length > 0);
+      if (plainMatch) return { plain: plainMatch.plainLyrics };
+      return null;
+    };
+
+    const fetchLyricsWithRetries = async () => {
+      setIsLoading(true);
+      setError(null);
+      setRetryAttempt(1);
+
+      // 0. Comprobar caché en memoria de la sesión (si no es un reintento manual forzado)
+      if (retryTrigger === 0 && lyricsSessionCache.has(currentSong.id)) {
+        const cached = lyricsSessionCache.get(currentSong.id)!;
+        if (cached.synced) {
+          applySyncedLyrics(cached.synced);
+          return;
+        }
+        if (cached.plain) {
+          applyPlainLyrics(cached.plain);
+          return;
+        }
+      }
+
+      let plainFallbackCandidate: string | null = null;
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        if (!isMounted) return;
+        setRetryAttempt(attempt);
+
+        // 1. Consultar la API de Aura (incluye letras personalizadas y búsqueda desde el servidor)
+        const auraData = await fetchJsonWithTimeout(`${API_BASE}/api/tracks/${currentSong.id}/lyrics`, 6000);
+        if (!isMounted) return;
+        if (auraData?.lyrics && String(auraData.lyrics).trim().length > 0) {
+          applySyncedLyrics(auraData.lyrics);
+          return;
+        }
+        if (auraData?.plainLyrics && String(auraData.plainLyrics).trim().length > 0) {
+          plainFallbackCandidate = auraData.plainLyrics;
+        }
+
+        // 2. Intentar lrclib /api/get (con y sin álbum/duración por si difieren los metadatos)
+        const getParams = new URLSearchParams({
+          artist_name: currentSong.artist,
+          track_name: currentSong.title
+        });
+        if (currentSong.album && currentSong.album.trim()) {
+          getParams.append('album_name', currentSong.album.trim());
+        }
+        if (duration && duration > 0) {
+          getParams.append('duration', String(Math.round(duration)));
+        }
+
+        const getData = await fetchJsonWithTimeout(`https://lrclib.net/api/get?${getParams.toString()}`, 5000);
+        if (!isMounted) return;
+        if (getData?.syncedLyrics) {
+          applySyncedLyrics(getData.syncedLyrics);
+          return;
+        }
+        if (getData?.plainLyrics && !plainFallbackCandidate) {
+          plainFallbackCandidate = getData.plainLyrics;
+        }
+
+        // 3. Intentar lrclib /api/search estructurado (track_name + artist_name)
+        const structuredSearchParams = new URLSearchParams({
+          track_name: currentSong.title,
+          artist_name: currentSong.artist
+        });
+        const structuredResults = await fetchJsonWithTimeout(`https://lrclib.net/api/search?${structuredSearchParams.toString()}`, 5500);
+        if (!isMounted) return;
+        const bestStructured = pickBestSearchResult(structuredResults);
+        if (bestStructured?.synced) {
+          applySyncedLyrics(bestStructured.synced);
+          return;
+        }
+        if (bestStructured?.plain && !plainFallbackCandidate) {
+          plainFallbackCandidate = bestStructured.plain;
+        }
+
+        // 4. Intentar lrclib /api/search por consulta libre (q = artist + title)
+        const rawQueryResults = await fetchJsonWithTimeout(
+          `https://lrclib.net/api/search?q=${encodeURIComponent(`${currentSong.artist} ${currentSong.title}`)}`,
+          5500
+        );
+        if (!isMounted) return;
+        const bestRaw = pickBestSearchResult(rawQueryResults);
+        if (bestRaw?.synced) {
+          applySyncedLyrics(bestRaw.synced);
+          return;
+        }
+        if (bestRaw?.plain && !plainFallbackCandidate) {
+          plainFallbackCandidate = bestRaw.plain;
+        }
+
+        // 5. Intentar con título y artista limpios (sin "(feat. ...)", "[Official Video]", "- Remastered", etc.)
+        const cleanedTitle = cleanSongTitle(currentSong.title);
+        const cleanedArtist = cleanArtistName(currentSong.artist);
+        if (cleanedTitle && cleanedArtist && (cleanedTitle !== currentSong.title || cleanedArtist !== currentSong.artist)) {
+          const cleanResults = await fetchJsonWithTimeout(
+            `https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanedArtist} ${cleanedTitle}`)}`,
+            5500
+          );
+          if (!isMounted) return;
+          const bestClean = pickBestSearchResult(cleanResults);
+          if (bestClean?.synced) {
+            applySyncedLyrics(bestClean.synced);
+            return;
+          }
+          if (bestClean?.plain && !plainFallbackCandidate) {
+            plainFallbackCandidate = bestClean.plain;
+          }
+        }
+
+        // Si ya tenemos al menos la letra en texto plano tras el 2º intento, mostrarla sin hacer esperar más
+        if (plainFallbackCandidate && attempt >= 2) {
+          applyPlainLyrics(plainFallbackCandidate);
+          return;
+        }
+
+        // Esperar antes del siguiente reintento si aún quedan intentos disponibles
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, 650 * attempt));
+        }
+      }
+
+      if (!isMounted) return;
+
+      if (plainFallbackCandidate) {
+        applyPlainLyrics(plainFallbackCandidate);
+        return;
+      }
+
+      setLyrics([]);
+      setError("No se encontraron letras para esta canción.");
+      initEmptyEditor();
+      setIsLoading(false);
+    };
+
+    fetchLyricsWithRetries();
 
     return () => {
       isMounted = false;
     };
-  }, [currentSong?.id, isOpen]);
+  }, [currentSong?.id, isOpen, retryTrigger]);
 
   // Inicializar editor desde letras parseadas
   const initEditorFromLyrics = (parsed: LyricLine[]) => {
@@ -464,7 +586,8 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
         throw new Error(errData.error || "Error al guardar en el servidor");
       }
 
-      // Actualizar vista local de karaoke
+      // Actualizar caché de sesión y vista local de karaoke
+      lyricsSessionCache.set(currentSong.id, { synced: lrcString });
       const newParsed = parseLRC(lrcString);
       setLyrics(newParsed);
       setError(null);
@@ -582,9 +705,13 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           className="flex-1 overflow-y-auto px-6 md:px-10 py-32 flex flex-col items-center scrollbar-hide relative"
         >
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center gap-4 my-auto opacity-40">
+            <div className="flex flex-col items-center justify-center gap-4 my-auto opacity-60">
               <Loader2 className="animate-spin text-purple-400" size={36} />
-              <p className="text-xs font-bold uppercase tracking-widest text-white/70">Buscando letras sincronizadas...</p>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/80">
+                {retryAttempt > 1 
+                  ? `Buscando letras sincronizadas... (Intento ${retryAttempt}/4)` 
+                  : 'Buscando letras sincronizadas...'}
+              </p>
             </div>
           ) : error || lyrics.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center my-auto max-w-md p-8 rounded-3xl bg-white/[0.03] border border-white/10 backdrop-blur-xl shadow-2xl">
@@ -593,15 +720,24 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               </div>
               <h3 className="text-xl font-bold text-white mb-2">Sin letras sincronizadas</h3>
               <p className="text-sm text-white/50 mb-6 leading-relaxed">
-                Esta canción aún no tiene letras sincronizadas registradas. Puedes crearlas tú mismo frase a frase y sincronizarlas con el audio.
+                No se encontraron letras tras 4 intentos de búsqueda. Puedes volver a intentarlo o añadirlas tú mismo frase a frase.
               </p>
-              <button
-                onClick={() => setActiveTab('editor')}
-                className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold text-sm shadow-xl shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer"
-              >
-                <Edit3 size={18} />
-                <span>Añadir y sincronizar letras</span>
-              </button>
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
+                <button
+                  onClick={() => setRetryTrigger(prev => prev + 1)}
+                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm transition-all cursor-pointer w-full sm:w-auto"
+                >
+                  <RotateCcw size={16} />
+                  <span>Reintentar</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('editor')}
+                  className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold text-sm shadow-xl shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer w-full sm:w-auto"
+                >
+                  <Edit3 size={18} />
+                  <span>Añadir manualmente</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="w-full max-w-4xl space-y-10 md:space-y-12">

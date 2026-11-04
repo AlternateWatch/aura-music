@@ -1917,15 +1917,134 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
 
 // --- ENDPOINTS DE LETRAS (SINCRONIZADAS Y MANUALES) ---
 
+const cleanSongQueryTerm = (str: string): string => {
+    if (!str) return '';
+    return str
+        .replace(/\s*[\(\[](?:feat\.?|ft\.?|with|prod\.?|official|video|audio|lyrics|visualizer|remaster(?:ed)?|live|version|edit)[^\)\]]*[\)\]]/gi, '')
+        .replace(/\s*-\s*(?:remaster(?:ed)?|live|single|version|edit|mix).*$/gi, '')
+        .trim();
+};
+
+const cleanPrimaryArtist = (artist: string): string => {
+    if (!artist) return '';
+    return artist
+        .split(/,|&|\bfeat\.?\b|\bft\.?\b|\bx\b|\bwith\b/i)[0]
+        .trim();
+};
+
+const fetchLrclibFromServer = async (artist: string, title: string, album?: string | null, duration?: number | null): Promise<{ syncedLyrics?: string | null; plainLyrics?: string | null } | null> => {
+    const headers = {
+        'User-Agent': 'AuraMusic/1.0 (https://aura.basildo.me)',
+        'Accept': 'application/json'
+    };
+
+    const pickBestResult = (results: any[]) => {
+        if (!Array.isArray(results) || results.length === 0) return null;
+        const withSynced = results.find(r => r && typeof r.syncedLyrics === 'string' && r.syncedLyrics.trim().length > 0);
+        if (withSynced) return { syncedLyrics: withSynced.syncedLyrics, plainLyrics: withSynced.plainLyrics || null };
+        const withPlain = results.find(r => r && typeof r.plainLyrics === 'string' && r.plainLyrics.trim().length > 0);
+        if (withPlain) return { syncedLyrics: null, plainLyrics: withPlain.plainLyrics };
+        return null;
+    };
+
+    const queries: string[] = [];
+
+    // 1. Búsqueda estructurada por track_name + artist_name
+    const structuredParams = new URLSearchParams({ track_name: title, artist_name: artist });
+    queries.push(`https://lrclib.net/api/search?${structuredParams.toString()}`);
+
+    // 2. Búsqueda libre q = artist + title
+    queries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(`${artist} ${title}`)}`);
+
+    // 3. Búsqueda limpia sin (feat...), [Official...], etc.
+    const cleanedTitle = cleanSongQueryTerm(title);
+    const cleanedArtist = cleanPrimaryArtist(artist);
+    if (cleanedTitle && cleanedArtist && (cleanedTitle !== title || cleanedArtist !== artist)) {
+        const cleanStructured = new URLSearchParams({ track_name: cleanedTitle, artist_name: cleanedArtist });
+        queries.push(`https://lrclib.net/api/search?${cleanStructured.toString()}`);
+        queries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanedArtist} ${cleanedTitle}`)}`);
+    }
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        // Primero intentar /api/get si tenemos datos completos
+        try {
+            const getParams = new URLSearchParams({ artist_name: artist, track_name: title });
+            if (album && album.trim()) getParams.append('album_name', album.trim());
+            if (duration && duration > 0) getParams.append('duration', String(Math.round(duration)));
+            const getRes = await fetch(`https://lrclib.net/api/get?${getParams.toString()}`, {
+                headers,
+                signal: AbortSignal.timeout(5000)
+            });
+            if (getRes.ok) {
+                const data: any = await getRes.json();
+                if (data?.syncedLyrics || data?.plainLyrics) {
+                    return { syncedLyrics: data.syncedLyrics || null, plainLyrics: data.plainLyrics || null };
+                }
+            }
+        } catch {}
+
+        // Intentar cada variante de /api/search
+        for (const url of queries) {
+            try {
+                const searchRes = await fetch(url, {
+                    headers,
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (searchRes.ok) {
+                    const results: any = await searchRes.json();
+                    const best = pickBestResult(results);
+                    if (best) return best;
+                }
+            } catch {}
+        }
+
+        if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 400 * attempt));
+        }
+    }
+
+    return null;
+};
+
 app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
     try {
-        const [rows]: any = await pool.execute('SELECT id, lyrics, title, artist, album FROM tracks WHERE id = ?', [req.params.id]);
+        const [rows]: any = await pool.execute('SELECT id, lyrics, title, artist, album, duration FROM tracks WHERE id = ?', [req.params.id]);
         if (!rows || rows.length === 0) {
             return res.status(404).json({ error: "Track not found" });
         }
+        const track = rows[0];
+        if (track.lyrics && String(track.lyrics).trim().length > 0) {
+            return res.json({
+                trackId: track.id,
+                lyrics: track.lyrics,
+                source: 'custom'
+            });
+        }
+
+        // Si no hay letras guardadas en BD, intentar obtenerlas desde el servidor con reintentos
+        const remote = await fetchLrclibFromServer(track.artist, track.title, track.album, track.duration);
+        if (remote?.syncedLyrics) {
+            // Guardar automáticamente en la BD para que futuras consultas sean instantáneas
+            try {
+                await pool.execute('UPDATE tracks SET lyrics = ? WHERE id = ? AND (lyrics IS NULL OR lyrics = "")', [remote.syncedLyrics.trim(), track.id]);
+            } catch {}
+            return res.json({
+                trackId: track.id,
+                lyrics: remote.syncedLyrics,
+                source: 'lrclib_synced'
+            });
+        } else if (remote?.plainLyrics) {
+            return res.json({
+                trackId: track.id,
+                lyrics: null,
+                plainLyrics: remote.plainLyrics,
+                source: 'lrclib_plain'
+            });
+        }
+
         res.json({
-            trackId: rows[0].id,
-            lyrics: rows[0].lyrics || null
+            trackId: track.id,
+            lyrics: null
         });
     } catch (e: any) {
         console.error("Error fetching lyrics:", e);
