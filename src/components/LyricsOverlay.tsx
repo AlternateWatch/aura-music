@@ -6,6 +6,7 @@ import {
   Check, Clock, Edit3, AlignLeft, Save, Sparkles, ChevronRight,
   Volume2, FastForward, Rewind, FileText, ArrowDown
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { type Song } from '../constants';
 import { API_BASE, DEFAULT_COVER } from '../utils/api';
 
@@ -20,6 +21,7 @@ interface LyricsOverlayProps {
   isPlaying?: boolean;
   onTogglePlay?: () => void;
   duration?: number;
+  userRole?: string;
 }
 
 export interface LyricLine {
@@ -75,12 +77,46 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   subscribeToTime,
   isPlaying = false,
   onTogglePlay,
-  duration = 0
+  duration = 0,
+  userRole
 }) => {
   const liveCurrentTime = useAudioPlaybackTime(getCurrentTime, subscribeToTime);
 
+  // Verificar si es Web/Escritorio (no app nativa Android ni pantalla móvil) y si el usuario es admin o moderador
+  const [isDesktopViewport, setIsDesktopViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setIsDesktopViewport(window.innerWidth >= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const canEditLyrics = useMemo(() => {
+    if (Capacitor.isNativePlatform() || !isDesktopViewport) return false;
+    let role = userRole;
+    if (!role) {
+      try {
+        const tokenValue = localStorage.getItem('aura_token');
+        if (tokenValue) {
+          const payload = JSON.parse(atob(tokenValue.split('.')[1]));
+          role = payload?.role;
+        }
+      } catch {}
+    }
+    return role === 'admin' || role === 'moderator';
+  }, [userRole, isDesktopViewport]);
+
   // Tab activo: 'view' (karaoke) o 'editor' (sincronizador manual)
   const [activeTab, setActiveTab] = useState<'view' | 'editor'>('view');
+
+  useEffect(() => {
+    if (!canEditLyrics && activeTab === 'editor') {
+      setActiveTab('view');
+    }
+  }, [canEditLyrics, activeTab]);
 
   // Estado de letras en vista karaoke
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
@@ -630,10 +666,10 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-2xl flex flex-col font-sans select-none text-white overflow-hidden"
     >
-      {/* Header con tabs */}
+      {/* Header */}
       <div className="h-20 md:h-24 flex items-center justify-between px-4 md:px-10 shrink-0 border-b border-white/10 bg-black/40">
         {/* Info Canción */}
-        <div className="flex items-center gap-3 md:gap-5 min-w-0 max-w-[40%] md:max-w-[45%]">
+        <div className="flex items-center gap-3 md:gap-5 min-w-0 max-w-[70%]">
           <img 
             src={currentSong?.coverUrl || DEFAULT_COVER} 
             onError={(e) => {
@@ -654,48 +690,26 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
           </div>
         </div>
 
-        {/* Selector de Pestañas (Letras vs Sincronizar) */}
-        <div className="flex items-center bg-white/5 p-1 rounded-2xl border border-white/10 shadow-inner">
-          <button
-            onClick={() => setActiveTab('view')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 md:px-5 md:py-2 rounded-xl text-xs md:text-sm font-semibold transition-all cursor-pointer ${
-              activeTab === 'view'
-                ? 'bg-white text-black shadow-lg font-bold scale-[1.02]'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
+        {/* Acciones Derecha (Volver a letras si estamos en el editor + Cerrar) */}
+        <div className="flex items-center gap-3 shrink-0">
+          {canEditLyrics && activeTab === 'editor' && (
+            <button
+              onClick={() => setActiveTab('view')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer"
+              title="Volver a la vista de letras"
+            >
+              <Music2 size={15} />
+              <span>Ver letras</span>
+            </button>
+          )}
+          <button 
+            onClick={onClose} 
+            className="p-2.5 md:p-3 bg-white/5 hover:bg-white/10 active:scale-95 rounded-full transition-all text-white/60 hover:text-white cursor-pointer shrink-0"
+            title="Cerrar (Esc)"
           >
-            <Music2 size={16} />
-            <span>Letras</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('editor')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 md:px-5 md:py-2 rounded-xl text-xs md:text-sm font-semibold transition-all cursor-pointer ${
-              activeTab === 'editor'
-                ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/25 font-bold scale-[1.02]'
-                : 'text-white/60 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Edit3 size={16} />
-            <span>Sincronizar</span>
-            {totalCount > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                activeTab === 'editor' ? 'bg-white/20 text-white' : 'bg-white/10 text-white/70'
-              }`}>
-                {syncedCount}/{totalCount}
-              </span>
-            )}
+            <X size={20} className="md:w-6 md:h-6" />
           </button>
         </div>
-
-        {/* Botón Cerrar */}
-        <button 
-          onClick={onClose} 
-          className="p-2.5 md:p-3 bg-white/5 hover:bg-white/10 active:scale-95 rounded-full transition-all text-white/60 hover:text-white cursor-pointer shrink-0"
-          title="Cerrar (Esc)"
-        >
-          <X size={20} className="md:w-6 md:h-6" />
-        </button>
       </div>
 
       {/* CUERPO: VISTA KARAOKE */}
@@ -720,27 +734,20 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               </div>
               <h3 className="text-xl font-bold text-white mb-2">Sin letras sincronizadas</h3>
               <p className="text-sm text-white/50 mb-6 leading-relaxed">
-                No se encontraron letras tras 4 intentos de búsqueda. Puedes volver a intentarlo o añadirlas tú mismo frase a frase.
+                No se encontraron letras tras 4 intentos de búsqueda.
               </p>
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
+              <div className="flex items-center justify-center w-full">
                 <button
                   onClick={() => setRetryTrigger(prev => prev + 1)}
-                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm transition-all cursor-pointer w-full sm:w-auto"
+                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm transition-all cursor-pointer"
                 >
                   <RotateCcw size={16} />
                   <span>Reintentar</span>
                 </button>
-                <button
-                  onClick={() => setActiveTab('editor')}
-                  className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold text-sm shadow-xl shadow-purple-500/20 hover:scale-105 active:scale-95 transition-all cursor-pointer w-full sm:w-auto"
-                >
-                  <Edit3 size={18} />
-                  <span>Añadir manualmente</span>
-                </button>
               </div>
             </div>
           ) : (
-            <div className="w-full max-w-4xl space-y-10 md:space-y-12">
+            <div className="w-full max-w-4xl space-y-10 md:space-y-12 pb-16">
               {lyrics.map((line, index) => {
                 const isActive = index === activeKaraokeIndex;
                 const isPast = index < activeKaraokeIndex;
@@ -764,24 +771,24 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                   </div>
                 );
               })}
-
-              {/* Botón flotante para editar letras */}
-              <div className="pt-16 pb-8 flex justify-center">
-                <button
-                  onClick={() => setActiveTab('editor')}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white text-xs font-semibold tracking-wide transition-all cursor-pointer"
-                >
-                  <Edit3 size={14} />
-                  <span>Ajustar o corregir estas letras</span>
-                </button>
-              </div>
             </div>
+          )}
+
+          {/* Botón exclusivo para Admins/Moderadores en Web/Escritorio: cuadradito con borde redondeado y solo el icono de lápiz abajo a la derecha */}
+          {canEditLyrics && (
+            <button
+              onClick={() => setActiveTab('editor')}
+              className="fixed bottom-8 right-8 z-30 hidden md:flex items-center justify-center w-11 h-11 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white/70 hover:text-white shadow-2xl backdrop-blur-md transition-all cursor-pointer active:scale-95"
+              title="Sincronizar o editar letras manualmente"
+            >
+              <Edit3 size={18} />
+            </button>
           )}
         </div>
       )}
 
-      {/* CUERPO: EDITOR / SINCRONIZADOR MANUAL */}
-      {activeTab === 'editor' && (
+      {/* CUERPO: EDITOR / SINCRONIZADOR MANUAL (Solo Admins/Moderadores en Web/Escritorio) */}
+      {canEditLyrics && activeTab === 'editor' && (
         <div className="flex-1 flex flex-col overflow-hidden relative">
           {/* Barra de herramientas superior */}
           <div className="px-4 md:px-10 py-3 bg-white/[0.02] border-b border-white/5 flex flex-wrap items-center justify-between gap-3 shrink-0">

@@ -2053,6 +2053,9 @@ app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
 });
 
 app.put('/api/tracks/:id/lyrics', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: "Forbidden" });
+    }
     try {
         const { lyrics } = req.body;
         if (lyrics !== null && typeof lyrics !== 'string') {
