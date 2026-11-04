@@ -18,6 +18,7 @@ export interface Song {
   animated_cover_path?: string | null;
   animatedCoverUrl?: string | null;
   video_url?: string | null;
+  lyrics?: string | null;
 }
 export interface Playlist {
   id: string | number;

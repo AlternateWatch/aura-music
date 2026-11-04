@@ -478,7 +478,7 @@ const backfillTrackMetadata = async () => {
 // Auto-crear columnas duration, genre y created_at si no existen en la tabla tracks
 pool.execute(`
     SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre', 'created_at')
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tracks' AND COLUMN_NAME IN ('duration', 'genre', 'created_at', 'lyrics')
 `).then(async ([rows]: any) => {
     const existingCols = new Set((rows || []).map((r: any) => r.COLUMN_NAME));
     if (!existingCols.has('duration')) {
@@ -492,6 +492,10 @@ pool.execute(`
     if (!existingCols.has('created_at')) {
         await pool.execute('ALTER TABLE tracks ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
         console.log('[DB] Columna created_at agregada a la tabla tracks.');
+    }
+    if (!existingCols.has('lyrics')) {
+        await pool.execute('ALTER TABLE tracks ADD COLUMN lyrics MEDIUMTEXT NULL DEFAULT NULL');
+        console.log('[DB] Columna lyrics agregada a la tabla tracks.');
     }
 
     // Auto-limpieza de pistas duplicadas accidentales existentes (mismo título, artista, álbum y track_number)
@@ -1872,6 +1876,10 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
             updateQuery += ', genre = ?';
             updateParams.push(cleanGenre);
         }
+        if (req.body.lyrics !== undefined) {
+            updateQuery += ', lyrics = ?';
+            updateParams.push(req.body.lyrics ? String(req.body.lyrics).trim() : null);
+        }
 
         updateQuery += ' WHERE id = ?';
         updateParams.push(req.params.id);
@@ -1906,6 +1914,39 @@ app.patch('/api/tracks/:id', authenticateToken, upload.fields([{ name: 'cover', 
 });
 
 
+
+// --- ENDPOINTS DE LETRAS (SINCRONIZADAS Y MANUALES) ---
+
+app.get('/api/tracks/:id/lyrics', async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute('SELECT id, lyrics, title, artist, album FROM tracks WHERE id = ?', [req.params.id]);
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+        res.json({
+            trackId: rows[0].id,
+            lyrics: rows[0].lyrics || null
+        });
+    } catch (e: any) {
+        console.error("Error fetching lyrics:", e);
+        res.status(500).json({ error: "Error fetching lyrics" });
+    }
+});
+
+app.put('/api/tracks/:id/lyrics', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const { lyrics } = req.body;
+        if (lyrics !== null && typeof lyrics !== 'string') {
+            return res.status(400).json({ error: "Invalid lyrics format" });
+        }
+        const cleanLyrics = typeof lyrics === 'string' ? lyrics.trim() : null;
+        await pool.execute('UPDATE tracks SET lyrics = ? WHERE id = ?', [cleanLyrics || null, req.params.id]);
+        res.json({ success: true, lyrics: cleanLyrics });
+    } catch (e: any) {
+        console.error("Error saving lyrics:", e);
+        res.status(500).json({ error: "Error saving lyrics" });
+    }
+});
 
 app.post('/api/moderation/:id', authenticateToken, async (req: any, res: Response) => {
 
