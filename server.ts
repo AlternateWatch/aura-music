@@ -1,6 +1,7 @@
 process.env.UV_THREADPOOL_SIZE = '16';
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { spawn } from 'child_process';
 
 import { createServer } from 'http';
 
@@ -3240,11 +3241,25 @@ type SessionState = {
 
     isLoop: boolean;
 
+    votes?: Record<string, string[]>;
+
 };
 
 const sessionStates = new Map<string, SessionState>();
 
-
+const reorderQueueByVotes = (list: any[], currentSongId: string | null, votes: Record<string, string[]> = {}): any[] => {
+    if (!Array.isArray(list) || list.length <= 1) return list;
+    const idx = currentSongId ? list.findIndex((s: any) => String(s?.id) === String(currentSongId)) : -1;
+    const prefix = idx >= 0 ? list.slice(0, idx + 1) : [];
+    const upcoming = idx >= 0 ? list.slice(idx + 1) : list.slice();
+    const indexed = upcoming.map((item, i) => ({
+        item,
+        i,
+        v: Array.isArray(votes[String(item?.id)]) ? votes[String(item?.id)].length : 0
+    }));
+    indexed.sort((a, b) => (b.v - a.v) || (a.i - b.i));
+    return [...prefix, ...indexed.map(x => x.item)];
+};
 
 const getSessionState = (code: string): SessionState => {
 
@@ -3252,7 +3267,7 @@ const getSessionState = (code: string): SessionState => {
 
     if (!st) {
 
-        st = { song: null, songId: null, queue: [], isPlaying: false, position: 0, updatedAt: Date.now(), isShuffle: false, shuffledQueue: [], isLoop: false };
+        st = { song: null, songId: null, queue: [], isPlaying: false, position: 0, updatedAt: Date.now(), isShuffle: false, shuffledQueue: [], isLoop: false, votes: {} };
 
         sessionStates.set(code, st);
 
@@ -3296,6 +3311,20 @@ const trackCommand = (code: string, command: string, data: any) => {
                 st.isPlaying = data.isPlaying !== undefined ? !!data.isPlaying : true;
                 st.position = Number(data.position) || 0;
                 st.updatedAt = now;
+                if (st.votes && st.votes[String(data.song.id)]) {
+                    delete st.votes[String(data.song.id)];
+                }
+                if (st.votes && Object.keys(st.votes).length > 0) {
+                    st.queue = reorderQueueByVotes(st.queue, String(st.songId), st.votes);
+                    if (Array.isArray(st.shuffledQueue) && st.shuffledQueue.length > 0) {
+                        st.shuffledQueue = reorderQueueByVotes(st.shuffledQueue, String(st.songId), st.votes);
+                    }
+                }
+                io.to(code).emit('session-votes-updated', {
+                    votes: st.votes || {},
+                    queue: st.queue,
+                    shuffledQueue: st.shuffledQueue
+                });
             }
             break;
         }
@@ -3703,7 +3732,7 @@ io.on('connection', (socket) => {
 
     // El resto de la sesión solo escucha, así no hay peleas por el control.
 
-    const HOST_ONLY_COMMANDS = new Set(['play-track', 'toggle-play', 'seek', 'toggle-shuffle', 'toggle-loop', 'sync-time', 'update-queue']);
+    const HOST_ONLY_COMMANDS = new Set(['play-track', 'toggle-play', 'seek', 'toggle-shuffle', 'toggle-loop', 'sync-time']);
 
     socket.on('send-command', ({ code, command, data }) => {
         const c = String(code ?? '').trim().toUpperCase();
@@ -3789,6 +3818,98 @@ io.on('connection', (socket) => {
             messageId,
             userId: effectiveUserId,
             reaction
+        });
+    });
+
+    socket.on('vote-queue-track', ({ code, songId, userId }) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        if (!c || !socket.rooms.has(c) || !songId) return;
+        const st = getSessionState(c);
+        if (!st.votes) st.votes = {};
+        const effectiveUserId = String(userId ?? socket.data.sessionUsers?.[c]?.userId ?? '');
+        if (!effectiveUserId) return;
+        const sid = String(songId);
+        const currentVoters = Array.isArray(st.votes[sid]) ? st.votes[sid] : [];
+        if (currentVoters.includes(effectiveUserId)) {
+            st.votes[sid] = currentVoters.filter(id => id !== effectiveUserId);
+            if (st.votes[sid].length === 0) delete st.votes[sid];
+        } else {
+            st.votes[sid] = [...currentVoters, effectiveUserId];
+        }
+        st.queue = reorderQueueByVotes(st.queue, st.songId, st.votes);
+        if (Array.isArray(st.shuffledQueue) && st.shuffledQueue.length > 0) {
+            st.shuffledQueue = reorderQueueByVotes(st.shuffledQueue, st.songId, st.votes);
+        }
+        io.to(c).emit('session-votes-updated', {
+            votes: st.votes,
+            queue: st.queue,
+            shuffledQueue: st.shuffledQueue
+        });
+    });
+
+    socket.on('propose-queue-track', ({ code, song, user }) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        if (!c || !socket.rooms.has(c) || !song?.id) return;
+        const st = getSessionState(c);
+        if (!st.votes) st.votes = {};
+        const u = socket.data.sessionUsers?.[c] ?? cleanUser(user);
+        const effectiveUserId = String(u?.userId || '');
+        const sid = String(song.id);
+        const { lyrics, lore_data, ...cleanSong } = song;
+
+        const insertIntoList = (list: any[]) => {
+            const arr = Array.isArray(list) ? [...list] : [];
+            const existingIdx = arr.findIndex((s: any) => String(s?.id) === sid);
+            const curIdx = st.songId ? arr.findIndex((s: any) => String(s?.id) === String(st.songId)) : -1;
+            if (existingIdx === -1) {
+                if (curIdx >= 0) {
+                    arr.splice(curIdx + 1, 0, cleanSong);
+                } else {
+                    arr.push(cleanSong);
+                }
+            } else if (curIdx >= 0 && existingIdx < curIdx) {
+                const [item] = arr.splice(existingIdx, 1);
+                const newCurIdx = arr.findIndex((s: any) => String(s?.id) === String(st.songId));
+                arr.splice(newCurIdx + 1, 0, item || cleanSong);
+            }
+            return arr;
+        };
+
+        st.queue = insertIntoList(st.queue);
+        if (st.isShuffle || (Array.isArray(st.shuffledQueue) && st.shuffledQueue.length > 0)) {
+            st.shuffledQueue = insertIntoList(st.shuffledQueue);
+        }
+
+        if (effectiveUserId) {
+            const currentVoters = Array.isArray(st.votes[sid]) ? st.votes[sid] : [];
+            if (!currentVoters.includes(effectiveUserId)) {
+                st.votes[sid] = [...currentVoters, effectiveUserId];
+            }
+        }
+
+        st.queue = reorderQueueByVotes(st.queue, st.songId, st.votes);
+        if (Array.isArray(st.shuffledQueue) && st.shuffledQueue.length > 0) {
+            st.shuffledQueue = reorderQueueByVotes(st.shuffledQueue, st.songId, st.votes);
+        }
+
+        io.to(c).emit('session-votes-updated', {
+            votes: st.votes,
+            queue: st.queue,
+            shuffledQueue: st.shuffledQueue
+        });
+        systemChat(c, `🎵 ${u?.username || 'Alguien'} ha propuesto "${cleanSong.title}" en la cola`, 'info');
+    });
+
+    socket.on('send-live-reaction', ({ code, emoji, user }) => {
+        const c = String(code ?? '').trim().toUpperCase();
+        if (!c || !socket.rooms.has(c) || !emoji) return;
+        const u = socket.data.sessionUsers?.[c] ?? cleanUser(user);
+        const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        io.to(c).emit('receive-live-reaction', {
+            id,
+            emoji: String(emoji).slice(0, 8),
+            username: u?.username || 'Alguien',
+            userId: u?.userId || ''
         });
     });
 
@@ -4358,9 +4479,130 @@ const generateThumbnailBuffer = async (filename: string, targetWidth: number, ca
     return job;
 };
 
+const transcodedDir = path.join(uploadDir, 'transcoded');
+if (!fs.existsSync(transcodedDir)) {
+    try { fs.mkdirSync(transcodedDir, { recursive: true }); } catch {}
+}
+const transcodeJobsInFlight = new Map<string, Promise<string | null>>();
+
+const serveAudioFileWithRange = (req: Request, res: Response, filePath: string, mime = 'audio/mpeg') => {
+    const stat = fs.statSync(filePath);
+    const totalSize = stat.size;
+    let start = 0;
+    let end = totalSize - 1;
+    let isPartial = false;
+
+    const rangeHeader = req.headers.range;
+    if (rangeHeader) {
+        const parts = rangeHeader.replace(/bytes=/, '').split('-');
+        start = parseInt(parts[0], 10) || 0;
+        end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+        if (start >= totalSize) start = 0;
+        if (end >= totalSize) end = totalSize - 1;
+        isPartial = true;
+    }
+
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
+    if (isPartial) {
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+        res.setHeader('Content-Length', (end - start) + 1);
+    } else {
+        res.status(200);
+        res.setHeader('Content-Length', totalSize);
+    }
+
+    const stream = fs.createReadStream(filePath, { start, end });
+    res.on('close', () => { stream.destroy(); });
+    return stream.pipe(res);
+};
+
+const getOrTranscodeAudio = async (filename: string, quality: 'high' | 'low'): Promise<string | null> => {
+    const baseName = path.parse(filename).name;
+    const cachedMp3Path = path.join(transcodedDir, `${baseName}_${quality}.mp3`);
+    try {
+        if (fs.existsSync(cachedMp3Path) && fs.statSync(cachedMp3Path).size > 1024) {
+            return cachedMp3Path;
+        }
+    } catch {}
+
+    const jobKey = `${filename}_${quality}`;
+    if (transcodeJobsInFlight.has(jobKey)) {
+        return transcodeJobsInFlight.get(jobKey)!;
+    }
+
+    const job = (async (): Promise<string | null> => {
+        try {
+            let srcPath = resolveDiskPath(`/uploads/${filename}`);
+            if ((!srcPath || !fs.existsSync(srcPath)) && isB2Configured()) {
+                const tempDownloadPath = path.join(uploadDir, filename);
+                const downloaded = await downloadB2FileToDisk(filename, tempDownloadPath);
+                if (downloaded && fs.existsSync(tempDownloadPath)) {
+                    srcPath = tempDownloadPath;
+                }
+            }
+            if (!srcPath || !fs.existsSync(srcPath)) return null;
+
+            const bitrate = quality === 'low' ? '128k' : '320k';
+            const tempOut = `${cachedMp3Path}.tmp.${Date.now()}`;
+
+            await new Promise<void>((resolve, reject) => {
+                const ff = spawn('ffmpeg', [
+                    '-y',
+                    '-i', srcPath!,
+                    '-vn',
+                    '-ar', '44100',
+                    '-ac', '2',
+                    '-codec:a', 'libmp3lame',
+                    '-b:a', bitrate,
+                    tempOut
+                ], { stdio: 'ignore' });
+
+                ff.on('error', (err) => reject(err));
+                ff.on('close', (code) => {
+                    if (code === 0) resolve();
+                    else reject(new Error(`ffmpeg exited with code ${code}`));
+                });
+            });
+
+            if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 1024) {
+                fs.renameSync(tempOut, cachedMp3Path);
+                return cachedMp3Path;
+            }
+            try { if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut); } catch {}
+            return null;
+        } catch (err: any) {
+            console.warn(`[Transcode] Fallback a audio original para ${filename} (${quality}):`, err?.message || err);
+            return null;
+        } finally {
+            transcodeJobsInFlight.delete(jobKey);
+        }
+    })();
+
+    transcodeJobsInFlight.set(jobKey, job);
+    return job;
+};
+
 app.get('/uploads/:filename', async (req: Request, res: Response, next: NextFunction) => {
-    const rawW = req.query.w ? parseInt(String(req.query.w), 10) : null;
     const filename = path.basename(decodeURIComponent(req.params.filename.split('?')[0]));
+    const rawQuality = String(req.query.quality || '').toLowerCase();
+
+    if ((rawQuality === 'high' || rawQuality === 'low') && /\.(flac|mp3|wav|m4a|ogg|aac|opus)$/i.test(filename)) {
+        // Si ya es MP3 y piden calidad 'high' (320k), servir el MP3 original directamente
+        if (rawQuality === 'high' && /\.mp3$/i.test(filename)) {
+            return next();
+        }
+        const transcodedPath = await getOrTranscodeAudio(filename, rawQuality as 'high' | 'low');
+        if (transcodedPath && fs.existsSync(transcodedPath)) {
+            return serveAudioFileWithRange(req, res, transcodedPath, 'audio/mpeg');
+        }
+        return next();
+    }
+
+    const rawW = req.query.w ? parseInt(String(req.query.w), 10) : null;
 
     if (!rawW || isNaN(rawW) || !/\.(jpe?g|png|webp)$/i.test(filename)) {
         return next();
@@ -4662,6 +4904,14 @@ app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
         const requestedFile = path.basename(decodeURIComponent(track.file_path.split('?')[0]));
         const ext = path.extname(requestedFile).toLowerCase();
         const contentType = ext === '.flac' ? 'audio/flac' : 'audio/mpeg';
+        const rawQuality = String(req.query.quality || '').toLowerCase();
+
+        if ((rawQuality === 'high' || rawQuality === 'low') && !(rawQuality === 'high' && ext === '.mp3')) {
+            const transcodedPath = await getOrTranscodeAudio(requestedFile, rawQuality as 'high' | 'low');
+            if (transcodedPath && fs.existsSync(transcodedPath)) {
+                return serveAudioFileWithRange(req, res, transcodedPath, 'audio/mpeg');
+            }
+        }
 
         const diskPath = resolveDiskPath(track.file_path);
         if (diskPath && fs.existsSync(diskPath)) {

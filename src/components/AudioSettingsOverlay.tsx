@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
-import { X, SlidersHorizontal, Activity, RotateCcw, Radio, Zap, Gauge, Sparkles } from "lucide-react";
+import { X, SlidersHorizontal, Activity, RotateCcw, Radio, Zap, Gauge, Sparkles, Wifi } from "lucide-react";
 import { hapticImpact, hapticSelection } from "../utils/haptics";
 import {
   AudioSettings,
@@ -433,6 +433,93 @@ export const AudioSettingsOverlay: React.FC<Props> = ({
                   label="Autoplay"
                 />
               </div>
+            </div>
+          </section>
+
+
+          {/* CALIDAD DE STREAMING Y MODO AHORRO DE DATOS */}
+          <section className="p-6 bg-white/[0.02] border border-white/5 rounded-[24px]">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-3">
+                <Wifi className="text-brand-primary" size={18} />
+                <div>
+                  <p className="text-sm font-bold text-white leading-none">Calidad de Streaming y Ahorro de Datos</p>
+                  <p className="text-[9px] font-bold uppercase text-white/20 tracking-wider mt-1">
+                    Adapta el consumo de red en datos móviles o conexiones lentas
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-[9px] font-mono font-bold uppercase bg-brand-primary/15 text-brand-primary border border-brand-primary/25">
+                {settings.streamingQuality === "low"
+                  ? "128 kbps · Ahorro"
+                  : settings.streamingQuality === "high"
+                    ? "320 kbps · Alta"
+                    : settings.streamingQuality === "auto"
+                      ? "Automático"
+                      : "FLAC / Original"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                {
+                  id: "original" as const,
+                  title: "Original (Hi-Res / FLAC)",
+                  badge: "Sin pérdida",
+                  desc: "Máxima fidelidad de estudio sin compresión adicional.",
+                },
+                {
+                  id: "high" as const,
+                  title: "Alta Calidad (320 kbps)",
+                  badge: "320 kbps",
+                  desc: "Transcodificación transparente con carga rápida y menor uso de datos.",
+                },
+                {
+                  id: "low" as const,
+                  title: "Ahorro de Datos (128 kbps)",
+                  badge: "-85% datos",
+                  desc: "Ideal para datos móviles o cobertura débil. Evita cortes de reproducción.",
+                },
+                {
+                  id: "auto" as const,
+                  title: "Automático Inteligente",
+                  badge: "Auto Red",
+                  desc: "Original en Wi-Fi y ahorro de datos (128 kbps) en red móvil.",
+                },
+              ].map((opt) => {
+                const currentQ = settings.streamingQuality || "original";
+                const active = currentQ === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      hapticSelection();
+                      onChange({
+                        ...settings,
+                        streamingQuality: opt.id,
+                      });
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                      active
+                        ? "bg-brand-primary/15 border-brand-primary text-white shadow-lg shadow-brand-primary/10"
+                        : "bg-white/[0.03] border-white/5 text-white/60 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white">{opt.title}</span>
+                      <span
+                        className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                          active ? "bg-brand-primary text-black font-black" : "bg-white/10 text-white/60"
+                        }`}
+                      >
+                        {opt.badge}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-white/40 leading-relaxed">{opt.desc}</p>
+                  </button>
+                );
+              })}
             </div>
           </section>
 

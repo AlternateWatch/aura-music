@@ -1141,10 +1141,15 @@ useEffect(() => {
       } else {
         // Enviar inmediatamente la canción actual, la cola y el estado al servidor para que el snapshot esté completo
         if (currentSong) {
+          const initialPool = activeQueue.length > 0 ? activeQueue : getCurrentPlayPool();
+          const finalQueue = initialPool.length > 0 ? initialPool : [currentSong];
+          if (activeQueue.length === 0 && finalQueue.length > 0) {
+            setActiveQueue(finalQueue);
+          }
           socketObj.emitCommand('play-track', {
             id: currentSong.id,
             song: currentSong,
-            queue: activeQueue.length > 0 ? activeQueue : [currentSong],
+            queue: finalQueue,
             position: audioObj.getCurrentTime?.() || 0,
             isPlaying: isPlaying
           });
@@ -6325,7 +6330,7 @@ getCurrentTime={audioObj.getCurrentTime}
         />
       )}</AnimatePresence>
       <AnimatePresence>{sessionNotice && (<motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[700] bg-[#121212] border border-brand-primary/30 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-2xl max-w-[90vw] text-center">{sessionNotice}</motion.div> )}</AnimatePresence>
-      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} onSendReaction={(messageId, reaction) => socketObj.emitReaction(messageId, reaction)} analyser={audioObj.analyser} active={isPlaying} /> )}</AnimatePresence></Suspense>
+      <Suspense fallback={null}><AnimatePresence>{isSessionOpen && ( <LazySessionOverlay onClose={() => setIsSessionOpen(false)} token={token} user={user} currentSession={socketObj.currentSession} messages={socketObj.sessionMessages} members={socketObj.sessionMembers} onSendMessage={handleSendChat} onCreateSession={handleStartSession} onJoinSession={handleJoinSession} onLeaveSession={() => socketObj.leaveSession()} isHost={socketObj.isLeader()} onTransferHost={async (uid: string) => { const r = await socketObj.transferHost(uid); if (!r.ok) alert('No se ha podido ceder el control.'); }} onSendReaction={(messageId, reaction) => socketObj.emitReaction(messageId, reaction)} analyser={audioObj.analyser} active={isPlaying} currentSong={currentSong} queue={getCurrentPlayPool()} allSongs={allLibrarySongs.length > 0 ? allLibrarySongs : songs} sessionVotes={socketObj.sessionVotes} onVoteTrack={socketObj.voteQueueTrack} onProposeTrack={socketObj.proposeQueueTrack} liveReactions={socketObj.liveReactions} onSendLiveReaction={socketObj.sendLiveReaction} onPlayFromQueue={(song) => handlePlaySong(song, false, 0, true)} /> )}</AnimatePresence></Suspense>
       <Suspense fallback={null}><AnimatePresence>{isWrappedOpen && <LazyWrappedOverlay onClose={() => setIsWrappedOpen(false)} apiBase={API_BASE} token={token} />}</AnimatePresence></Suspense>
       <Suspense fallback={null}>
         <AnimatePresence>

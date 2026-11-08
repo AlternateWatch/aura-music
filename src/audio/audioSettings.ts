@@ -23,6 +23,7 @@ export interface EqSettings {
 }
 
 export type PlaybackPresetId = "normal" | "nightcore" | "slowed" | "speedup" | "custom";
+export type StreamingQuality = "original" | "high" | "low" | "auto";
 
 export interface PlaybackRateSettings {
   rate: number;          // 0.5 a 2.0 (default 1.0)
@@ -106,6 +107,7 @@ export interface AudioSettings {
   autoplay?: {
     enabled: boolean;
   };
+  streamingQuality?: StreamingQuality;
 }
 
 export const NORMALIZER_TARGETS = [
@@ -133,6 +135,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
     preset: "normal",
   },
   autoplay: { enabled: true },
+  streamingQuality: "original",
 };
 
 const KEY = "aura_audio_v2";
@@ -188,6 +191,10 @@ export function loadAudioSettings(): AudioSettings {
     if (p?.autoplay !== undefined) {
       base.autoplay = { enabled: p.autoplay.enabled !== false };
     }
+    if (typeof p?.streamingQuality === "string" && ["original", "high", "low", "auto"].includes(p.streamingQuality)) {
+      base.streamingQuality = p.streamingQuality as StreamingQuality;
+    }
+    localStorage.setItem("aura_streaming_quality", base.streamingQuality || "original");
   } catch {
     /* ajustes corruptos: valores por defecto */
   }
@@ -199,6 +206,10 @@ export function saveAudioSettings(s: AudioSettings) {
     localStorage.setItem(KEY, JSON.stringify(s));
     // Mantiene sincronizada la clave antigua por si otra parte la lee.
     localStorage.setItem(LEGACY_NORMALIZER_KEY, String(s.normalizer.enabled));
+    localStorage.setItem("aura_streaming_quality", s.streamingQuality || "original");
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("aura:streaming-quality-changed"));
+    }
   } catch {
     /* sin persistencia */
   }

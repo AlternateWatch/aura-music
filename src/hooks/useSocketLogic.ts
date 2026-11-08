@@ -58,6 +58,8 @@ export function useSocketLogic(
   const [isShuffle, setIsShuffle] = useState(false);
   const [shuffledQueue, setShuffledQueue] = useState<Song[]>([]);
   const [isLoop, setIsLoop] = useState(false);
+  const [sessionVotes, setSessionVotes] = useState<Record<string, string[]>>({});
+  const [liveReactions, setLiveReactions] = useState<Array<{ id: string; emoji: string; username: string }>>([]);
 
   // Refs sincronizadas con el estado actual de App.tsx
   const currentSongIdRef = useRef<string | null>(currentSong?.id ? String(currentSong.id) : null);
@@ -128,6 +130,7 @@ export function useSocketLogic(
     if (Array.isArray(state.shuffledQueue)) setShuffledQueue(state.shuffledQueue);
     if (typeof state.isLoop === "boolean") setIsLoop(state.isLoop);
     if (Array.isArray(state.queue) && state.queue.length) setActiveQueue(state.queue);
+    if (state.votes && typeof state.votes === "object") setSessionVotes(state.votes);
 
     if (!state.song?.id) return;
     const position = Number(state.position) || 0;
@@ -292,6 +295,31 @@ export function useSocketLogic(
       setSessionMembers(members);
       updateLeaderFromMembers(members);
     });
+    socket.on("session-votes-updated", ({ votes, queue, shuffledQueue }) => {
+      if (votes && typeof votes === "object") {
+        setSessionVotes(votes);
+      }
+      if (Array.isArray(queue) && queue.length > 0) {
+        settersRef.current.setActiveQueue(queue);
+        if (Array.isArray(shuffledQueue) && shuffledQueue.length > 0) {
+          setShuffledQueue(shuffledQueue);
+        } else if (isShuffleRef.current) {
+          setShuffledQueue(queue);
+        }
+      }
+    });
+    socket.on("receive-live-reaction", (item: { id: string; emoji: string; username: string }) => {
+      if (!item || !item.emoji) return;
+      const reactionItem = {
+        id: item.id || `${Date.now()}_${Math.random()}`,
+        emoji: item.emoji,
+        username: item.username || "Alguien"
+      };
+      setLiveReactions(prev => [...prev.slice(-18), reactionItem]);
+      setTimeout(() => {
+        setLiveReactions(prev => prev.filter(r => r.id !== reactionItem.id));
+      }, 3200);
+    });
     socket.on("receive-private-message", (msg) => {
       setUnreadSenders(prev => [...new Set([...prev, String(msg.sender_id)])]);
     });
@@ -346,12 +374,19 @@ export function useSocketLogic(
         if (prevSession && prevSession !== code) {
           socket.emit("leave-session", { code: prevSession });
         }
-        if (prevSession !== code) setSessionMessages([]);
+        if (prevSession !== code) {
+          setSessionMessages([]);
+          setSessionVotes({});
+          setLiveReactions([]);
+        }
         setCurrentSession(code);
         isLeaderRef.current = !!opts.asLeader;
         if (res.membersList) {
           setSessionMembers(res.membersList);
           updateLeaderFromMembers(res.membersList);
+        }
+        if (res.state?.votes && typeof res.state.votes === "object") {
+          setSessionVotes(res.state.votes);
         }
         if (!opts.asLeader) {
           applyState(res.state);
@@ -379,6 +414,8 @@ export function useSocketLogic(
     setCurrentSession(null);
     setSessionMessages([]);
     setSessionMembers([]);
+    setSessionVotes({});
+    setLiveReactions([]);
   }, [setCurrentSession]);
 
   // Pide el estado actual al servidor y sincroniza canción y posición.
@@ -449,6 +486,37 @@ export function useSocketLogic(
     });
   };
 
+  const voteQueueTrack = useCallback((songId: string) => {
+    const code = sessionRef.current;
+    const uid = getMyUserId();
+    if (!code || !songId || !uid) return;
+    socketRef.current?.emit("vote-queue-track", {
+      code,
+      songId: String(songId),
+      userId: uid
+    });
+  }, []);
+
+  const proposeQueueTrack = useCallback((song: Song) => {
+    const code = sessionRef.current;
+    if (!code || !song?.id) return;
+    socketRef.current?.emit("propose-queue-track", {
+      code,
+      song: stripSongForSocket(song),
+      user: userRef.current
+    });
+  }, []);
+
+  const sendLiveReaction = useCallback((emoji: string) => {
+    const code = sessionRef.current;
+    if (!code || !emoji) return;
+    socketRef.current?.emit("send-live-reaction", {
+      code,
+      emoji,
+      user: userRef.current
+    });
+  }, []);
+
   const setTrackId = (id: string | null) => { currentSongIdRef.current = id ? String(id) : null; };
   const getTrackId = () => currentSongIdRef.current;
   const isLeader = () => isLeaderRef.current;
@@ -457,6 +525,7 @@ export function useSocketLogic(
     socketRef, currentSession, setCurrentSession, sessionMessages, setSessionMessages, sessionMembers,
     unreadSenders, setUnreadSenders, activeInvite, setActiveInvite, emitCommand, emitReaction,
     isShuffle, setIsShuffle, shuffledQueue, setShuffledQueue, isLoop, setIsLoop,
-    setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession, transferHost
+    setTrackId, getTrackId, isLeader, joinSession, leaveSession, resyncSession, transferHost,
+    sessionVotes, liveReactions, voteQueueTrack, proposeQueueTrack, sendLiveReaction
   };
 }
