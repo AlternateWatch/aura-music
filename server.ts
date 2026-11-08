@@ -1114,7 +1114,7 @@ app.get(['/download/aura-latest.apk', '/download/aura-v:ver.apk', '/download/app
                     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
                     res.setHeader('Content-Disposition', 'attachment; filename="aura-latest.apk"');
                     res.setHeader('Content-Length', stat.size);
-                    res.setHeader('Cache-Control', 'public, max-age=60');
+                    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
                     res.setHeader('Accept-Ranges', 'bytes');
                     return res.sendFile(resolvedPath, (err) => {
                         if (err && !res.headersSent) {
