@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.13",
-  "versionCode": 14,
-  "releaseNotes": "• Erradicación definitiva del bloqueo de reproducción automática: Soporte integral para transiciones continuas de audio en segundo plano con pantalla bloqueada o en otras apps.\n• Configuración nativa de WebView: Desactivación permanente de la política de restricción por gesto de usuario (User Gesture Policy) en Android.\n• CPU y Wi-Fi WakeLock continuo: Servicio en primer plano persistente para mantener el procesador y la red activos durante los cambios de canción, evitando que el sistema suspenda la app entre pistas.\n• Watchdog resiliente y AudioContext no bloqueante: Prevención de pausas accidentales y reintento inteligente de reproducción sin interrupción.",
+  "latestVersion": "1.0.14",
+  "versionCode": 15,
+  "releaseNotes": "• «Reproducir siguiente» y motor Standby perfeccionados: Invalidación instantánea de precarga al modificar la cola y corrección del intercambio entre reproductores A/B en transiciones gapless.\n• Sesiones en vivo con sobreescritura automática: Si estás escuchando cualquier canción y el anfitrión reproduce o reanuda algo, tu reproducción se sincroniza y sobreescribe al instante.\n• Trasfondo («Lore»), entrevistas y anotaciones estilo Genius: Nuevo panel para leer y añadir reflexiones sobre la canción y el artista, citas de entrevistas con enlaces y significados por verso.\n• Búsqueda de letras resiliente (4 reintentos + caché en servidor): Limpieza inteligente de títulos y persistencia automática en base de datos para cargas instantáneas.",
   "history": [
+    {
+      "version": "1.0.14",
+      "versionCode": 15,
+      "notes": "• «Reproducir siguiente» y motor Standby perfeccionados: Invalidación instantánea de precarga al modificar la cola y corrección del intercambio entre reproductores A/B en transiciones gapless.\n• Sesiones en vivo con sobreescritura automática: Si estás escuchando cualquier canción y el anfitrión reproduce o reanuda algo, tu reproducción se sincroniza y sobreescribe al instante.\n• Trasfondo («Lore»), entrevistas y anotaciones estilo Genius: Nuevo panel para leer y añadir reflexiones sobre la canción y el artista, citas de entrevistas con enlaces y significados por verso.\n• Búsqueda de letras resiliente (4 reintentos + caché en servidor): Limpieza inteligente de títulos y persistencia automática en base de datos para cargas instantáneas."
+    },
     {
       "version": "1.0.13",
       "versionCode": 14,
@@ -75,7 +80,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.13",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.14",
   "mandatory": false,
-  "publishedAt": "2026-11-03T10:44:58.980Z"
+  "publishedAt": "2026-11-08T01:02:08.377Z"
 }
