@@ -697,13 +697,13 @@ export default function App() {
   const resolvedMinigameAudioUrl = useFileUrl(minigameTargetSong?.audioUrl);
 
   const handlePlaySongRef = useRef<any>(null);
-  const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
+  const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl || (currentSong as any)?.cover_url || (currentSong as any)?.cover_path);
   const resolvedAnimatedCoverUrl = useFileUrl((currentSong as any)?.animated_cover_path || (currentSong as any)?.animatedCoverUrl);
   const [tvVideoError, setTvVideoError] = useState(false);
   useEffect(() => {
     setTvVideoError(false);
   }, [currentSong?.id, resolvedAnimatedCoverUrl]);
-  const resolvedAudioUrl = useFileUrl(currentSong?.audioUrl);
+  const resolvedAudioUrl = useFileUrl(currentSong?.audioUrl || (currentSong as any)?.audio_url || (currentSong as any)?.file_path);
   const resolvedCustomBg = useFileUrl(customBg);
   const resolvedProfilePic = useFileUrl(user?.profile_pic_path);
 
@@ -1883,6 +1883,35 @@ useEffect(() => {
         }
         return;
       }
+      // Si se avanza en la cola (preserveQueue) a la misma canción (p. ej. "Reproducir siguiente" de la actual),
+      // reiniciarla desde 0:00 y consumir la entrada duplicada en lugar de alternar pausa.
+      if (preserveQueue) {
+        setManualQueueIds(prev => prev.filter(id => String(id) !== String(song.id)));
+        const removeLeadingDuplicate = (list: Song[]) => {
+          const idx = list.findIndex(s => String(s.id) === String(song.id));
+          if (idx !== -1 && idx + 1 < list.length && String(list[idx + 1].id) === String(song.id)) {
+            const copy = [...list];
+            copy.splice(idx, 1);
+            return copy;
+          }
+          return list;
+        };
+        setActiveQueue(prev => removeLeadingDuplicate(prev));
+        if (socketObj.isShuffle) {
+          socketObj.setShuffledQueue(prev => removeLeadingDuplicate(prev));
+        }
+        audioObj.seek(0);
+        setIsPlaying(true);
+        void audioObj.audioRef.current?.play().catch(() => {});
+        socketObj.emitCommand('play-track', {
+          id: currentSong.id,
+          song: currentSong,
+          queue: activeQueue.length > 0 ? activeQueue : [currentSong],
+          position: 0,
+          isPlaying: true
+        });
+        return;
+      }
       const nextState = !isPlaying;
       setIsPlaying(nextState);
       const currentPos = audioObj.getCurrentTime?.() || 0;
@@ -1978,11 +2007,12 @@ useEffect(() => {
       }
     } else if (preserveQueue) {
       // Si avanzamos a una canción que estaba en la cola manual o radio, la removemos de la lista de pendientes
-      setManualQueueIds(prev => prev.filter(id => id !== song.id));
+      setManualQueueIds(prev => prev.filter(id => String(id) !== String(song.id)));
       setRadioQueueIds(prev => {
-        if (!prev.has(song.id)) return prev;
+        if (!prev.has(song.id) && !prev.has(String(song.id))) return prev;
         const next = new Set(prev);
         next.delete(song.id);
+        next.delete(String(song.id));
         return next;
       });
     }
@@ -2095,7 +2125,7 @@ useEffect(() => {
 
   const handleNext = async () => {
     if (blockIfGuest()) return;
-    const pool = socketObj.isShuffle
+    const pool = (socketObj.isShuffle && socketObj.shuffledQueue.length > 0)
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
@@ -2113,7 +2143,7 @@ useEffect(() => {
       return;
     }
 
-    const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
+    const currentIndex = pool.findIndex((s) => String(s.id) === String(currentSong?.id));
     const isAutoplay = audioSettings.autoplay?.enabled ?? true;
     const isAtEnd = currentIndex >= pool.length - 1;
 
@@ -2158,13 +2188,13 @@ audioObj.seek(0);
 
   const handlePrevious = () => {
     if (blockIfGuest()) return;
-    const pool = socketObj.isShuffle
+    const pool = (socketObj.isShuffle && socketObj.shuffledQueue.length > 0)
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : getFlattenedSongs());
 
     if (pool.length === 0) return;
 
-    const currentIndex = pool.findIndex((s) => s.id === currentSong?.id);
+    const currentIndex = pool.findIndex((s) => String(s.id) === String(currentSong?.id));
 
     if (audioObj.getCurrentTime() > 3) {
       audioObj.seek(0);
@@ -2360,61 +2390,76 @@ audioObj.seek(0);
   // Cola: cualquier miembro de la sesión puede tocarla (añadir, "siguiente",
   // reordenar) sin ser el anfitrión.
   const handlePlayNext = (song: Song) => {
+    const canonical = songs.find(s => String(s.id) === String(song.id)) || allLibrarySongs.find(s => String(s.id) === String(song.id));
+    const enrichedSong: Song = canonical
+      ? { ...canonical, ...song, audioUrl: song.audioUrl || canonical.audioUrl, coverUrl: song.coverUrl || canonical.coverUrl }
+      : song;
+
     // Si no hay canción sonando, la ponemos directamente
     if (!currentSong) {
-      handlePlaySong(song);
+      handlePlaySong(enrichedSong);
       return;
     }
 
     const isShuff = socketObj.isShuffle;
+    const fallbackPool = getFlattenedSongs().length > 0 ? getFlattenedSongs() : songs;
     const currentPool = isShuff
-      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...songs]))
-      : (activeQueue.length > 0 ? [...activeQueue] : [...songs]);
+      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...fallbackPool]))
+      : (activeQueue.length > 0 ? [...activeQueue] : [...fallbackPool]);
 
     // Aseguramos que currentSong esté en la cola
-    let curIdx = currentPool.findIndex(s => s.id === currentSong.id);
+    let curIdx = currentPool.findIndex(s => String(s.id) === String(currentSong.id));
     if (curIdx === -1) {
       currentPool.unshift(currentSong);
       curIdx = 0;
     }
 
     // Quitamos song si ya existía en otra posición que no sea la actual sonando
-    const filtered = currentPool.filter((s, idx) => idx === curIdx || s.id !== song.id);
-    curIdx = filtered.findIndex(s => s.id === currentSong.id);
+    const filtered = currentPool.filter((s, idx) => idx === curIdx || String(s.id) !== String(enrichedSong.id));
+    curIdx = filtered.findIndex(s => String(s.id) === String(currentSong.id));
 
     // Reproducir siguiente se inserta EXACTAMENTE en curIdx + 1 (la siguiente pista)
     const insertIdx = curIdx + 1;
-    filtered.splice(insertIdx, 0, song);
+    filtered.splice(insertIdx, 0, enrichedSong);
 
     // Registramos la canción como parte de la cola manual de prioridad al frente
-    setManualQueueIds(prev => [song.id, ...prev.filter(id => id !== song.id)]);
+    setManualQueueIds(prev => [String(enrichedSong.id), ...prev.filter(id => String(id) !== String(enrichedSong.id))]);
 
     setActiveQueue(filtered);
     if (isShuff) {
       socketObj.setShuffledQueue(filtered);
     }
-    socketObj.emitCommand('update-queue', { queue: filtered });
+    socketObj.emitCommand('update-queue', {
+      queue: filtered,
+      shuffledQueue: isShuff ? filtered : undefined
+    });
   };
 
   const handleAddToQueue = (song: Song) => {
+    const canonical = songs.find(s => String(s.id) === String(song.id)) || allLibrarySongs.find(s => String(s.id) === String(song.id));
+    const enrichedSong: Song = canonical
+      ? { ...canonical, ...song, audioUrl: song.audioUrl || canonical.audioUrl, coverUrl: song.coverUrl || canonical.coverUrl }
+      : song;
+
     if (!currentSong) {
-      handlePlaySong(song);
+      handlePlaySong(enrichedSong);
       return;
     }
 
     const isShuff = socketObj.isShuffle;
+    const fallbackPool = getFlattenedSongs().length > 0 ? getFlattenedSongs() : songs;
     const currentPool = isShuff
-      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...songs]))
-      : (activeQueue.length > 0 ? [...activeQueue] : [...songs]);
+      ? (socketObj.shuffledQueue.length > 0 ? [...socketObj.shuffledQueue] : (activeQueue.length > 0 ? [...activeQueue] : [...fallbackPool]))
+      : (activeQueue.length > 0 ? [...activeQueue] : [...fallbackPool]);
 
-    let curIdx = currentPool.findIndex(s => s.id === currentSong.id);
+    let curIdx = currentPool.findIndex(s => String(s.id) === String(currentSong.id));
     if (curIdx === -1) {
       currentPool.unshift(currentSong);
       curIdx = 0;
     }
 
-    const filtered = currentPool.filter((s, idx) => idx === curIdx || s.id !== song.id);
-    curIdx = filtered.findIndex(s => s.id === currentSong.id);
+    const filtered = currentPool.filter((s, idx) => idx === curIdx || String(s.id) !== String(enrichedSong.id));
+    curIdx = filtered.findIndex(s => String(s.id) === String(currentSong.id));
 
     // Determinamos si estamos en pestañas generales o búsqueda:
     // General Library ('all'), Liked Tracks ('liked'), Offline Tracks ('offline'),
@@ -2429,13 +2474,13 @@ audioObj.seek(0);
     if (isGeneralTabOrSearch) {
       // En pestañas generales / búsqueda: no se va al final de los cientos de canciones
       // de la biblioteca, sino justo después del bloque de cola manual previa (o de reproducir siguiente).
-      const manualSet = new Set(manualQueueIds);
+      const manualSet = new Set(manualQueueIds.map(id => String(id)));
       let target = curIdx + 1;
-      while (target < filtered.length && manualSet.has(filtered[target].id)) {
+      while (target < filtered.length && manualSet.has(String(filtered[target].id))) {
         target++;
       }
       insertIdx = target;
-      setManualQueueIds(prev => [...prev.filter(id => id !== song.id), song.id]);
+      setManualQueueIds(prev => [...prev.filter(id => String(id) !== String(enrichedSong.id)), String(enrichedSong.id)]);
     } else {
       // En playlists personalizadas o álbumes cerrados: al final de la lista correspondiente
       if (playbackContext === 'album' && contextAlbumName) {
@@ -2452,13 +2497,16 @@ audioObj.seek(0);
       }
     }
 
-    filtered.splice(insertIdx, 0, song);
+    filtered.splice(insertIdx, 0, enrichedSong);
 
     setActiveQueue(filtered);
     if (isShuff) {
       socketObj.setShuffledQueue(filtered);
     }
-    socketObj.emitCommand('update-queue', { queue: filtered });
+    socketObj.emitCommand('update-queue', {
+      queue: filtered,
+      shuffledQueue: isShuff ? filtered : undefined
+    });
   };
 
   const handleAddAlbumToQueue = (tracks: Song[]) => {
@@ -3395,19 +3443,19 @@ audioObj.seek(0);
       !selectedArtistName;
 
   const getCurrentPlayPool = () => {
-    if (socketObj.isShuffle) return socketObj.shuffledQueue;
+    if (socketObj.isShuffle && socketObj.shuffledQueue.length > 0) return socketObj.shuffledQueue;
     return activeQueue.length > 0 ? activeQueue : flattenedSongs;
   };
 
-  const getNextTrackInfo = useCallback((): { song: Song; resolveUrl: () => Promise<string | undefined> } | null => {
+  const nextTrackInfoMemo = useMemo((): { song: Song; resolveUrl: () => Promise<string | undefined> } | null => {
     if (socketObj.isLoop) return null;
     if (socketObj.currentSession && !socketObj.isLeader()) return null;
-    const pool = socketObj.isShuffle
+    const pool = (socketObj.isShuffle && socketObj.shuffledQueue.length > 0)
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : flattenedSongs);
     if (pool.length === 0 || !currentSong) return null;
 
-    const currentIndex = pool.findIndex((s) => s.id === currentSong.id);
+    const currentIndex = pool.findIndex((s) => String(s.id) === String(currentSong.id));
     const isAutoplay = audioSettings.autoplay?.enabled ?? true;
     const isAtEnd = currentIndex >= pool.length - 1;
 
@@ -3416,9 +3464,10 @@ audioObj.seek(0);
         const radioTracks = generateRadioTracks(currentSong, pool);
         if (radioTracks.length > 0) {
           const nextSong = radioTracks[0];
+          const nextUrl = nextSong.audioUrl || (nextSong as any).audio_url || (nextSong as any).file_path;
           return {
             song: nextSong,
-            resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
+            resolveUrl: () => resolveFileUrl(nextUrl),
           };
         }
       }
@@ -3426,13 +3475,16 @@ audioObj.seek(0);
     }
 
     const nextSong = currentIndex === -1 ? pool[0] : pool[(currentIndex + 1) % pool.length];
-    if (!nextSong || nextSong.id === currentSong.id) return null;
+    if (!nextSong || String(nextSong.id) === String(currentSong.id)) return null;
 
+    const nextUrl = nextSong.audioUrl || (nextSong as any).audio_url || (nextSong as any).file_path;
     return {
       song: nextSong,
-      resolveUrl: () => resolveFileUrl(nextSong.audioUrl),
+      resolveUrl: () => resolveFileUrl(nextUrl),
     };
-  }, [socketObj.isShuffle, socketObj.shuffledQueue, socketObj.isLoop, activeQueue, flattenedSongs, currentSong, audioSettings.autoplay?.enabled, generateRadioTracks, playbackContext]);
+  }, [socketObj.isShuffle, socketObj.shuffledQueue, socketObj.isLoop, socketObj.currentSession, activeQueue, flattenedSongs, currentSong, audioSettings.autoplay?.enabled, generateRadioTracks, playbackContext]);
+
+  const getNextTrackInfo = useCallback(() => nextTrackInfoMemo, [nextTrackInfoMemo]);
 
   getNextTrackInfoRef.current = getNextTrackInfo;
 
@@ -3457,11 +3509,12 @@ audioObj.seek(0);
       return nextRecent;
     });
 
-    setManualQueueIds(prev => prev.filter(id => id !== nextSong.id));
+    setManualQueueIds(prev => prev.filter(id => String(id) !== String(nextSong.id)));
     setRadioQueueIds(prev => {
-      if (!prev.has(nextSong.id)) return prev;
+      if (!prev.has(nextSong.id) && !prev.has(String(nextSong.id))) return prev;
       const next = new Set(prev);
       next.delete(nextSong.id);
+      next.delete(String(nextSong.id));
       return next;
     });
 

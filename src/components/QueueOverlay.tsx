@@ -142,7 +142,7 @@ export const QueueOverlay: React.FC<QueueOverlayProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const currentIndex = queue.findIndex(s => s.id === currentSong?.id);
+  const currentIndex = queue.findIndex(s => String(s.id) === String(currentSong?.id));
   const upcoming = currentIndex !== -1 ? queue.slice(currentIndex + 1) : queue;
 
   const handleReorderUpcoming = (newUpcoming: Song[]) => {
