@@ -1051,7 +1051,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
     <span class="badge">Aura Music v${version} (Android)</span>
     <h1>Descarga Oficial APK</h1>
     <p class="desc">La última versión con panel de personalización avanzado, estilos de reproductor y mayor velocidad.</p>
-    <a href="/download/aura-latest.apk?v=${version}" class="btn" id="dlBtn" download="aura-latest.apk">
+    <a href="/download/aura-latest.apk?v=${version}&t=${Date.now()}" class="btn" id="dlBtn" download="aura-latest.apk">
       <span>⬇️ Descargar APK (6.6 MB)</span>
     </a>
     <p class="auto-notice" id="timerNotice">La descarga comenzará automáticamente en 2 segundos...</p>
@@ -1079,7 +1079,7 @@ app.get(['/download', '/descargar'], (req: Request, res: Response) => {
         if (n) n.innerText = 'Iniciando descarga... Si no aparece, pulsa el botón naranja.';
         var ifr = document.createElement('iframe');
         ifr.style.display = 'none';
-        ifr.src = '/download/aura-latest.apk?v=' + encodeURIComponent('${version}');
+        ifr.src = '/download/aura-latest.apk?v=' + encodeURIComponent('${version}') + '&t=' + Date.now();
         document.body.appendChild(ifr);
       } catch (e) {
         var n2 = document.getElementById('timerNotice');
