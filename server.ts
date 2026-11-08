@@ -84,6 +84,7 @@ const getRequestBaseUrl = (req: Request): string => {
 };
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
+  maxHttpBufferSize: 1e7,
   cors: {
     origin: true,
     credentials: true,
@@ -1233,7 +1234,7 @@ app.get('/api/tracks', async (req: any, res: Response) => {
         const [t]: any = await pool.execute(query, params);
 
         const baseUrl = getRequestBaseUrl(req);
-        const enriched = t.map((item: any) => ({
+        const enriched = t.map(({ lyrics, lore_data, ...item }: any) => ({
             ...item,
             duration: item.duration !== null && item.duration !== undefined ? Number(item.duration) : null,
             genre: item.genre || null,
@@ -3306,15 +3307,17 @@ const trackCommand = (code: string, command: string, data: any) => {
         }
 
         case 'sync-time':
-
-            if (data?.songId && data.songId === st.songId) {
-
-                st.position = Number(data.position) || 0;
-
-                st.updatedAt = now;
-
+            if (data?.song?.id) {
+                st.song = data.song;
+                st.songId = String(data.song.id);
             }
-
+            if (typeof data?.isPlaying === 'boolean') {
+                st.isPlaying = data.isPlaying;
+            }
+            if (data?.songId && String(data.songId) === String(st.songId)) {
+                st.position = Number(data.position) || 0;
+                st.updatedAt = now;
+            }
             break;
 
         case 'seek':
@@ -3326,13 +3329,17 @@ const trackCommand = (code: string, command: string, data: any) => {
             break;
 
         case 'toggle-play':
-
-            st.position = livePosition(st);
-
+            if (data?.song?.id) {
+                st.song = data.song;
+                st.songId = String(data.song.id);
+            }
+            if (data?.position !== undefined) {
+                st.position = Number(data.position) || 0;
+            } else {
+                st.position = livePosition(st);
+            }
             st.isPlaying = !!data?.isPlaying;
-
             st.updatedAt = now;
-
             break;
 
         case 'toggle-shuffle':

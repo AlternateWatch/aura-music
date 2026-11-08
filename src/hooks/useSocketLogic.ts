@@ -13,15 +13,38 @@ const getSocketUrl = () => {
   }
   return "https://aura.basildo.me";
 };
+
 // Cuánto puede desviarse el audio local respecto al de la sesión antes de saltar.
 const DRIFT_TOLERANCE = 1.5;
+
+// Limpia campos pesados (como letras o lore) para que los paquetes de Socket.IO sean ligeros y nunca se descarten.
+const stripSongForSocket = (song: any): any => {
+  if (!song || typeof song !== "object") return song;
+  const { lyrics, lore_data, ...rest } = song;
+  return rest;
+};
+
+const trimQueueForSocket = (queue: any[], currentSongId?: string | null, maxItems = 80): any[] => {
+  if (!Array.isArray(queue) || queue.length === 0) return [];
+  let sliced = queue;
+  if (queue.length > maxItems) {
+    const idx = currentSongId
+      ? queue.findIndex((s) => String(s?.id) === String(currentSongId))
+      : 0;
+    const start = Math.max(0, (idx >= 0 ? idx : 0) - 10);
+    sliced = queue.slice(start, start + maxItems);
+  }
+  return sliced.map(stripSongForSocket);
+};
 
 export function useSocketLogic(
   user: any,
   handlePlaySongRef: any,
   setIsPlaying: any,
   audioRef: MutableRefObject<HTMLAudioElement | null>,
-  setActiveQueue: any
+  setActiveQueue: any,
+  currentSong?: Song | null,
+  isPlaying?: boolean
 ) {
   const socketRef = useRef<Socket | null>(null);
   const [currentSession, setCurrentSessionState] = useState<string | null>(() => {
@@ -36,21 +59,55 @@ export function useSocketLogic(
   const [shuffledQueue, setShuffledQueue] = useState<Song[]>([]);
   const [isLoop, setIsLoop] = useState(false);
 
-  // Refs para que los listeners del socket (que se crean UNA sola vez) siempre
-  // vean el valor actual y no el de la primera render.
-  const currentSongIdRef = useRef<string | null>(null);
+  // Refs sincronizadas con el estado actual de App.tsx
+  const currentSongIdRef = useRef<string | null>(currentSong?.id ? String(currentSong.id) : null);
+  const currentSongRef = useRef<Song | null>(currentSong ?? null);
+  const isPlayingRef = useRef<boolean>(!!isPlaying);
   const userRef = useRef<any>(user);
-  const sessionRef = useRef<string | null>(null);
+  const sessionRef = useRef<string | null>(currentSession);
   const settersRef = useRef({ setIsPlaying, setActiveQueue });
   const isShuffleRef = useRef(isShuffle);
-  // "Líder" = el último que tocó un control (play, seek, siguiente...). Solo el
-  // líder envía el latido de sincronización; si lo enviaran todos, se estarían
-  // corrigiendo entre ellos y la música saltaría constantemente.
+  // Solo el anfitrión de la sesión tiene isLeaderRef = true.
   const isLeaderRef = useRef(false);
 
   userRef.current = user;
   settersRef.current = { setIsPlaying, setActiveQueue };
   isShuffleRef.current = isShuffle;
+  currentSongRef.current = currentSong ?? null;
+  isPlayingRef.current = !!isPlaying;
+
+  useEffect(() => {
+    currentSongIdRef.current = currentSong?.id ? String(currentSong.id) : null;
+  }, [currentSong?.id]);
+
+  // Si el anfitrión cambia play/pause desde controles externos (notificación Android, teclas multimedia, etc.),
+  // propagar de inmediato a la sesión además del latido de 3s.
+  useEffect(() => {
+    if (!sessionRef.current || !isLeaderRef.current || !socketRef.current) return;
+    if (!currentSongRef.current?.id) return;
+    socketRef.current.emit("sync-command", {
+      code: sessionRef.current,
+      command: "sync-time",
+      data: {
+        songId: String(currentSongRef.current.id),
+        song: stripSongForSocket(currentSongRef.current),
+        position: audioRef.current?.currentTime || 0,
+        isPlaying: !!isPlaying
+      }
+    });
+  }, [isPlaying]);
+
+  const getMyUserId = () => String(userRef.current?.userId ?? userRef.current?.id ?? "");
+
+  const updateLeaderFromMembers = useCallback((members?: SessionMember[]) => {
+    if (!Array.isArray(members)) return;
+    const myId = getMyUserId();
+    if (!myId) return;
+    const me = members.find((m) => String(m.userId) === myId);
+    if (me) {
+      isLeaderRef.current = !!me.isHost;
+    }
+  }, []);
 
   const setCurrentSession = useCallback((code: string | null) => {
     sessionRef.current = code;
@@ -62,7 +119,7 @@ export function useSocketLogic(
     }
   }, []);
 
-  // Aplica el estado de la sesión (canción, posición, cola, shuffle, loop).
+  // Aplica el estado de la sesión y sobreescribe cualquier canción que el usuario estuviera escuchando.
   const applyState = useCallback((state: any) => {
     if (!state) return;
     const { setIsPlaying, setActiveQueue } = settersRef.current;
@@ -74,18 +131,12 @@ export function useSocketLogic(
 
     if (!state.song?.id) return;
     const position = Number(state.position) || 0;
+    const targetId = String(state.song.id);
+    const shouldPlay = state.isPlaying !== undefined ? !!state.isPlaying : true;
 
-    if (currentSongIdRef.current === state.song.id) {
-      const audio = audioRef.current;
-      if (audio && Math.abs(audio.currentTime - position) > DRIFT_TOLERANCE) {
-        audio.currentTime = position;
-      }
-      setIsPlaying(!!state.isPlaying);
-    } else {
-      currentSongIdRef.current = state.song.id;
-      handlePlaySongRef.current?.(state.song, true, position);
-      if (!state.isPlaying) setIsPlaying(false);
-    }
+    currentSongIdRef.current = targetId;
+    handlePlaySongRef.current?.(state.song, true, position, true, null, shouldPlay);
+    setIsPlaying(shouldPlay);
   }, []);
 
   useEffect(() => {
@@ -99,28 +150,31 @@ export function useSocketLogic(
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      const uid = String(userRef.current?.userId ?? userRef.current?.id ?? "");
+      const uid = getMyUserId();
       if (uid) socket.emit("identify", uid);
 
-      // Tras una reconexión (red inestable, reinicio del servidor...) el servidor
-      // ha olvidado en qué salas estábamos: hay que volver a entrar y ponerse al día.
+      // Si ya estábamos en una sesión (o tras recargar/reconectar), volver a entrar y sincronizar.
       const code = sessionRef.current;
       if (code) {
         socket.emit("join-session", { code, user: userRef.current }, (res: any) => {
           if (res?.ok) {
-            applyState(res.state);
-            if (res.membersList) setSessionMembers(res.membersList);
+            if (res.membersList) {
+              setSessionMembers(res.membersList);
+              updateLeaderFromMembers(res.membersList);
+            }
+            if (!isLeaderRef.current) {
+              applyState(res.state);
+            }
+          } else if (res?.error === "SESSION_NOT_FOUND") {
+            setCurrentSession(null);
           }
-          else if (res?.error === "SESSION_NOT_FOUND") setCurrentSession(null);
         });
       }
     });
 
     socket.on("receive-command", ({ command, data }) => {
-      if (command !== "sync-time") isLeaderRef.current = false;
-
       if (command === "update-queue") {
-        if (Array.isArray(data.queue)) {
+        if (Array.isArray(data?.queue)) {
           settersRef.current.setActiveQueue(data.queue);
           if (Array.isArray(data.shuffledQueue)) {
             setShuffledQueue(data.shuffledQueue);
@@ -131,77 +185,112 @@ export function useSocketLogic(
       }
 
       if (command === "play-track") {
-        if (data.queue) settersRef.current.setActiveQueue(data.queue);
-        if (data.song?.id) {
-          if (currentSongIdRef.current === data.song.id) {
-            const audio = audioRef.current;
-            const pos = Number(data.position) || 0;
-            if (audio && Math.abs(audio.currentTime - pos) > DRIFT_TOLERANCE) audio.currentTime = pos;
-          } else {
-            currentSongIdRef.current = data.song.id;
-            handlePlaySongRef.current?.(data.song, true, Number(data.position) || 0);
-          }
+        if (Array.isArray(data?.queue) && data.queue.length > 0) {
+          settersRef.current.setActiveQueue(data.queue);
+        }
+        if (data?.song?.id) {
+          const pos = Number(data.position) || 0;
+          const shouldPlay = data.isPlaying !== undefined ? !!data.isPlaying : true;
+          currentSongIdRef.current = String(data.song.id);
+          // Sobreescribir inmediatamente lo que sea que el miembro estuviera escuchando
+          handlePlaySongRef.current?.(data.song, true, pos, true, null, shouldPlay);
+          settersRef.current.setIsPlaying(shouldPlay);
         }
       }
 
       if (command === "sync-time") {
+        const incomingId = data?.songId ?? data?.song?.id;
+        const pos = Number(data?.position) || 0;
+
+        // Si el anfitrión está reproduciendo otra canción distinta a la que tenemos puesta, sobreescribir automáticamente
+        if (incomingId && String(incomingId) !== String(currentSongIdRef.current)) {
+          if (data?.song?.id) {
+            const shouldPlay = data.isPlaying !== undefined ? !!data.isPlaying : true;
+            currentSongIdRef.current = String(data.song.id);
+            handlePlaySongRef.current?.(data.song, true, pos, true, null, shouldPlay);
+            settersRef.current.setIsPlaying(shouldPlay);
+          } else if (sessionRef.current) {
+            socket.emit("get-session-state", { code: sessionRef.current }, (res: any) => {
+              if (res?.state?.song?.id) applyState(res.state);
+            });
+          }
+          return;
+        }
+
         const audio = audioRef.current;
-        if (audio && data.songId === currentSongIdRef.current) {
-          if (Math.abs(audio.currentTime - data.position) > DRIFT_TOLERANCE) {
-            audio.currentTime = data.position;
+        if (audio && incomingId && String(incomingId) === String(currentSongIdRef.current)) {
+          if (typeof data.isPlaying === "boolean" && data.isPlaying !== isPlayingRef.current) {
+            settersRef.current.setIsPlaying(data.isPlaying);
+          }
+          if (Math.abs(audio.currentTime - pos) > DRIFT_TOLERANCE) {
+            audio.currentTime = pos;
           }
         }
       }
 
-      if (command === "toggle-play") settersRef.current.setIsPlaying(data.isPlaying);
-
-      if (command === "toggle-shuffle") {
-        setIsShuffle(data.isShuffle);
-        if (data.shuffledQueue) setShuffledQueue(data.shuffledQueue);
+      if (command === "toggle-play") {
+        const shouldPlay = !!data?.isPlaying;
+        // Si el anfitrión le da a Play en una canción distinta a la que el invitado estaba escuchando, sobreescribirla
+        if (shouldPlay && data?.song?.id && String(data.song.id) !== String(currentSongIdRef.current)) {
+          const pos = Number(data.position) || 0;
+          currentSongIdRef.current = String(data.song.id);
+          handlePlaySongRef.current?.(data.song, true, pos, true, null, true);
+          settersRef.current.setIsPlaying(true);
+        } else {
+          settersRef.current.setIsPlaying(shouldPlay);
+          if (data?.position !== undefined && audioRef.current) {
+            const pos = Number(data.position) || 0;
+            if (Math.abs(audioRef.current.currentTime - pos) > DRIFT_TOLERANCE) {
+              audioRef.current.currentTime = pos;
+            }
+          }
+        }
       }
 
-      if (command === "toggle-loop") setIsLoop(data.isLoop);
+      if (command === "toggle-shuffle") {
+        setIsShuffle(!!data?.isShuffle);
+        if (Array.isArray(data?.shuffledQueue)) setShuffledQueue(data.shuffledQueue);
+      }
+
+      if (command === "toggle-loop") setIsLoop(!!data?.isLoop);
 
       if (command === "seek" && audioRef.current) {
-        audioRef.current.currentTime = data.time;
+        audioRef.current.currentTime = Number(data?.time) || 0;
       }
     });
 
-    // HEARTBEAT: Solo el líder envía el tiempo actual cada 3 segundos para mantener a todos sincronizados
+    // HEARTBEAT: El anfitrión envía el estado y tiempo actual cada 3 segundos para mantener a todos sincronizados
     const heartbeatInterval = setInterval(() => {
-      if (isLeaderRef.current && sessionRef.current && audioRef.current) {
+      if (isLeaderRef.current && sessionRef.current && audioRef.current && currentSongRef.current) {
         emitCommand("sync-time", {
-          songId: currentSongIdRef.current,
-          position: audioRef.current.currentTime
+          songId: String(currentSongRef.current.id),
+          song: stripSongForSocket(currentSongRef.current),
+          position: audioRef.current.currentTime,
+          isPlaying: !audioRef.current.paused
         });
       }
     }, 3000);
 
     socket.on("receive-chat", (chat) => setSessionMessages(prev => [...prev, chat]));
     socket.on("receive-reaction", ({ messageId, userId, reaction }) => {
-      console.log("[SOCKET] receive-reaction:", { messageId, userId, reaction });
       setSessionMessages(prev => {
-        const updated = prev.map(msg => {
+        return prev.map(msg => {
           if (msg.id === messageId) {
             const reactions = msg.reactions || {};
             const userReactions = reactions[userId] || [];
             const newReactions = userReactions.includes(reaction)
-              ? userReactions.filter(r => r !== reaction)
+              ? userReactions.filter((r: string) => r !== reaction)
               : [...userReactions, reaction];
             return { ...msg, reactions: { ...reactions, [userId]: newReactions } };
           }
           return msg;
         });
-        return updated;
       });
     });
     socket.on("session-members", ({ code, members }: { code: string; members: SessionMember[] }) => {
       if (code !== sessionRef.current) return;
       setSessionMembers(members);
-      // El anfitrión puede cambiar (por "Ceder control"): esto mantiene isLeaderRef
-      // al día en todos los clientes sin depender de un evento aparte.
-      const me = members.find((m) => m.userId === String(userRef.current?.userId ?? ""));
-      if (me) isLeaderRef.current = me.isHost;
+      updateLeaderFromMembers(members);
     });
     socket.on("receive-private-message", (msg) => {
       setUnreadSenders(prev => [...new Set([...prev, String(msg.sender_id)])]);
@@ -216,12 +305,11 @@ export function useSocketLogic(
   }, []);
 
   useEffect(() => {
-    const uid = String(user?.userId ?? user?.id ?? "");
+    const uid = getMyUserId();
     if (uid && socketRef.current) socketRef.current.emit("identify", uid);
   }, [user]);
 
-  // Entra en una sesión. Solo se marca como "dentro" si el servidor confirma
-  // que el código existe (antes se marcaba siempre, aunque fuese inválido).
+  // Entra en una sesión.
   const joinSession = useCallback((rawCode: string, opts: { asLeader?: boolean } = {}): Promise<JoinResult> => {
     return new Promise((resolve) => {
       const code = (rawCode || "").trim().toUpperCase();
@@ -229,41 +317,50 @@ export function useSocketLogic(
       if (!code) return resolve({ ok: false, error: "INVALID_CODE" });
       if (!socket) return resolve({ ok: false, error: "NO_SOCKET" });
 
+      const prevSession = sessionRef.current;
+      // Fijar sessionRef antes del emit para que el evento 'session-members' que emite el servidor
+      // inmediatamente antes del ack no sea descartado por `code !== sessionRef.current`.
+      sessionRef.current = code;
+
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        sessionRef.current = prevSession;
         resolve({ ok: false, error: "TIMEOUT" });
       }, 10000);
 
-      // Si el socket aún se está conectando, socket.io guarda el emit y lo envía al conectar.
       socket.emit("join-session", { code, user: userRef.current }, (res: any) => {
         if (settled) {
-          // Llegó tarde: si ya no nos interesa, salimos de la sala.
           if (res?.ok && sessionRef.current !== code) socket.emit("leave-session", { code });
           return;
         }
         settled = true;
         clearTimeout(timer);
 
-        if (!res?.ok) return resolve({ ok: false, error: res?.error || "SERVER_ERROR" });
-
-        // Si estaba en otra sesión, la dejo.
-        if (sessionRef.current && sessionRef.current !== code) {
-          socket.emit("leave-session", { code: sessionRef.current });
+        if (!res?.ok) {
+          sessionRef.current = prevSession;
+          return resolve({ ok: false, error: res?.error || "SERVER_ERROR" });
         }
-        if (sessionRef.current !== code) setSessionMessages([]);
+
+        if (prevSession && prevSession !== code) {
+          socket.emit("leave-session", { code: prevSession });
+        }
+        if (prevSession !== code) setSessionMessages([]);
         setCurrentSession(code);
         isLeaderRef.current = !!opts.asLeader;
-        if (res.membersList) setSessionMembers(res.membersList);
-        applyState(res.state);
+        if (res.membersList) {
+          setSessionMembers(res.membersList);
+          updateLeaderFromMembers(res.membersList);
+        }
+        if (!opts.asLeader) {
+          applyState(res.state);
+        }
         resolve({ ok: true, members: res.members });
       });
     });
-  }, []);
+  }, [applyState, setCurrentSession, updateLeaderFromMembers]);
 
-  // Cede el control de la sesión a otra persona. Solo funciona si somos el
-  // anfitrión; el servidor lo comprueba de todas formas por seguridad.
   const transferHost = useCallback((targetUserId: string): Promise<{ ok: boolean; error?: string }> => {
     return new Promise((resolve) => {
       const code = sessionRef.current;
@@ -282,30 +379,46 @@ export function useSocketLogic(
     setCurrentSession(null);
     setSessionMessages([]);
     setSessionMembers([]);
-  }, []);
+  }, [setCurrentSession]);
 
-  // Pide el estado actual y corrige solo la posición (no toca play/pausa).
+  // Pide el estado actual al servidor y sincroniza canción y posición.
   const resyncSession = useCallback(() => {
     const code = sessionRef.current;
     if (!code) return;
     socketRef.current?.emit("get-session-state", { code }, (res: any) => {
       const st = res?.state;
+      if (!st?.song?.id) return;
+      if (String(st.song.id) !== String(currentSongIdRef.current)) {
+        applyState(st);
+        return;
+      }
       const audio = audioRef.current;
-      if (!st?.song?.id || !audio || st.song.id !== currentSongIdRef.current) return;
-      if (Math.abs(audio.currentTime - st.position) > DRIFT_TOLERANCE) audio.currentTime = st.position;
+      if (audio && Math.abs(audio.currentTime - st.position) > DRIFT_TOLERANCE) {
+        audio.currentTime = st.position;
+      }
     });
-  }, []);
+  }, [applyState]);
 
   const emitCommand = (command: string, data: any) => {
     const code = sessionRef.current;
     if (!code) return;
-    // isLeaderRef refleja si somos el anfitrión (lo fija el evento "session-members"
-    // del servidor); emitir un comando no nos convierte en anfitrión.
-    if (command === "sync-time" && !isLeaderRef.current) return; // solo el anfitrión emite el latido
+    if (command === "sync-time" && !isLeaderRef.current) return;
+
+    const payload = { ...data };
+    if (payload.song) {
+      payload.song = stripSongForSocket(payload.song);
+    }
+    if (Array.isArray(payload.queue)) {
+      payload.queue = trimQueueForSocket(payload.queue, payload.song?.id ?? currentSongIdRef.current);
+    }
+    if (Array.isArray(payload.shuffledQueue)) {
+      payload.shuffledQueue = trimQueueForSocket(payload.shuffledQueue, payload.song?.id ?? currentSongIdRef.current);
+    }
+
     socketRef.current?.emit("send-command", {
       code,
       command,
-      data: { ...data, sentAt: Date.now() }
+      data: { ...payload, sentAt: Date.now() }
     });
   };
 
@@ -313,22 +426,21 @@ export function useSocketLogic(
     const code = sessionRef.current;
     if (!code) return;
 
-    // Optimistic Update: Immediately update local state so the user sees their reaction
+    const uid = getMyUserId();
     setSessionMessages(prev =>
       prev.map(msg => {
         if (msg.id === messageId) {
           const reactions = msg.reactions || {};
-          const myReactions = reactions[userRef.current?.userId] || [];
+          const myReactions = reactions[uid] || [];
           const newMyReactions = myReactions.includes(reaction)
-            ? myReactions.filter(r => r !== reaction)
+            ? myReactions.filter((r: string) => r !== reaction)
             : [...myReactions, reaction];
-          return { ...msg, reactions: { ...reactions, [userRef.current?.userId]: newMyReactions } };
+          return { ...msg, reactions: { ...reactions, [uid]: newMyReactions } };
         }
         return msg;
       })
     );
 
-    const uid = String(userRef.current?.userId ?? userRef.current?.id ?? "");
     socketRef.current?.emit("send-reaction", {
       code,
       messageId,
@@ -337,8 +449,7 @@ export function useSocketLogic(
     });
   };
 
-  // Helper to keep track of the ID for sync-time
-  const setTrackId = (id: string | null) => { currentSongIdRef.current = id; };
+  const setTrackId = (id: string | null) => { currentSongIdRef.current = id ? String(id) : null; };
   const getTrackId = () => currentSongIdRef.current;
   const isLeader = () => isLeaderRef.current;
 

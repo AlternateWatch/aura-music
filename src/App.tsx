@@ -725,7 +725,7 @@ export default function App() {
     () => getNextTrackInfoRef.current(),
     (s) => handleGaplessNextRef.current(s)
   );
-  const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue);
+  const socketObj = useSocketLogic(user, handlePlaySongRef, setIsPlaying, audioObj.audioRef, setActiveQueue, currentSong, isPlaying);
 
   const handlePauseForSleepTimer = useCallback(() => {
     if (audioObj.audioRef.current) {
@@ -1844,12 +1844,24 @@ useEffect(() => {
     fromSocket = false,
     initialPos = 0,
     preserveQueue = false,
-    albumContextName?: string | null
+    albumContextName?: string | null,
+    shouldPlay = true
   ) => {
+    // Si viene del anfitrión de la sesión, cancelar cualquier minijuego o cola local pendiente para forzar la sobreescritura
+    if (fromSocket) {
+      if (isMinigameActive) {
+        if (minigameAudioRef.current) minigameAudioRef.current.pause();
+        if (minigameTimeoutRef.current) clearTimeout(minigameTimeoutRef.current);
+        setIsMinigameActive(false);
+      }
+      setManualQueueIds([]);
+      setRadioQueueIds(new Set());
+    }
+
     // Si es un invitado que hace click en la canción actual que estaba pausada (ej. por bloqueo de autoplay),
     // le permitimos iniciar su reproducción local y resincronizarse con la sesión sin bloquearlo
     if (!fromSocket && isSessionGuest()) {
-      if (currentSong?.id === song.id && !isPlaying) {
+      if (String(currentSong?.id) === String(song.id) && !isPlaying) {
         setIsPlaying(true);
         socketObj.resyncSession();
         return;
@@ -1857,21 +1869,40 @@ useEffect(() => {
       if (blockIfGuest()) return;
     }
 
-    if (currentSong?.id === song.id) {
-      if (song.coverUrl && song.coverUrl !== currentSong.coverUrl) {
+    if (String(currentSong?.id) === String(song.id)) {
+      if (song.coverUrl && song.coverUrl !== currentSong?.coverUrl) {
         setCurrentSong(prev => prev ? { ...prev, ...song } : song);
         try { localStorage.setItem('aura_last_song', JSON.stringify({ ...currentSong, ...song })); } catch {}
       }
       if (fromSocket) {
-        setIsPlaying(true);
-        if (initialPos > 0 && Math.abs(audioObj.getCurrentTime() - initialPos) > 1.5) {
+        setCurrentSong(prev => prev ? { ...prev, ...song } : song);
+        setIsPlaying(shouldPlay);
+        socketObj.setTrackId(String(song.id));
+        if (initialPos >= 0 && Math.abs(audioObj.getCurrentTime() - initialPos) > 1.5) {
           audioObj.seek(initialPos);
         }
         return;
       }
       const nextState = !isPlaying;
       setIsPlaying(nextState);
-      socketObj.emitCommand('toggle-play', { isPlaying: nextState });
+      const currentPos = audioObj.getCurrentTime?.() || 0;
+      if (nextState) {
+        // Si el anfitrión reanuda su canción actual, emitir play-track completo para que cualquier
+        // miembro de la sesión que estuviera escuchando otra cosa sea sobreescrito automáticamente
+        socketObj.emitCommand('play-track', {
+          id: currentSong.id,
+          song: currentSong,
+          queue: activeQueue.length > 0 ? activeQueue : [currentSong],
+          position: currentPos,
+          isPlaying: true
+        });
+      } else {
+        socketObj.emitCommand('toggle-play', {
+          isPlaying: false,
+          song: currentSong,
+          position: currentPos
+        });
+      }
       if (nextState && socketObj.currentSession) socketObj.resyncSession();
       return;
     }
@@ -1969,8 +2000,8 @@ useEffect(() => {
     });
 
     setCurrentSong(song);
-    setIsPlaying(true);
-    socketObj.setTrackId(song.id);
+    setIsPlaying(fromSocket ? shouldPlay : true);
+    socketObj.setTrackId(String(song.id));
 
     const activeToken = token || localStorage.getItem('aura_token');
     if (!fromSocket && activeToken) {
@@ -1992,7 +2023,8 @@ useEffect(() => {
         id: song.id,
         song,
         queue: finalQueue,
-        position: 0
+        position: 0,
+        isPlaying: true
       });
     }
   };
@@ -2281,8 +2313,10 @@ audioObj.seek(0);
     if (!socketObj.currentSession || socketObj.isLeader()) return handleNext();
     const endedId = socketObj.getTrackId();
     setTimeout(() => {
-      if (socketObj.getTrackId() === endedId) handleNextRef.current();
-    }, 3000);
+      if (socketObj.getTrackId() === endedId) {
+        socketObj.resyncSession();
+      }
+    }, 1500);
   };
   handleSongEndedRef.current = handleSongEnded;
 
@@ -3367,6 +3401,7 @@ audioObj.seek(0);
 
   const getNextTrackInfo = useCallback((): { song: Song; resolveUrl: () => Promise<string | undefined> } | null => {
     if (socketObj.isLoop) return null;
+    if (socketObj.currentSession && !socketObj.isLeader()) return null;
     const pool = socketObj.isShuffle
       ? socketObj.shuffledQueue
       : (activeQueue.length > 0 ? activeQueue : flattenedSongs);
