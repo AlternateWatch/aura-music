@@ -3187,6 +3187,8 @@ audioObj.seek(0);
   const displayItems = useMemo(() => {
     const list = flattenedSongs;
 
+    // En la vista de Canciones, Favoritos, Offline o Playlists siempre mostrar todas las canciones separadas (sin agrupar en álbumes)
+    if (!showModeration) return list;
     if (activePlaylistId !== 'all' && activePlaylistId !== 'liked') return list;
     if (selectedAlbumName || selectedArtistName) return list;
 
@@ -3255,7 +3257,7 @@ audioObj.seek(0);
     });
 
     return items;
-  }, [flattenedSongs, songs, allArtists, allAlbums, artistFuse, albumFuse, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery]);
+  }, [flattenedSongs, songs, allArtists, allAlbums, artistFuse, albumFuse, activePlaylistId, selectedAlbumName, selectedArtistName, searchQuery, showModeration]);
 
   // RENDERIZADO PROGRESIVO DE TARJETAS Y MEMORIA DE SCROLL
   const [renderedCount, setRenderedCount] = useState(48);
