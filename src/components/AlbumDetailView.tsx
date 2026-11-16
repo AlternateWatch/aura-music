@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, Shuffle, Download, CheckCircle2, Loader2, 
   ChevronLeft, Disc, Heart, MoreVertical, ListPlus, ListMusic, 
-  Guitar, Trash2, Edit2, User, Music2, Check, X
+  Guitar, Trash2, Edit2, User, Music2, Check, X, Share2
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { useFileUrl } from '../hooks/useFileUrl';
@@ -17,6 +17,7 @@ import {
   getCachedOfflineBlobUrl,
 } from '../utils/offlineDb';
 import { hapticImpact } from '../utils/haptics';
+import { triggerShareSong } from '../utils/shareSong';
 
 interface AlbumDetailViewProps {
   albumName: string;
@@ -606,6 +607,20 @@ export const AlbumDetailView: React.FC<AlbumDetailViewProps> = ({
                   >
                     <Heart size={iconSize} fill={isTrackLiked ? "currentColor" : "none"} className={isTrackLiked ? "text-red-500" : ""} />
                     <span>{isTrackLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+                  </button>
+
+                  {/* Compartir canción */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveMenuSongId(null);
+                      setMenuPlacement(null);
+                      void triggerShareSong(activeTrack, isMobile);
+                    }}
+                    className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+                  >
+                    <Share2 size={iconSize} className="text-brand-primary" />
+                    <span>{isMobile ? 'Compartir canción...' : 'Compartir (Copiar link)'}</span>
                   </button>
 
                   {/* Reproducir siguiente */}

@@ -40,6 +40,7 @@ import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import AuraMedia from './plugins/auraMedia';
 import { PlaylistImportOverlay } from "./components/PlaylistImportOverlay";
+import { ShareSongOverlay } from "./components/ShareSongOverlay";
 
 
 // Pantallas que no hacen falta en el primer render (solo se abren bajo
@@ -1206,6 +1207,52 @@ useEffect(() => {
     const qs = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
   }, [user]);
+
+  // Abrir y reproducir automáticamente una canción compartida mediante enlace (?track=ID)
+  const sharedTrackDoneRef = useRef(false);
+  useEffect(() => {
+    if (sharedTrackDoneRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const trackId = params.get('track');
+    if (!trackId) return;
+    sharedTrackDoneRef.current = true;
+
+    params.delete('track');
+    const qs = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+
+    (async () => {
+      try {
+        const activeToken = token || localStorage.getItem('aura_token');
+        const headers: Record<string, string> = {};
+        if (activeToken) headers['Authorization'] = `Bearer ${activeToken}`;
+        const res = await fetch(`${API_BASE}/api/tracks/${encodeURIComponent(trackId)}`, { headers });
+        if (!res.ok) return;
+        const s = await res.json();
+        if (!s || !s.id) return;
+        const sharedSong: Song = {
+          ...s,
+          id: s.id.toString(),
+          coverUrl: resolveMediaUrl(s.cover_path),
+          animatedCoverUrl: resolveMediaUrl(s.animated_cover_path),
+          audioUrl: resolveMediaUrl(s.file_path),
+          uploaderId: s.added_by?.toString(),
+          tabs_url: s.tabs_url,
+          track_number: s.track_number,
+          format: s.format,
+          video_url: s.video_url,
+        };
+        setCurrentSong(sharedSong);
+        setIsFullPlayerOpen(true);
+        showSessionNotice(`🎵 Escuchando "${sharedSong.title}" — ${sharedSong.artist}`);
+        setTimeout(() => {
+          handlePlaySong(sharedSong, false, 0, false);
+        }, 150);
+      } catch (e) {
+        console.warn('Error cargando canción compartida:', e);
+      }
+    })();
+  }, [token]);
   const handleSendChat = (message: string) => { if (socketObj.currentSession) socketObj.socketRef.current?.emit('send-chat', { code: socketObj.currentSession, user, message }); };
 
   // ESTADÍSTICAS DE ESCUCHA (para el "Wrapped"): un aviso cada 30s de reproducción
@@ -6881,6 +6928,8 @@ getCurrentTime={audioObj.getCurrentTime}
             </motion.div>
         </div> 
       )}</AnimatePresence>
+
+      <ShareSongOverlay />
 
       {/* MODAL DE ACTUALIZACIÓN AUTOMÁTICA */}
       <UpdateModal

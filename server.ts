@@ -5483,6 +5483,60 @@ No inventes IDs numéricas. Usa estrictamente las IDs del catálogo provisto.`;
     }
 });
 
+const escapeHtmlAttr = (str: string) =>
+    String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+app.get('/', async (req: Request, res: Response, next: NextFunction) => {
+    const trackId = req.query.track ? String(req.query.track).trim() : '';
+    if (!trackId || !/^[0-9]+$/.test(trackId)) return next();
+
+    try {
+        const indexPath = path.join(DIST_DIR, 'index.html');
+        if (!fs.existsSync(indexPath)) return next();
+
+        const [rows]: any = await pool.execute(
+            'SELECT id, title, artist, album, cover_path FROM tracks WHERE id = ? LIMIT 1',
+            [trackId]
+        );
+        if (!rows || !rows[0]) return next();
+
+        const t = rows[0];
+        const baseUrl = getRequestBaseUrl(req);
+        const title = `🎵 ${t.title || 'Canción'} — ${t.artist || 'Artista'}`;
+        const desc = t.album
+            ? `Escucha "${t.title}" de ${t.artist} (${t.album}) en AURA Music`
+            : `Escucha "${t.title}" de ${t.artist} en AURA Music`;
+        const rawCover = t.cover_path
+            ? (String(t.cover_path).startsWith('http') ? String(t.cover_path) : `${baseUrl}${t.cover_path}`)
+            : `${baseUrl}/uploads/default-cover.jpg`;
+        const shareUrl = `${baseUrl}/?track=${encodeURIComponent(String(t.id))}`;
+
+        const ogTags = [
+            `<meta property="og:type" content="music.song" />`,
+            `<meta property="og:site_name" content="AURA Music" />`,
+            `<meta property="og:title" content="${escapeHtmlAttr(title)}" />`,
+            `<meta property="og:description" content="${escapeHtmlAttr(desc)}" />`,
+            `<meta property="og:image" content="${escapeHtmlAttr(rawCover)}" />`,
+            `<meta property="og:url" content="${escapeHtmlAttr(shareUrl)}" />`,
+            `<meta name="twitter:card" content="summary_large_image" />`,
+            `<meta name="twitter:title" content="${escapeHtmlAttr(title)}" />`,
+            `<meta name="twitter:description" content="${escapeHtmlAttr(desc)}" />`,
+            `<meta name="twitter:image" content="${escapeHtmlAttr(rawCover)}" />`
+        ].join('\n    ');
+
+        let html = fs.readFileSync(indexPath, 'utf8');
+        html = html.replace('</head>', `    ${ogTags}\n  </head>`);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+    } catch (e) {
+        return next();
+    }
+});
+
 app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
     if (req.path.startsWith('/uploads') || /\.(jpg|jpeg|png|webp|gif|mp3|flac|wav|ogg|m4a)$/i.test(req.path)) {

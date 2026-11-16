@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, ListPlus, Guitar, Trash2, 
   Edit2, ListMusic, Heart, MoreVertical, Youtube, Check, Download, Loader2, HardDriveDownload,
-  Disc, User
+  Disc, User, Share2
 } from 'lucide-react';
 import { type Song } from '../constants';
 import { hapticImpact, hapticSuccess, hapticWarning } from '../utils/haptics';
@@ -19,6 +19,7 @@ import {
 } from '../utils/offlineDb';
 import { useFileUrl } from '../hooks/useFileUrl';
 import { DEFAULT_COVER, getResponsiveCoverSrcSet, getThumbnailUrl } from '../utils/api';
+import { triggerShareSong } from '../utils/shareSong';
 
 interface MusicCardProps {
   song: Song;
@@ -261,6 +262,19 @@ export const MusicCard: React.FC<MusicCardProps> = ({
         >
           <Heart size={iconSize} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-red-500" : ""} />
           <span>{isLiked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}</span>
+        </button>
+
+        {/* 1.2 COMPARTIR CANCIÓN */}
+        <button
+          type="button"
+          onClick={() => {
+            closeMenu();
+            void triggerShareSong(song, isMobile);
+          }}
+          className={`w-full flex items-center gap-3 ${itemPadding} rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-left`}
+        >
+          <Share2 size={iconSize} className="text-brand-primary" />
+          <span>{isMobile ? 'Compartir canción...' : 'Compartir (Copiar link)'}</span>
         </button>
 
         {/* 1.5 DESCARGAR MODO SIN CONEXIÓN */}

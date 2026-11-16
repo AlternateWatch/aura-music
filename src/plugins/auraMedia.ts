@@ -42,6 +42,11 @@ export interface AuraMediaPlugin {
     url: string;
   }): Promise<void>;
 
+  shareText?(options: {
+    title?: string;
+    text: string;
+  }): Promise<void>;
+
   addListener(
     eventName: 'play' | 'pause' | 'next' | 'previous' | 'shuffleChanged' | 'repeatChanged' | 'seek',
     listenerFunc: (data: any) => void

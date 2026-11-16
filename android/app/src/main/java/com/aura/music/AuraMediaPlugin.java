@@ -379,6 +379,30 @@ public class AuraMediaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void shareText(PluginCall call) {
+        String text = call.getString("text");
+        String title = call.getString("title", "Compartir canción");
+        if (text == null || text.isEmpty()) {
+            call.reject("Text is required");
+            return;
+        }
+        try {
+            Intent sendIntent = new Intent(Intent.ACTION_SEND);
+            sendIntent.setType("text/plain");
+            sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+            if (title != null) {
+                sendIntent.putExtra(Intent.EXTRA_SUBJECT, title);
+            }
+            Intent chooser = Intent.createChooser(sendIntent, title);
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to share text", e);
+        }
+    }
+
+    @PluginMethod
     public void openExternalUrl(PluginCall call) {
         String urlString = call.getString("url");
         if (urlString == null || urlString.isEmpty()) {
