@@ -24,17 +24,10 @@ import { useFileUrl } from '../hooks/useFileUrl';
 import { DEFAULT_COVER, getThumbnailUrl } from '../utils/api';
 import { hapticImpact, hapticSuccess } from '../utils/haptics';
 
-const isVideoAsset = (url?: string | null) => {
-  if (!url) return false;
-  return /\.(mp4|webm|mov|mkv)($|\?)/i.test(url);
-};
-
 export const ShareSongOverlay: React.FC = () => {
   const song = useSyncExternalStore(subscribeShareStore, getActiveShareSongSnapshot, getActiveShareSongSnapshot);
   const toast = useSyncExternalStore(subscribeShareStore, getShareToastSnapshot, getShareToastSnapshot);
   const resolvedCover = useFileUrl(song?.coverUrl);
-  const rawAnimated = (song as any)?.animatedCoverUrl || (song as any)?.animated_cover_path || undefined;
-  const resolvedAnimated = useFileUrl(rawAnimated);
 
   const [viewMode, setViewMode] = useState<'main' | 'instagram'>('main');
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
@@ -47,16 +40,6 @@ export const ShareSongOverlay: React.FC = () => {
   }, [song?.id]);
 
   if (typeof document === 'undefined') return null;
-
-  const hasAnimatedCover = Boolean(rawAnimated && String(rawAnimated).trim());
-
-  const getDirectAnimatedVideoUrl = (): string | undefined => {
-    if (!hasAnimatedCover) return undefined;
-    const candidate = resolvedAnimated || String(rawAnimated).trim();
-    if (!candidate) return undefined;
-    if (candidate.startsWith('http://') || candidate.startsWith('https://')) return candidate;
-    return `https://aura.basildo.me${candidate.startsWith('/') ? '' : '/'}${candidate}`;
-  };
 
   const handleShareWhatsApp = async () => {
     if (!song) return;
@@ -80,13 +63,10 @@ export const ShareSongOverlay: React.FC = () => {
     try {
       const assets = await generateInstagramStoryAssets(song);
       const shareUrl = getSongShareUrl(song);
-      const storyVideoUrl = getDirectAnimatedVideoUrl();
 
       if (Capacitor.isNativePlatform() && typeof AuraMedia.shareToInstagramStory === 'function') {
         await AuraMedia.shareToInstagramStory({
           backgroundImageBase64: assets.fullStoryPngBase64,
-          stickerBase64: assets.stickerPngBase64,
-          backgroundVideoUrl: storyVideoUrl,
           topColor: assets.topColor,
           bottomColor: assets.bottomColor,
           contentUrl: shareUrl,
@@ -371,31 +351,11 @@ export const ShareSongOverlay: React.FC = () => {
                   <div className="p-5 flex flex-col items-center gap-5">
                     {/* Vista previa 9:16 limpia estilo Tidal */}
                     <div className="relative w-44 aspect-[9/16] rounded-[26px] overflow-hidden border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.85)] bg-[#08080b] flex items-center justify-center select-none">
-                      {/* Fondo: Vídeo animado si existe, o portada desenfocada */}
-                      {hasAnimatedCover && resolvedAnimated ? (
-                        isVideoAsset(resolvedAnimated) ? (
-                          <video
-                            src={resolvedAnimated}
-                            autoPlay
-                            loop
-                            muted
-                            playsInline
-                            className="absolute inset-0 w-full h-full object-cover brightness-[0.72] scale-105"
-                          />
-                        ) : (
-                          <img
-                            src={resolvedAnimated}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover brightness-[0.72] scale-105"
-                          />
-                        )
-                      ) : (
-                        <img
-                          src={coverSrc}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover blur-xl brightness-50 saturate-125 scale-125"
-                        />
-                      )}
+                      <img
+                        src={coverSrc}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover blur-xl brightness-50 saturate-125 scale-125"
+                      />
 
                       <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-black/20 to-black/70" />
 
@@ -452,7 +412,7 @@ export const ShareSongOverlay: React.FC = () => {
                         {isGeneratingStory ? (
                           <>
                             <Loader2 size={17} className="animate-spin" />
-                            <span>Preparando Story...</span>
+                            <span>Abriendo Stories...</span>
                           </>
                         ) : (
                           <>

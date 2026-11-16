@@ -239,7 +239,6 @@ function drawBottomRightDomainWatermark(ctx: CanvasRenderingContext2D) {
 
 export async function generateInstagramStoryAssets(song: Song): Promise<{
   fullStoryPngBase64: string;
-  stickerPngBase64: string;
   topColor: string;
   bottomColor: string;
 }> {
@@ -251,27 +250,7 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
   const cardX = (1080 - cardW) / 2;
   const cardY = Math.round((1920 - cardH) / 2);
 
-  // 1. Generar Overlay PNG 1080x1920 transparente (Viñeta suave + Tarjeta estilo Tidal + aura.basildo.me abajo a la derecha)
-  // Se superpone directamente sobre el vídeo animado 9:16 en Android usando Media3 Transformer
-  const stickerCanvas = document.createElement('canvas');
-  stickerCanvas.width = 1080;
-  stickerCanvas.height = 1920;
-  const sCtx = stickerCanvas.getContext('2d')!;
-
-  const videoVignette = sCtx.createLinearGradient(0, 0, 0, 1920);
-  videoVignette.addColorStop(0, 'rgba(6, 6, 10, 0.32)');
-  videoVignette.addColorStop(0.5, 'rgba(6, 6, 10, 0.18)');
-  videoVignette.addColorStop(1, 'rgba(4, 4, 7, 0.65)');
-  sCtx.fillStyle = videoVignette;
-  sCtx.fillRect(0, 0, 1080, 1920);
-
-  drawTidalCardOnCanvas(sCtx, img, song, cardX, cardY, cardW, cardH, rgb);
-  drawBottomRightDomainWatermark(sCtx);
-
-  const stickerDataUrl = stickerCanvas.toDataURL('image/png');
-  const stickerPngBase64 = stickerDataUrl.replace(/^data:image\/png;base64,/, '');
-
-  // 2. Generar imagen completa 9:16 (1080x1920) para canciones con portada estática
+  // Generar imagen completa 9:16 (1080x1920) instantánea (< 50ms)
   const fullCanvas = document.createElement('canvas');
   fullCanvas.width = 1080;
   fullCanvas.height = 1920;
@@ -301,7 +280,7 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
   fCtx.fillStyle = bgGrad;
   fCtx.fillRect(0, 0, 1080, 1920);
 
-  // Tarjeta centrada en el lienzo 1080x1920
+  // Tarjeta centrada en el lienzo 1080x1920 + marca de agua aura.basildo.me abajo a la derecha
   drawTidalCardOnCanvas(fCtx, img, song, cardX, cardY, cardW, cardH, rgb);
   drawBottomRightDomainWatermark(fCtx);
 
@@ -310,7 +289,6 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
 
   return {
     fullStoryPngBase64,
-    stickerPngBase64,
     topColor: topHex,
     bottomColor: bottomHex,
   };
