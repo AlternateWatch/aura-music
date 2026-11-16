@@ -8,7 +8,26 @@ import android.content.Intent;
 import android.net.Uri;
 import android.util.Log;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.util.Base64;
+import androidx.media3.common.Effect;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
+import androidx.media3.effect.BitmapOverlay;
+import androidx.media3.effect.OverlayEffect;
+import androidx.media3.effect.Presentation;
+import androidx.media3.effect.TextureOverlay;
+import androidx.media3.transformer.Composition;
+import androidx.media3.transformer.EditedMediaItem;
+import androidx.media3.transformer.EditedMediaItemSequence;
+import androidx.media3.transformer.Effects;
+import androidx.media3.transformer.ExportException;
+import androidx.media3.transformer.ExportResult;
+import androidx.media3.transformer.Transformer;
+import com.google.common.collect.ImmutableList;
+import java.util.Arrays;
+import java.util.Collections;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import java.io.File;
@@ -458,62 +477,64 @@ public class AuraMediaPlugin extends Plugin {
         }
     }
 
+    private void launchInstagramStoryWithFile(Activity activity, Context context, File mediaFile, String mimeType, PluginCall call) {
+        try {
+            String authority = context.getPackageName() + ".fileprovider";
+            Uri mediaUri = FileProvider.getUriForFile(context, authority, mediaFile);
+            context.grantUriPermission(
+                    "com.instagram.android",
+                    mediaUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+            );
+
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setComponent(new ComponentName(
+                    "com.instagram.android",
+                    "com.instagram.share.handleractivity.StoryShareHandlerActivity"
+            ));
+            intent.setType(mimeType);
+            intent.putExtra(Intent.EXTRA_STREAM, mediaUri);
+            intent.setClipData(ClipData.newRawUri("aura_story", mediaUri));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            if (activity != null) {
+                activity.startActivity(intent);
+            } else {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            }
+            call.resolve();
+        } catch (Exception err) {
+            Log.e("AuraMedia", "Error abriendo StoryShareHandlerActivity", err);
+            call.reject("No se pudo abrir Instagram Stories", err);
+        }
+    }
+
     @PluginMethod
     public void shareToInstagramStory(PluginCall call) {
         String bgImageB64 = call.getString("backgroundImageBase64");
+        String stickerB64 = call.getString("stickerBase64");
         String bgVideoUrl = call.getString("backgroundVideoUrl");
 
         new Thread(() -> {
-            try {
-                Context context = getContext();
-                Activity activity = getActivity();
-                String authority = context.getPackageName() + ".fileprovider";
-                File storyDir = new File(context.getCacheDir(), "aura_stories");
-                if (!storyDir.exists()) {
-                    storyDir.mkdirs();
-                }
+            Context context = getContext();
+            Activity activity = getActivity();
+            File storyDir = new File(context.getCacheDir(), "aura_stories");
+            if (!storyDir.exists()) {
+                storyDir.mkdirs();
+            }
 
-                // Limpiar archivos antiguos de stories en caché
-                File[] oldFiles = storyDir.listFiles();
-                if (oldFiles != null) {
-                    for (File f : oldFiles) {
-                        if (System.currentTimeMillis() - f.lastModified() > 300_000) {
-                            f.delete();
-                        }
+            File[] oldFiles = storyDir.listFiles();
+            if (oldFiles != null) {
+                for (File f : oldFiles) {
+                    if (System.currentTimeMillis() - f.lastModified() > 300_000) {
+                        f.delete();
                     }
                 }
+            }
 
-                File mediaFile = null;
-                String mimeType = "image/png";
-
-                if (bgVideoUrl != null && !bgVideoUrl.trim().isEmpty()) {
-                    try {
-                        File candidateVideo = new File(storyDir, "aura_story_" + System.currentTimeMillis() + ".mp4");
-                        URL url = new URL(bgVideoUrl.trim());
-                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                        conn.setConnectTimeout(10000);
-                        conn.setReadTimeout(20000);
-                        conn.setInstanceFollowRedirects(true);
-                        if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
-                            try (InputStream in = conn.getInputStream();
-                                 FileOutputStream fos = new FileOutputStream(candidateVideo)) {
-                                byte[] buf = new byte[16384];
-                                int read;
-                                while ((read = in.read(buf)) != -1) {
-                                    fos.write(buf, 0, read);
-                                }
-                            }
-                            if (candidateVideo.exists() && candidateVideo.length() > 1024) {
-                                mediaFile = candidateVideo;
-                                mimeType = "video/mp4";
-                            }
-                        }
-                    } catch (Exception videoErr) {
-                        Log.w("AuraMedia", "Fallback a Story PNG estática: " + videoErr.getMessage());
-                    }
-                }
-
-                if (mediaFile == null) {
+            Runnable fallbackToStaticPng = () -> {
+                try {
                     if (bgImageB64 == null || bgImageB64.isEmpty()) {
                         call.reject("No story image provided");
                         return;
@@ -523,53 +544,109 @@ public class AuraMediaPlugin extends Plugin {
                     try (FileOutputStream fos = new FileOutputStream(bgFile)) {
                         fos.write(bgBytes);
                     }
-                    mediaFile = bgFile;
-                    mimeType = "image/png";
-                }
-
-                final Uri mediaUri = FileProvider.getUriForFile(context, authority, mediaFile);
-                final String finalMime = mimeType;
-
-                context.grantUriPermission(
-                        "com.instagram.android",
-                        mediaUri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                );
-
-                Runnable launchStory = () -> {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_SEND);
-                        intent.setComponent(new ComponentName(
-                                "com.instagram.android",
-                                "com.instagram.share.handleractivity.StoryShareHandlerActivity"
-                        ));
-                        intent.setType(finalMime);
-                        intent.putExtra(Intent.EXTRA_STREAM, mediaUri);
-                        intent.setClipData(ClipData.newRawUri("aura_story", mediaUri));
-                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-                        if (activity != null) {
-                            activity.startActivity(intent);
-                        } else {
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            context.startActivity(intent);
-                        }
-                        call.resolve();
-                    } catch (Exception err) {
-                        Log.e("AuraMedia", "Error abriendo StoryShareHandlerActivity", err);
-                        call.reject("No se pudo abrir Instagram Stories", err);
+                    if (activity != null) {
+                        activity.runOnUiThread(() -> launchInstagramStoryWithFile(activity, context, bgFile, "image/png", call));
+                    } else {
+                        launchInstagramStoryWithFile(null, context, bgFile, "image/png", call);
                     }
-                };
-
-                if (activity != null) {
-                    activity.runOnUiThread(launchStory);
-                } else {
-                    launchStory.run();
+                } catch (Exception e) {
+                    call.reject("Error creando imagen de Story", e);
                 }
-            } catch (Exception e) {
-                Log.e("AuraMedia", "Error preparando Instagram Story", e);
-                call.reject("No se pudo preparar Instagram Story", e);
+            };
+
+            if (bgVideoUrl != null && !bgVideoUrl.trim().isEmpty() && stickerB64 != null && !stickerB64.isEmpty() && activity != null) {
+                try {
+                    File rawVideo = new File(storyDir, "raw_anim_" + System.currentTimeMillis() + ".mp4");
+                    URL url = new URL(bgVideoUrl.trim());
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(15000);
+                    conn.setInstanceFollowRedirects(true);
+                    if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
+                        try (InputStream in = conn.getInputStream();
+                             FileOutputStream fos = new FileOutputStream(rawVideo)) {
+                            byte[] buf = new byte[16384];
+                            int read;
+                            while ((read = in.read(buf)) != -1) {
+                                fos.write(buf, 0, read);
+                            }
+                        }
+                    }
+
+                    if (rawVideo.exists() && rawVideo.length() > 1024) {
+                        byte[] overlayBytes = Base64.decode(stickerB64, Base64.DEFAULT);
+                        Bitmap decodedOverlay = BitmapFactory.decodeByteArray(overlayBytes, 0, overlayBytes.length);
+                        if (decodedOverlay != null) {
+                            final int targetW = 720;
+                            final int targetH = 1280;
+                            final Bitmap scaledOverlay = Bitmap.createScaledBitmap(decodedOverlay, targetW, targetH, true);
+                            final File outVideo = new File(storyDir, "aura_story_video_" + System.currentTimeMillis() + ".mp4");
+
+                            activity.runOnUiThread(() -> {
+                                try {
+                                    Presentation presentation = Presentation.createForWidthAndHeight(
+                                            targetW,
+                                            targetH,
+                                            Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+                                    );
+                                    BitmapOverlay bmpOverlay = BitmapOverlay.createStaticBitmapOverlay(scaledOverlay);
+                                    OverlayEffect overlayEffect = new OverlayEffect(
+                                            ImmutableList.of((TextureOverlay) bmpOverlay)
+                                    );
+                                    Effects effects = new Effects(
+                                            Collections.emptyList(),
+                                            Arrays.asList((Effect) presentation, (Effect) overlayEffect)
+                                    );
+
+                                    MediaItem mediaItem = MediaItem.fromUri(Uri.fromFile(rawVideo));
+                                    EditedMediaItem editedItem = new EditedMediaItem.Builder(mediaItem)
+                                            .setRemoveAudio(true)
+                                            .setEffects(effects)
+                                            .build();
+
+                                    // Repetir secuencia 2 veces para asegurar duración suficiente en Instagram Stories
+                                    EditedMediaItemSequence sequence = new EditedMediaItemSequence(
+                                            Arrays.asList(editedItem, editedItem)
+                                    );
+                                    Composition composition = new Composition.Builder(
+                                            Collections.singletonList(sequence)
+                                    ).build();
+
+                                    Transformer transformer = new Transformer.Builder(context)
+                                            .setVideoMimeType(MimeTypes.VIDEO_H264)
+                                            .addListener(new Transformer.Listener() {
+                                                @Override
+                                                public void onCompleted(Composition comp, ExportResult exportResult) {
+                                                    if (outVideo.exists() && outVideo.length() > 1024) {
+                                                        launchInstagramStoryWithFile(activity, context, outVideo, "video/mp4", call);
+                                                    } else {
+                                                        new Thread(fallbackToStaticPng).start();
+                                                    }
+                                                }
+
+                                                @Override
+                                                public void onError(Composition comp, ExportResult exportResult, ExportException exportException) {
+                                                    Log.w("AuraMedia", "Transformer error, usando Story PNG estática: " + exportException.getMessage());
+                                                    new Thread(fallbackToStaticPng).start();
+                                                }
+                                            })
+                                            .build();
+
+                                    transformer.start(composition, outVideo.getAbsolutePath());
+                                } catch (Exception trErr) {
+                                    Log.w("AuraMedia", "Fallo al iniciar Transformer: " + trErr.getMessage());
+                                    new Thread(fallbackToStaticPng).start();
+                                }
+                            });
+                            return;
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w("AuraMedia", "Error preparando vídeo animado para Story, usando estática: " + e.getMessage());
+                }
             }
+
+            fallbackToStaticPng.run();
         }).start();
     }
 

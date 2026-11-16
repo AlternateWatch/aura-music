@@ -50,6 +50,14 @@ export const ShareSongOverlay: React.FC = () => {
 
   const hasAnimatedCover = Boolean(rawAnimated && String(rawAnimated).trim());
 
+  const getDirectAnimatedVideoUrl = (): string | undefined => {
+    if (!hasAnimatedCover) return undefined;
+    const candidate = resolvedAnimated || String(rawAnimated).trim();
+    if (!candidate) return undefined;
+    if (candidate.startsWith('http://') || candidate.startsWith('https://')) return candidate;
+    return `https://aura.basildo.me${candidate.startsWith('/') ? '' : '/'}${candidate}`;
+  };
+
   const handleShareWhatsApp = async () => {
     if (!song) return;
     hapticImpact('medium');
@@ -72,21 +80,7 @@ export const ShareSongOverlay: React.FC = () => {
     try {
       const assets = await generateInstagramStoryAssets(song);
       const shareUrl = getSongShareUrl(song);
-      let storyVideoUrl: string | undefined = undefined;
-
-      if (hasAnimatedCover) {
-        try {
-          const resp = await fetch(`https://aura.basildo.me/api/tracks/${encodeURIComponent(String(song.id))}/story-video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stickerBase64: assets.stickerPngBase64 }),
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data?.url) storyVideoUrl = data.url;
-          }
-        } catch {}
-      }
+      const storyVideoUrl = getDirectAnimatedVideoUrl();
 
       if (Capacitor.isNativePlatform() && typeof AuraMedia.shareToInstagramStory === 'function') {
         await AuraMedia.shareToInstagramStory({
@@ -440,6 +434,11 @@ export const ShareSongOverlay: React.FC = () => {
                           </div>
                         </div>
                       </div>
+
+                      {/* Marca de agua discreta abajo a la derecha */}
+                      <span className="absolute bottom-2 right-3 z-20 text-[7px] font-medium text-white/50 tracking-tight drop-shadow">
+                        aura.basildo.me
+                      </span>
                     </div>
 
                     {/* Botones de acción limpios */}

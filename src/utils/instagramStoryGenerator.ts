@@ -225,6 +225,18 @@ function drawTidalCardOnCanvas(
   ctx.restore();
 }
 
+function drawBottomRightDomainWatermark(ctx: CanvasRenderingContext2D) {
+  ctx.save();
+  ctx.font = '500 22px sans-serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.50)';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+  ctx.shadowBlur = 8;
+  ctx.fillText('aura.basildo.me', 1036, 1876);
+  ctx.restore();
+}
+
 export async function generateInstagramStoryAssets(song: Song): Promise<{
   fullStoryPngBase64: string;
   stickerPngBase64: string;
@@ -236,15 +248,26 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
 
   const cardW = 780;
   const cardH = 995;
+  const cardX = (1080 - cardW) / 2;
+  const cardY = Math.round((1920 - cardH) / 2);
 
-  // 1. Generar Sticker PNG transparente (Tarjeta estilo Tidal + Logo AURA) para superponer sobre vídeo animado
+  // 1. Generar Overlay PNG 1080x1920 transparente (Viñeta suave + Tarjeta estilo Tidal + aura.basildo.me abajo a la derecha)
+  // Se superpone directamente sobre el vídeo animado 9:16 en Android usando Media3 Transformer
   const stickerCanvas = document.createElement('canvas');
-  stickerCanvas.width = 920;
-  stickerCanvas.height = 1140;
+  stickerCanvas.width = 1080;
+  stickerCanvas.height = 1920;
   const sCtx = stickerCanvas.getContext('2d')!;
-  const sCardX = (stickerCanvas.width - cardW) / 2;
-  const sCardY = (stickerCanvas.height - cardH) / 2;
-  drawTidalCardOnCanvas(sCtx, img, song, sCardX, sCardY, cardW, cardH, rgb);
+
+  const videoVignette = sCtx.createLinearGradient(0, 0, 0, 1920);
+  videoVignette.addColorStop(0, 'rgba(6, 6, 10, 0.32)');
+  videoVignette.addColorStop(0.5, 'rgba(6, 6, 10, 0.18)');
+  videoVignette.addColorStop(1, 'rgba(4, 4, 7, 0.65)');
+  sCtx.fillStyle = videoVignette;
+  sCtx.fillRect(0, 0, 1080, 1920);
+
+  drawTidalCardOnCanvas(sCtx, img, song, cardX, cardY, cardW, cardH, rgb);
+  drawBottomRightDomainWatermark(sCtx);
+
   const stickerDataUrl = stickerCanvas.toDataURL('image/png');
   const stickerPngBase64 = stickerDataUrl.replace(/^data:image\/png;base64,/, '');
 
@@ -279,9 +302,8 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
   fCtx.fillRect(0, 0, 1080, 1920);
 
   // Tarjeta centrada en el lienzo 1080x1920
-  const fCardX = (1080 - cardW) / 2;
-  const fCardY = Math.round((1920 - cardH) / 2);
-  drawTidalCardOnCanvas(fCtx, img, song, fCardX, fCardY, cardW, cardH, rgb);
+  drawTidalCardOnCanvas(fCtx, img, song, cardX, cardY, cardW, cardH, rgb);
+  drawBottomRightDomainWatermark(fCtx);
 
   const fullDataUrl = fullCanvas.toDataURL('image/png');
   const fullStoryPngBase64 = fullDataUrl.replace(/^data:image\/png;base64,/, '');
