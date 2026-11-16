@@ -598,7 +598,7 @@ public class AuraMediaPlugin extends Plugin {
                                             Arrays.asList((Effect) presentation, (Effect) overlayEffect)
                                     );
 
-                                    MediaItem mediaItem = MediaItem.fromUri(Uri.fromFile(rawVideo));
+                                    MediaItem mediaItem = new MediaItem.Builder().setUri(Uri.fromFile(rawVideo)).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setEndPositionMs(10000).build()).build();
                                     EditedMediaItem editedItem = new EditedMediaItem.Builder(mediaItem)
                                             .setRemoveAudio(true)
                                             .setEffects(effects)
