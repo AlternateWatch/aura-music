@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Share2, Copy, Check, X, MessageCircle, Send, Camera,
-  ExternalLink, ChevronLeft, Sparkles, Loader2, Film
+  ExternalLink, ChevronLeft, Sparkles, Loader2
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import AuraMedia from '../plugins/auraMedia';
@@ -102,7 +102,6 @@ export const ShareSongOverlay: React.FC = () => {
         return;
       }
 
-      // Fallback para navegador móvil (Web Share API con archivo de imagen 9:16 generado)
       const byteString = atob(assets.fullStoryPngBase64);
       const ab = new ArrayBuffer(byteString.length);
       const ia = new Uint8Array(ab);
@@ -122,7 +121,6 @@ export const ShareSongOverlay: React.FC = () => {
         return;
       }
 
-      // Descargar imagen si el navegador no soporta compartir archivos directamente
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `aura-story-${song.id}.png`;
@@ -242,7 +240,7 @@ export const ShareSongOverlay: React.FC = () => {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: '100%', opacity: 0 }}
               transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-              className="relative z-[751] w-full max-w-lg mx-auto bg-[#141416] border-t border-white/10 rounded-t-3xl shadow-2xl flex flex-col overflow-hidden pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
+              className="relative z-[751] w-full max-w-lg mx-auto bg-[#121215] border-t border-white/10 rounded-t-[32px] shadow-2xl flex flex-col overflow-hidden pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="w-10 h-1 bg-white/20 rounded-full mx-auto my-3 shrink-0" />
@@ -353,35 +351,32 @@ export const ShareSongOverlay: React.FC = () => {
                   </div>
                 </>
               ) : (
-                /* Submenú de Instagram: Vista previa estilo Tidal + Stories o Direct Message */
+                /* Submenú de Instagram: Vista previa minimalista estilo Tidal + Stories o Direct Message */
                 <div className="flex flex-col">
                   <div className="px-5 pb-3 flex items-center justify-between border-b border-white/5">
                     <button
                       type="button"
                       onClick={() => setViewMode('main')}
-                      className="flex items-center gap-1.5 text-xs font-bold text-white/70 hover:text-white py-1"
+                      className="flex items-center gap-1 text-xs font-semibold text-white/70 hover:text-white py-1 cursor-pointer"
                     >
                       <ChevronLeft size={16} />
-                      <span>Volver</span>
+                      <span>Atrás</span>
                     </button>
-                    <div className="flex items-center gap-1.5">
-                      <Camera size={14} className="text-pink-400" />
-                      <span className="text-xs font-black uppercase tracking-widest text-white">
-                        Compartir en Instagram
-                      </span>
-                    </div>
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">
+                      Instagram
+                    </span>
                     <button
                       type="button"
                       onClick={closeShareSongModal}
-                      className="p-1.5 rounded-full bg-white/5 text-white/40 hover:text-white"
+                      className="p-1.5 rounded-full bg-white/5 text-white/40 hover:text-white cursor-pointer"
                     >
-                      <X size={16} />
+                      <X size={15} />
                     </button>
                   </div>
 
-                  <div className="p-5 flex flex-col items-center gap-4">
-                    {/* Vista previa 9:16 inspirada en Tidal (Vídeo animado o foto de fondo + Tarjeta + Logo AURA) */}
-                    <div className="relative w-48 aspect-[9/16] rounded-3xl overflow-hidden border border-white/15 shadow-2xl bg-[#09090b] flex items-center justify-center select-none">
+                  <div className="p-5 flex flex-col items-center gap-5">
+                    {/* Vista previa 9:16 limpia estilo Tidal */}
+                    <div className="relative w-44 aspect-[9/16] rounded-[26px] overflow-hidden border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.85)] bg-[#08080b] flex items-center justify-center select-none">
                       {/* Fondo: Vídeo animado si existe, o portada desenfocada */}
                       {hasAnimatedCover && resolvedAnimated ? (
                         isVideoAsset(resolvedAnimated) ? (
@@ -391,45 +386,29 @@ export const ShareSongOverlay: React.FC = () => {
                             loop
                             muted
                             playsInline
-                            className="absolute inset-0 w-full h-full object-cover brightness-75 scale-105"
+                            className="absolute inset-0 w-full h-full object-cover brightness-[0.72] scale-105"
                           />
                         ) : (
                           <img
                             src={resolvedAnimated}
                             alt=""
-                            className="absolute inset-0 w-full h-full object-cover brightness-75 scale-105"
+                            className="absolute inset-0 w-full h-full object-cover brightness-[0.72] scale-105"
                           />
                         )
                       ) : (
                         <img
                           src={coverSrc}
                           alt=""
-                          className="absolute inset-0 w-full h-full object-cover blur-md brightness-50 scale-125"
+                          className="absolute inset-0 w-full h-full object-cover blur-xl brightness-50 saturate-125 scale-125"
                         />
                       )}
 
-                      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/25 to-black/75" />
+                      <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-black/20 to-black/70" />
 
-                      {hasAnimatedCover && (
-                        <div className="absolute top-2.5 right-2.5 z-20 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-brand-primary">
-                          <Film size={9} /> Vídeo
-                        </div>
-                      )}
-
-                      {/* Tarjeta central estilo Tidal */}
-                      <div className="relative z-10 w-[82%] rounded-2xl bg-[#0e0e12]/90 backdrop-blur-md border border-white/15 p-3 shadow-2xl flex flex-col gap-2">
-                        {/* Cabecera AURA. dentro de la tarjeta */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black tracking-tight text-white">
-                            AURA<span className="text-brand-primary">.</span>
-                          </span>
-                          <span className="text-[7px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30">
-                            {song.format?.toLowerCase() === 'flac' ? 'HI-RES FLAC' : 'AURA MUSIC'}
-                          </span>
-                        </div>
-
-                        {/* Portada cuadrada nítida */}
-                        <div className="w-full aspect-square rounded-xl overflow-hidden bg-white/5 border border-white/10 shadow-md">
+                      {/* Tarjeta central estilo Tidal (Portada arriba + Título/Artista + Pie AURA.) */}
+                      <div className="relative z-10 w-[80%] rounded-[20px] bg-[#0d0d11]/90 backdrop-blur-xl border border-white/[0.13] p-2.5 shadow-[0_16px_36px_rgba(0,0,0,0.75)] flex flex-col">
+                        {/* Portada cuadrada protagonista */}
+                        <div className="w-full aspect-square rounded-[13px] overflow-hidden bg-white/5 border border-white/10 shadow-lg">
                           <img
                             src={coverSrc}
                             alt={song.title}
@@ -437,22 +416,33 @@ export const ShareSongOverlay: React.FC = () => {
                           />
                         </div>
 
-                        {/* Título, artista y barra */}
-                        <div className="min-w-0 pt-0.5">
+                        {/* Título y Artista */}
+                        <div className="min-w-0 pt-2.5 pb-2">
                           <p className="text-[11px] font-extrabold text-white truncate leading-tight">
                             {song.title}
                           </p>
-                          <p className="text-[9px] font-semibold text-white/60 truncate mt-0.5">
+                          <p className="text-[9px] font-medium text-white/60 truncate mt-0.5">
                             {song.artist}
                           </p>
-                          <div className="mt-2 h-1 w-full rounded-full bg-white/15 overflow-hidden relative">
-                            <div className="h-full w-[38%] bg-brand-primary rounded-full" />
+                        </div>
+
+                        {/* Separador fino + Pie AURA. y ecualizador */}
+                        <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between">
+                          <span className="text-[9px] font-black tracking-tight text-white leading-none">
+                            AURA<span className="text-brand-primary">.</span>
+                          </span>
+                          <div className="flex items-center gap-[2px] h-2.5">
+                            <span className="w-[1.5px] h-1.5 rounded-full bg-white/35" />
+                            <span className="w-[1.5px] h-2.5 rounded-full bg-white/35" />
+                            <span className="w-[1.5px] h-2 rounded-full bg-white/35" />
+                            <span className="w-[1.5px] h-2.5 rounded-full bg-brand-primary" />
+                            <span className="w-[1.5px] h-1.5 rounded-full bg-white/35" />
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Botones de elección: Instagram Stories vs Direct Messages */}
+                    {/* Botones de acción limpios */}
                     <div className="w-full space-y-2.5">
                       <button
                         type="button"
@@ -468,11 +458,7 @@ export const ShareSongOverlay: React.FC = () => {
                         ) : (
                           <>
                             <Sparkles size={17} />
-                            <span>
-                              {hasAnimatedCover
-                                ? 'Subir a Stories (Vídeo + Tarjeta)'
-                                : 'Subir a Instagram Stories'}
-                            </span>
+                            <span>Compartir en Stories</span>
                           </>
                         )}
                       </button>
@@ -480,10 +466,10 @@ export const ShareSongOverlay: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleInstagramDM}
-                        className="w-full py-3.5 px-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all cursor-pointer"
+                        className="w-full py-3.5 px-4 rounded-2xl bg-white/[0.07] hover:bg-white/[0.12] border border-white/10 text-white font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all cursor-pointer"
                       >
-                        <Send size={16} />
-                        <span>Enviar por Direct Message (DM)</span>
+                        <Send size={15} />
+                        <span>Enviar por Direct Message</span>
                       </button>
                     </div>
                   </div>

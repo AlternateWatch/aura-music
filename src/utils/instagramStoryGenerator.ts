@@ -61,12 +61,12 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
 function extractDominantColors(img: HTMLImageElement): { topHex: string; bottomHex: string; rgb: [number, number, number] } {
   try {
     const c = document.createElement('canvas');
-    c.width = 4;
-    c.height = 4;
+    c.width = 6;
+    c.height = 6;
     const ctx = c.getContext('2d');
-    if (!ctx) return { topHex: '#18181b', bottomHex: '#09090b', rgb: [242, 125, 38] };
-    ctx.drawImage(img, 0, 0, 4, 4);
-    const data = ctx.getImageData(0, 0, 4, 4).data;
+    if (!ctx) return { topHex: '#141418', bottomHex: '#070709', rgb: [242, 125, 38] };
+    ctx.drawImage(img, 0, 0, 6, 6);
+    const data = ctx.getImageData(0, 0, 6, 6).data;
     let r = 0, g = 0, b = 0, count = 0;
     for (let i = 0; i < data.length; i += 4) {
       r += data[i];
@@ -78,11 +78,11 @@ function extractDominantColors(img: HTMLImageElement): { topHex: string; bottomH
     g = Math.round(g / count);
     b = Math.round(b / count);
     const toHex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
-    const topHex = `#${toHex(r * 0.45)}${toHex(g * 0.45)}${toHex(b * 0.45)}`;
-    const bottomHex = `#${toHex(r * 0.15)}${toHex(g * 0.15)}${toHex(b * 0.15)}`;
+    const topHex = `#${toHex(r * 0.42)}${toHex(g * 0.42)}${toHex(b * 0.42)}`;
+    const bottomHex = `#${toHex(r * 0.14)}${toHex(g * 0.14)}${toHex(b * 0.14)}`;
     return { topHex, bottomHex, rgb: [r, g, b] };
   } catch {
-    return { topHex: '#18181b', bottomHex: '#09090b', rgb: [242, 125, 38] };
+    return { topHex: '#141418', bottomHex: '#070709', rgb: [242, 125, 38] };
   }
 }
 
@@ -96,94 +96,63 @@ function drawTidalCardOnCanvas(
   cardH: number,
   accentRgb: [number, number, number]
 ) {
-  const pad = 44;
+  const pad = 42;
+  const cardRadius = 46;
 
-  // Sombra profunda de la tarjeta
+  // 1. Sombra exterior suave y profunda
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.72)';
-  ctx.shadowBlur = 65;
-  ctx.shadowOffsetY = 28;
-  roundRectPath(ctx, cardX, cardY, cardW, cardH, 48);
-  ctx.fillStyle = 'rgba(14, 14, 18, 0.90)';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
+  ctx.shadowBlur = 75;
+  ctx.shadowOffsetY = 32;
+  roundRectPath(ctx, cardX, cardY, cardW, cardH, cardRadius);
+  ctx.fillStyle = 'rgba(13, 13, 17, 0.88)';
   ctx.fill();
   ctx.restore();
 
-  // Resplandor sutil superior dentro de la tarjeta
+  // 2. Luz ambiental sutil de la propia portada dentro de la tarjeta
   ctx.save();
-  roundRectPath(ctx, cardX, cardY, cardW, cardH, 48);
+  roundRectPath(ctx, cardX, cardY, cardW, cardH, cardRadius);
   ctx.clip();
   const cardGlow = ctx.createRadialGradient(
     cardX + cardW / 2,
-    cardY + 120,
+    cardY + cardW * 0.45,
     40,
     cardX + cardW / 2,
-    cardY + 260,
-    cardW * 0.85
+    cardY + cardW * 0.55,
+    cardW * 0.9
   );
-  cardGlow.addColorStop(0, `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.22)`);
-  cardGlow.addColorStop(1, 'rgba(14, 14, 18, 0)');
+  cardGlow.addColorStop(0, `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.25)`);
+  cardGlow.addColorStop(0.65, `rgba(${accentRgb[0]}, ${accentRgb[1]}, ${accentRgb[2]}, 0.08)`);
+  cardGlow.addColorStop(1, 'rgba(13, 13, 17, 0)');
   ctx.fillStyle = cardGlow;
   ctx.fillRect(cardX, cardY, cardW, cardH);
   ctx.restore();
 
-  // Borde fino cristalino
+  // 3. Borde cristalino fino
   ctx.save();
-  roundRectPath(ctx, cardX, cardY, cardW, cardH, 48);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  roundRectPath(ctx, cardX, cardY, cardW, cardH, cardRadius);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.13)';
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.restore();
 
-  // Cabecera dentro de la tarjeta: Logo AURA. + Badge de formato
-  const headerY = cardY + pad + 32;
-  ctx.save();
-  ctx.font = '900 34px sans-serif';
-  ctx.fillStyle = '#ffffff';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('AURA', cardX + pad, headerY);
-  const auraWidth = ctx.measureText('AURA').width;
-  ctx.fillStyle = '#F27D26';
-  ctx.fillText('.', cardX + pad + auraWidth + 1, headerY);
-
-  // Badge derecha (ej. FLAC HI-RES o STREAMING)
-  const badgeText = song.format?.toLowerCase() === 'flac' ? 'HI-RES FLAC' : 'AURA MUSIC';
-  ctx.font = '800 18px monospace';
-  const badgeTextW = ctx.measureText(badgeText).width;
-  const badgeW = badgeTextW + 32;
-  const badgeH = 38;
-  const badgeX = cardX + cardW - pad - badgeW;
-  const badgeY = headerY - badgeH / 2;
-
-  roundRectPath(ctx, badgeX, badgeY, badgeW, badgeH, 19);
-  ctx.fillStyle = 'rgba(242, 125, 38, 0.16)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(242, 125, 38, 0.45)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  ctx.fillStyle = '#F27D26';
-  ctx.textAlign = 'center';
-  ctx.fillText(badgeText, badgeX + badgeW / 2, headerY + 1);
-  ctx.restore();
-
-  // Portada cuadrada nítida dentro de la tarjeta
+  // 4. Portada cuadrada protagonista en la parte superior (como en Tidal)
   const coverSize = cardW - pad * 2;
   const coverX = cardX + pad;
-  const coverY = cardY + pad + 68;
+  const coverY = cardY + pad;
 
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-  ctx.shadowBlur = 35;
-  ctx.shadowOffsetY = 16;
-  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 32);
-  ctx.fillStyle = '#18181b';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.62)';
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 18;
+  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 30);
+  ctx.fillStyle = '#141418';
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 32);
+  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 30);
   ctx.clip();
-  // Dibujar imagen centrada tipo cover
   const imgRatio = img.width / img.height;
   let sx = 0, sy = 0, sw = img.width, sh = img.height;
   if (imgRatio > 1) {
@@ -196,47 +165,63 @@ function drawTidalCardOnCanvas(
   ctx.drawImage(img, sx, sy, sw, sh, coverX, coverY, coverSize, coverSize);
   ctx.restore();
 
-  // Borde sutil de la portada
   ctx.save();
-  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 32);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  roundRectPath(ctx, coverX, coverY, coverSize, coverSize, 30);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.restore();
 
-  // Título de la canción y Artista (estilo Tidal)
-  const textStartY = coverY + coverSize + 52;
+  // 5. Título de la canción y Artista debajo de la portada
+  const textStartY = coverY + coverSize + 44;
   ctx.save();
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
 
-  ctx.font = '800 40px sans-serif';
+  ctx.font = '800 38px sans-serif';
   ctx.fillStyle = '#ffffff';
   const cleanTitle = truncateText(ctx, song.title || 'Canción', coverSize);
   ctx.fillText(cleanTitle, coverX, textStartY);
 
-  ctx.font = '600 27px sans-serif';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+  ctx.font = '500 26px sans-serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.60)';
   const cleanArtist = truncateText(ctx, song.artist || 'Artista', coverSize);
-  ctx.fillText(cleanArtist, coverX, textStartY + 54);
+  ctx.fillText(cleanArtist, coverX, textStartY + 52);
+  ctx.restore();
 
-  // Barra de progreso minimalista estilo Tidal
-  const barY = textStartY + 116;
-  const barH = 6;
-  roundRectPath(ctx, coverX, barY, coverSize, barH, 3);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-  ctx.fill();
-
-  const progressW = coverSize * 0.38;
-  roundRectPath(ctx, coverX, barY, progressW, barH, 3);
-  ctx.fillStyle = '#F27D26';
-  ctx.fill();
-
-  // Punto luminoso en la barra
+  // 6. Separador sutil y pie con el logo AURA. + icono de ondas minimalista
+  const dividerY = textStartY + 114;
+  ctx.save();
   ctx.beginPath();
-  ctx.arc(coverX + progressW, barY + barH / 2, 8, 0, Math.PI * 2);
+  ctx.moveTo(coverX, dividerY);
+  ctx.lineTo(coverX + coverSize, dividerY);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const footerCenterY = dividerY + 42;
+  ctx.font = '900 28px sans-serif';
   ctx.fillStyle = '#ffffff';
-  ctx.fill();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('AURA', coverX, footerCenterY);
+  const auraW = ctx.measureText('AURA').width;
+  ctx.fillStyle = '#F27D26';
+  ctx.fillText('.', coverX + auraW + 1, footerCenterY);
+
+  // Pequeño ecualizador estético a la derecha del pie
+  const eqRightX = coverX + coverSize;
+  const barHeights = [14, 24, 18, 28, 16];
+  const barWidth = 4;
+  const barGap = 5;
+  for (let i = 0; i < barHeights.length; i++) {
+    const bh = barHeights[i];
+    const bx = eqRightX - (barHeights.length - i) * (barWidth + barGap) + barGap;
+    const by = footerCenterY - bh / 2;
+    roundRectPath(ctx, bx, by, barWidth, bh, 2);
+    ctx.fillStyle = i === 3 ? '#F27D26' : 'rgba(255, 255, 255, 0.35)';
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -249,26 +234,27 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
   const img = await loadSongCoverImage(song);
   const { topHex, bottomHex, rgb } = extractDominantColors(img);
 
-  // 1. Generar el Sticker PNG transparente (Tarjeta estilo Tidal + Logo AURA) para vídeo animado
+  const cardW = 780;
+  const cardH = 995;
+
+  // 1. Generar Sticker PNG transparente (Tarjeta estilo Tidal + Logo AURA) para superponer sobre vídeo animado
   const stickerCanvas = document.createElement('canvas');
   stickerCanvas.width = 920;
-  stickerCanvas.height = 1220;
+  stickerCanvas.height = 1140;
   const sCtx = stickerCanvas.getContext('2d')!;
-  const sCardW = 800;
-  const sCardH = 1040;
-  const sCardX = (stickerCanvas.width - sCardW) / 2;
-  const sCardY = (stickerCanvas.height - sCardH) / 2;
-  drawTidalCardOnCanvas(sCtx, img, song, sCardX, sCardY, sCardW, sCardH, rgb);
+  const sCardX = (stickerCanvas.width - cardW) / 2;
+  const sCardY = (stickerCanvas.height - cardH) / 2;
+  drawTidalCardOnCanvas(sCtx, img, song, sCardX, sCardY, cardW, cardH, rgb);
   const stickerDataUrl = stickerCanvas.toDataURL('image/png');
   const stickerPngBase64 = stickerDataUrl.replace(/^data:image\/png;base64,/, '');
 
-  // 2. Generar la imagen completa 9:16 (1080x1920) para portadas estáticas
+  // 2. Generar imagen completa 9:16 (1080x1920) para canciones con portada estática
   const fullCanvas = document.createElement('canvas');
   fullCanvas.width = 1080;
   fullCanvas.height = 1920;
   const fCtx = fullCanvas.getContext('2d')!;
 
-  // Fondo: foto de la portada a pantalla completa con zoom y desenfoque atmosférico
+  // Fondo: foto de la portada a pantalla completa con desenfoque suave y saturación rica
   fCtx.save();
   const targetRatio = 1080 / 1920;
   const imgRatio = img.width / img.height;
@@ -280,33 +266,22 @@ export async function generateInstagramStoryAssets(song: Song): Promise<{
     sh = img.width / targetRatio;
     sy = (img.height - sh) / 2;
   }
-  fCtx.filter = 'blur(26px) saturate(1.25)';
-  // Dibujar un poco más grande para evitar bordes blancos por el blur
-  fCtx.drawImage(img, sx, sy, sw, sh, -60, -60, 1200, 2040);
+  fCtx.filter = 'blur(34px) saturate(1.3)';
+  fCtx.drawImage(img, sx, sy, sw, sh, -80, -80, 1240, 2080);
   fCtx.restore();
 
-  // Capa de viñeta oscura cinematográfica sobre el fondo
+  // Viñeta cinematográfica suave para dar protagonismo a la tarjeta central
   const bgGrad = fCtx.createLinearGradient(0, 0, 0, 1920);
-  bgGrad.addColorStop(0, 'rgba(8, 8, 12, 0.52)');
-  bgGrad.addColorStop(0.5, 'rgba(8, 8, 12, 0.42)');
-  bgGrad.addColorStop(1, 'rgba(5, 5, 8, 0.82)');
+  bgGrad.addColorStop(0, 'rgba(6, 6, 10, 0.48)');
+  bgGrad.addColorStop(0.5, 'rgba(6, 6, 10, 0.35)');
+  bgGrad.addColorStop(1, 'rgba(4, 4, 7, 0.78)');
   fCtx.fillStyle = bgGrad;
   fCtx.fillRect(0, 0, 1080, 1920);
 
-  // Dibujar la tarjeta Tidal en el centro del 1080x1920
-  const fCardW = 820;
-  const fCardH = 1060;
-  const fCardX = (1080 - fCardW) / 2;
-  const fCardY = (1920 - fCardH) / 2 - 20;
-  drawTidalCardOnCanvas(fCtx, img, song, fCardX, fCardY, fCardW, fCardH, rgb);
-
-  // Pie inferior sutil
-  fCtx.save();
-  fCtx.font = '700 22px sans-serif';
-  fCtx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-  fCtx.textAlign = 'center';
-  fCtx.fillText('ESCÚCHALA EN AURA · AURA.BASILDO.ME', 540, 1810);
-  fCtx.restore();
+  // Tarjeta centrada en el lienzo 1080x1920
+  const fCardX = (1080 - cardW) / 2;
+  const fCardY = Math.round((1920 - cardH) / 2);
+  drawTidalCardOnCanvas(fCtx, img, song, fCardX, fCardY, cardW, cardH, rgb);
 
   const fullDataUrl = fullCanvas.toDataURL('image/png');
   const fullStoryPngBase64 = fullDataUrl.replace(/^data:image\/png;base64,/, '');

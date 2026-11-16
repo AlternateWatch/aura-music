@@ -4908,7 +4908,7 @@ app.post('/api/tracks/:id/story-video', async (req: Request, res: Response) => {
         const rawAnimPath = String(rows[0].animated_cover_path);
         const filename = path.basename(decodeURIComponent(rawAnimPath.split('?')[0]));
         const baseName = path.parse(filename).name;
-        const cachedStoryVideo = path.join(transcodedDir, `story_card_v2_${trackId}_${baseName}.mp4`);
+        const cachedStoryVideo = path.join(transcodedDir, `story_card_v3_${trackId}_${baseName}.mp4`);
 
         if (fs.existsSync(cachedStoryVideo) && fs.statSync(cachedStoryVideo).size > 1024) {
             const baseUrl = getRequestBaseUrl(req);
@@ -5003,7 +5003,7 @@ app.get('/api/tracks/:id/story-bg-video', async (req: Request, res: Response) =>
         const rawAnimPath = String(rows[0].animated_cover_path);
         const filename = path.basename(decodeURIComponent(rawAnimPath.split('?')[0]));
         const baseName = path.parse(filename).name;
-        const cachedStoryVideo = path.join(transcodedDir, `story_card_v2_${trackId}_${baseName}.mp4`);
+        const cachedStoryVideo = path.join(transcodedDir, `story_card_v3_${trackId}_${baseName}.mp4`);
 
         if (fs.existsSync(cachedStoryVideo) && fs.statSync(cachedStoryVideo).size > 1024) {
             return serveAudioFileWithRange(req, res, cachedStoryVideo, 'video/mp4');
