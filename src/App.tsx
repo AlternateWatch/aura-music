@@ -420,6 +420,15 @@ export default function App() {
   const [isWrappedOpen, setIsWrappedOpen] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
   const [purgeStats, setPurgeStats] = useState<{ albums: number; tracks: number; files: number } | null>(null);
+  const [isAutoFillingLinks, setIsAutoFillingLinks] = useState(false);
+  const [autoFillStats, setAutoFillStats] = useState<{
+    running: boolean;
+    processed: number;
+    total: number;
+    tabsAdded: number;
+    videosAdded: number;
+    currentTrack?: string;
+  } | null>(null);
 
   // METADATA EDITING STATES
   const [songToEdit, setSongToEdit] = useState<any | null>(null);
@@ -2710,6 +2719,59 @@ audioObj.seek(0);
       loadContent();
     } finally {
       setIsPurging(false);
+    }
+  };
+
+  const handleAutoFillLinks = async () => {
+    if (!isDesktop) {
+      if (!window.confirm("🎸🎬 ¿Buscar automáticamente en Songsterr y YouTube las tablaturas y vídeos oficiales de todas las canciones que aún no tengan link?")) {
+        return;
+      }
+    }
+
+    setIsAutoFillingLinks(true);
+    try {
+      const activeToken = token || localStorage.getItem('aura_token');
+      const res = await fetch(`${API_BASE}/api/admin/auto-fill-links`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al iniciar la búsqueda de links');
+      }
+
+      const initialData = await res.json();
+      setAutoFillStats(initialData);
+
+      // Sondear progreso cada 2 segundos hasta que termine
+      let ticks = 0;
+      const poll = setInterval(async () => {
+        try {
+          const stRes = await fetch(`${API_BASE}/api/admin/auto-fill-links/status`, {
+            headers: { 'Authorization': `Bearer ${activeToken}` }
+          });
+          if (!stRes.ok) return;
+          const st = await stRes.json();
+          setAutoFillStats(st);
+          ticks++;
+          if (ticks % 7 === 0) {
+            loadContent();
+          }
+          if (!st.running) {
+            clearInterval(poll);
+            setIsAutoFillingLinks(false);
+            loadContent();
+          }
+        } catch {
+          clearInterval(poll);
+          setIsAutoFillingLinks(false);
+        }
+      }, 2000);
+    } catch (e: any) {
+      alert(e?.message || 'Error al buscar tablaturas y vídeos');
+      setIsAutoFillingLinks(false);
     }
   };
 
@@ -5583,35 +5645,80 @@ transition={{
                                           <span>Aura DJ</span>
                                         </button>
                                       )}
-                                      {showModeration && userRole === 'admin' && (
-                                        <div className="flex flex-col gap-3 w-full max-w-[200px]">
-                                          <button
-                                            onClick={handlePurgeCovers}
-                                            disabled={isPurging}
-                                            className={`px-3 py-1 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
-                                              isPurging
-                                                ? 'bg-white/20 text-white/40 cursor-not-allowed'
-                                                : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
-                                            }`}
-                                          >
-                                            {isPurging ? (
-                                              <>
-                                                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                                Purging...
-                                              </>
-                                            ) : (
-                                              <>
-                                                <AlertTriangle size={10}/> Purge Album Covers
-                                              </>
-                                            )}
-                                          </button>
-                                          {purgeStats && !isPurging && (
-                                            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
-                                              <p>Albums: {purgeStats.albums}</p>
-                                              <p>Tracks: {purgeStats.tracks}</p>
-                                              <p>Files: {purgeStats.files}</p>
+                                      {showModeration && (userRole === 'admin' || userRole === 'moderator') && (
+                                        <div className="flex flex-wrap items-start gap-2.5">
+                                          {userRole === 'admin' && (
+                                            <div className="flex flex-col gap-2">
+                                              <button
+                                                onClick={handlePurgeCovers}
+                                                disabled={isPurging}
+                                                className={`px-3 py-1.5 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
+                                                  isPurging
+                                                    ? 'bg-white/20 text-white/40 cursor-not-allowed'
+                                                    : 'bg-amber-600 text-white hover:bg-amber-500 active:scale-95 cursor-pointer'
+                                                }`}
+                                              >
+                                                {isPurging ? (
+                                                  <>
+                                                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                    Purging...
+                                                  </>
+                                                ) : (
+                                                  <>
+                                                    <AlertTriangle size={10}/> Purge Album Covers
+                                                  </>
+                                                )}
+                                              </button>
+                                              {purgeStats && !isPurging && (
+                                                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[8px] text-amber-200 space-y-0.5 animate-in fade-in slide-in-from-top-1">
+                                                  <p>Albums: {purgeStats.albums}</p>
+                                                  <p>Tracks: {purgeStats.tracks}</p>
+                                                  <p>Files: {purgeStats.files}</p>
+                                                </div>
+                                              )}
                                             </div>
                                           )}
+
+                                          <div className="flex flex-col gap-2">
+                                            <button
+                                              onClick={handleAutoFillLinks}
+                                              disabled={isAutoFillingLinks}
+                                              className={`px-3.5 py-1.5 rounded-full text-[8px] font-bold uppercase tracking-widest transition-all shadow-lg flex items-center gap-1.5 ${
+                                                isAutoFillingLinks
+                                                  ? 'bg-brand-primary/20 text-brand-primary border border-brand-primary/40 cursor-wait'
+                                                  : 'bg-brand-primary text-black hover:brightness-110 active:scale-95 cursor-pointer'
+                                              }`}
+                                              title="Buscar automáticamente tablaturas en Songsterr y vídeos oficiales en YouTube para todas las canciones que no tengan link"
+                                            >
+                                              {isAutoFillingLinks ? (
+                                                <>
+                                                  <Loader2 size={11} className="animate-spin" />
+                                                  <span>
+                                                    Buscando ({autoFillStats?.processed || 0}/{autoFillStats?.total || '...'})
+                                                  </span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Sparkles size={11} />
+                                                  <span>Auto-Buscar Tabs y Vídeos</span>
+                                                </>
+                                              )}
+                                            </button>
+
+                                            {autoFillStats && (
+                                              <div className="p-2.5 rounded-xl bg-brand-primary/10 border border-brand-primary/25 text-[8px] text-white/90 space-y-0.5 max-w-[230px] animate-in fade-in slide-in-from-top-1">
+                                                <p className="font-bold text-brand-primary uppercase">
+                                                  {autoFillStats.running ? 'Escaneando biblioteca...' : '✅ Búsqueda completada'}
+                                                </p>
+                                                <p>Analizadas: {autoFillStats.processed} / {autoFillStats.total}</p>
+                                                <p>🎸 Tabs (Songsterr): +{autoFillStats.tabsAdded}</p>
+                                                <p>🎬 Vídeos (YouTube): +{autoFillStats.videosAdded}</p>
+                                                {autoFillStats.running && autoFillStats.currentTrack && (
+                                                  <p className="text-white/50 truncate pt-0.5">{autoFillStats.currentTrack}</p>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
                                         </div>
                                       )}
                                       {!showModeration && (

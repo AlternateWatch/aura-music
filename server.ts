@@ -3919,6 +3919,185 @@ io.on('connection', (socket) => {
 
 });
 
+// --- AUTO-BUSCADOR MASIVO DE TABS (SONGSTERR) Y VÍDEOS OFICIALES (YOUTUBE) ---
+const normalizeSlugWords = (str: string): string[] => {
+    return String(str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !['the', 'and', 'for', 'with', 'remaster', 'remastered', 'deluxe', 'edition', 'version'].includes(w));
+};
+
+const findSongsterrTabUrl = async (title: string, artist: string): Promise<string | null> => {
+    try {
+        const cleanTitle = cleanSongQueryTerm(title);
+        const cleanArtist = cleanPrimaryArtist(artist);
+        if (!cleanTitle || !cleanArtist) return null;
+
+        const url = `https://www.songsterr.com/a/wa/bestMatchForQueryString?s=${encodeURIComponent(cleanTitle)}&a=${encodeURIComponent(cleanArtist)}`;
+        const res = await fetch(url, {
+            redirect: 'manual',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            signal: AbortSignal.timeout(7000)
+        });
+
+        const loc = res.headers.get('location') || '';
+        const match = loc.match(/(\/a\/wsa\/([a-z0-9-]+)-tab-s\d+)/i);
+        if (!match) return null;
+
+        const pathPart = match[1];
+        const slug = match[2].toLowerCase();
+        const titleWords = normalizeSlugWords(cleanTitle);
+        const artistWords = normalizeSlugWords(cleanArtist);
+
+        // Validar que el slug devuelto por Songsterr coincida al menos parcialmente con el título o artista
+        const hasTitleMatch = titleWords.length === 0 || titleWords.some(w => slug.includes(w));
+        const hasArtistMatch = artistWords.length === 0 || artistWords.some(w => slug.includes(w));
+        if (!hasTitleMatch && !hasArtistMatch) {
+            return null;
+        }
+
+        return `https://www.songsterr.com${pathPart}`;
+    } catch {
+        return null;
+    }
+};
+
+const findOfficialYouTubeUrl = async (title: string, artist: string): Promise<string | null> => {
+    try {
+        const cleanTitle = cleanSongQueryTerm(title);
+        const cleanArtist = cleanPrimaryArtist(artist);
+        if (!cleanTitle || !cleanArtist) return null;
+
+        const query = `${cleanArtist} - ${cleanTitle} official music video`;
+        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+        const res = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            },
+            signal: AbortSignal.timeout(8000)
+        });
+        if (!res.ok) return null;
+        const html = await res.text();
+        const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        if (match && match[1]) {
+            return `https://www.youtube.com/watch?v=${match[1]}`;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+let autoFillLinksState = {
+    running: false,
+    processed: 0,
+    total: 0,
+    tabsAdded: 0,
+    videosAdded: 0,
+    currentTrack: ''
+};
+
+app.get('/api/admin/auto-fill-links/status', authenticateToken, (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    res.json(autoFillLinksState);
+});
+
+app.post('/api/admin/auto-fill-links', authenticateToken, async (req: any, res: Response) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
+        return res.status(403).json({ error: 'Forbidden: Admins only' });
+    }
+
+    if (autoFillLinksState.running) {
+        return res.json({ alreadyRunning: true, ...autoFillLinksState });
+    }
+
+    try {
+        const [tracks]: any = await pool.execute(`
+            SELECT id, title, artist, tabs_url, video_url
+            FROM tracks
+            WHERE (tabs_url IS NULL OR TRIM(tabs_url) = '')
+               OR (video_url IS NULL OR TRIM(video_url) = '')
+            ORDER BY id DESC
+        `);
+
+        const list = Array.isArray(tracks) ? tracks : [];
+        autoFillLinksState = {
+            running: true,
+            processed: 0,
+            total: list.length,
+            tabsAdded: 0,
+            videosAdded: 0,
+            currentTrack: list[0] ? `${list[0].artist} - ${list[0].title}` : ''
+        };
+
+        res.json({ started: true, ...autoFillLinksState });
+
+        // Ejecutar en segundo plano por lotes para no bloquear ni sufrir timeouts de Cloudflare
+        (async () => {
+            try {
+                console.log(`🎸🎬 [Auto-Fill Links] Iniciando búsqueda para ${list.length} canciones sin tab o vídeo...`);
+                const BATCH_SIZE = 3;
+
+                for (let i = 0; i < list.length; i += BATCH_SIZE) {
+                    const batch = list.slice(i, i + BATCH_SIZE);
+                    await Promise.all(batch.map(async (track: any) => {
+                        const needsTab = !track.tabs_url || !String(track.tabs_url).trim();
+                        const needsVideo = !track.video_url || !String(track.video_url).trim();
+                        autoFillLinksState.currentTrack = `${track.artist} - ${track.title}`;
+
+                        let newTabUrl: string | null = null;
+                        let newVideoUrl: string | null = null;
+
+                        const [tabRes, videoRes] = await Promise.all([
+                            needsTab ? findSongsterrTabUrl(track.title, track.artist) : Promise.resolve(null),
+                            needsVideo ? findOfficialYouTubeUrl(track.title, track.artist) : Promise.resolve(null)
+                        ]);
+
+                        newTabUrl = tabRes;
+                        newVideoUrl = videoRes;
+
+                        if (newTabUrl || newVideoUrl) {
+                            await pool.execute(
+                                `UPDATE tracks
+                                 SET tabs_url = COALESCE(NULLIF(TRIM(tabs_url), ''), ?),
+                                     video_url = COALESCE(NULLIF(TRIM(video_url), ''), ?)
+                                 WHERE id = ?`,
+                                [newTabUrl || track.tabs_url || null, newVideoUrl || track.video_url || null, track.id]
+                            );
+                            if (newTabUrl) autoFillLinksState.tabsAdded++;
+                            if (newVideoUrl) autoFillLinksState.videosAdded++;
+                        }
+
+                        autoFillLinksState.processed++;
+                    }));
+
+                    await new Promise(r => setTimeout(r, 220));
+                }
+                console.log(`✅ [Auto-Fill Links] Completado. Tabs añadidos: ${autoFillLinksState.tabsAdded}, Vídeos añadidos: ${autoFillLinksState.videosAdded}`);
+            } catch (err) {
+                console.error('❌ [Auto-Fill Links] Error en proceso de fondo:', err);
+            } finally {
+                autoFillLinksState.running = false;
+                autoFillLinksState.currentTrack = '';
+            }
+        })();
+    } catch (error) {
+        console.error('Error iniciando auto-fill-links:', error);
+        autoFillLinksState.running = false;
+        res.status(500).json({ error: 'Error al iniciar la búsqueda automática de links' });
+    }
+});
+
 // --- RUTA API PARA PURGAR Y UNIFICAR PORTADAS DE ÁLBUMES ---
 app.post('/api/admin/purge-album-covers', authenticateToken, async (req: any, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
