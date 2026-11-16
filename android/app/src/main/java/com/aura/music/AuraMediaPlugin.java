@@ -1,5 +1,8 @@
 package com.aura.music;
 
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -416,46 +419,80 @@ public class AuraMediaPlugin extends Plugin {
             call.reject("Text is required");
             return;
         }
-        try {
-            Context context = getContext();
-            Intent sendIntent = new Intent(Intent.ACTION_SEND);
-            sendIntent.setType("text/plain");
-            sendIntent.putExtra(Intent.EXTRA_TEXT, text);
-            sendIntent.setPackage("com.instagram.android");
-            sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(sendIntent);
-            call.resolve();
-        } catch (Exception e) {
-            call.reject("Instagram no está instalado o no se pudo abrir Direct Messages", e);
+        Activity activity = getActivity();
+        Context context = getContext();
+        Runnable launch = () -> {
+            try {
+                Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                sendIntent.setType("text/plain");
+                sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+                sendIntent.setComponent(new ComponentName(
+                        "com.instagram.android",
+                        "com.instagram.direct.share.handler.DirectShareHandlerActivity"
+                ));
+                if (activity != null) {
+                    activity.startActivity(sendIntent);
+                } else {
+                    sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(sendIntent);
+                }
+                call.resolve();
+            } catch (Exception e) {
+                try {
+                    Intent fallback = new Intent(Intent.ACTION_SEND);
+                    fallback.setType("text/plain");
+                    fallback.putExtra(Intent.EXTRA_TEXT, text);
+                    fallback.setPackage("com.instagram.android");
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(fallback);
+                    call.resolve();
+                } catch (Exception ex) {
+                    call.reject("Instagram no está instalado o no se pudo abrir Direct Messages", ex);
+                }
+            }
+        };
+        if (activity != null) {
+            activity.runOnUiThread(launch);
+        } else {
+            launch.run();
         }
     }
 
     @PluginMethod
     public void shareToInstagramStory(PluginCall call) {
         String bgImageB64 = call.getString("backgroundImageBase64");
-        String stickerB64 = call.getString("stickerBase64");
         String bgVideoUrl = call.getString("backgroundVideoUrl");
-        String topColor = call.getString("topColor", "#18181b");
-        String bottomColor = call.getString("bottomColor", "#09090b");
-        String contentUrl = call.getString("contentUrl", "https://aura.basildo.me");
 
         new Thread(() -> {
             try {
                 Context context = getContext();
+                Activity activity = getActivity();
                 String authority = context.getPackageName() + ".fileprovider";
                 File storyDir = new File(context.getCacheDir(), "aura_stories");
                 if (!storyDir.exists()) {
                     storyDir.mkdirs();
                 }
 
-                File videoFile = null;
+                // Limpiar archivos antiguos de stories en caché
+                File[] oldFiles = storyDir.listFiles();
+                if (oldFiles != null) {
+                    for (File f : oldFiles) {
+                        if (System.currentTimeMillis() - f.lastModified() > 300_000) {
+                            f.delete();
+                        }
+                    }
+                }
+
+                File mediaFile = null;
+                String mimeType = "image/png";
+
                 if (bgVideoUrl != null && !bgVideoUrl.trim().isEmpty()) {
                     try {
-                        File candidateVideo = new File(storyDir, "story_bg_" + System.currentTimeMillis() + ".mp4");
+                        File candidateVideo = new File(storyDir, "aura_story_" + System.currentTimeMillis() + ".mp4");
                         URL url = new URL(bgVideoUrl.trim());
                         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                        conn.setConnectTimeout(8000);
-                        conn.setReadTimeout(12000);
+                        conn.setConnectTimeout(10000);
+                        conn.setReadTimeout(20000);
                         conn.setInstanceFollowRedirects(true);
                         if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
                             try (InputStream in = conn.getInputStream();
@@ -467,59 +504,71 @@ public class AuraMediaPlugin extends Plugin {
                                 }
                             }
                             if (candidateVideo.exists() && candidateVideo.length() > 1024) {
-                                videoFile = candidateVideo;
+                                mediaFile = candidateVideo;
+                                mimeType = "video/mp4";
                             }
                         }
                     } catch (Exception videoErr) {
-                        Log.w("AuraMedia", "Fallback a Story estática, no se pudo descargar vídeo de portada: " + videoErr.getMessage());
+                        Log.w("AuraMedia", "Fallback a Story PNG estática: " + videoErr.getMessage());
                     }
                 }
 
-                Intent intent = new Intent("com.instagram.share.ADD_TO_STORY");
-                intent.setPackage("com.instagram.android");
-                intent.putExtra("source_application", context.getPackageName());
-                intent.putExtra("top_background_color", topColor);
-                intent.putExtra("bottom_background_color", bottomColor);
-                if (contentUrl != null) {
-                    intent.putExtra("content_url", contentUrl);
-                }
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-
-                if (videoFile != null && stickerB64 != null && !stickerB64.isEmpty()) {
-                    byte[] stickerBytes = Base64.decode(stickerB64, Base64.DEFAULT);
-                    File stickerFile = new File(storyDir, "story_sticker_" + System.currentTimeMillis() + ".png");
-                    try (FileOutputStream fos = new FileOutputStream(stickerFile)) {
-                        fos.write(stickerBytes);
+                if (mediaFile == null) {
+                    if (bgImageB64 == null || bgImageB64.isEmpty()) {
+                        call.reject("No story image provided");
+                        return;
                     }
-
-                    Uri videoUri = FileProvider.getUriForFile(context, authority, videoFile);
-                    Uri stickerUri = FileProvider.getUriForFile(context, authority, stickerFile);
-
-                    intent.setDataAndType(videoUri, "video/mp4");
-                    intent.putExtra("interactive_asset_uri", stickerUri);
-
-                    context.grantUriPermission("com.instagram.android", videoUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    context.grantUriPermission("com.instagram.android", stickerUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } else if (bgImageB64 != null && !bgImageB64.isEmpty()) {
                     byte[] bgBytes = Base64.decode(bgImageB64, Base64.DEFAULT);
-                    File bgFile = new File(storyDir, "story_full_" + System.currentTimeMillis() + ".png");
+                    File bgFile = new File(storyDir, "aura_story_" + System.currentTimeMillis() + ".png");
                     try (FileOutputStream fos = new FileOutputStream(bgFile)) {
                         fos.write(bgBytes);
                     }
-
-                    Uri bgUri = FileProvider.getUriForFile(context, authority, bgFile);
-                    intent.setDataAndType(bgUri, "image/png");
-                    context.grantUriPermission("com.instagram.android", bgUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } else {
-                    call.reject("No story assets provided");
-                    return;
+                    mediaFile = bgFile;
+                    mimeType = "image/png";
                 }
 
-                context.startActivity(intent);
-                call.resolve();
+                final Uri mediaUri = FileProvider.getUriForFile(context, authority, mediaFile);
+                final String finalMime = mimeType;
+
+                context.grantUriPermission(
+                        "com.instagram.android",
+                        mediaUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+
+                Runnable launchStory = () -> {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_SEND);
+                        intent.setComponent(new ComponentName(
+                                "com.instagram.android",
+                                "com.instagram.share.handleractivity.StoryShareHandlerActivity"
+                        ));
+                        intent.setType(finalMime);
+                        intent.putExtra(Intent.EXTRA_STREAM, mediaUri);
+                        intent.setClipData(ClipData.newRawUri("aura_story", mediaUri));
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+                        if (activity != null) {
+                            activity.startActivity(intent);
+                        } else {
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            context.startActivity(intent);
+                        }
+                        call.resolve();
+                    } catch (Exception err) {
+                        Log.e("AuraMedia", "Error abriendo StoryShareHandlerActivity", err);
+                        call.reject("No se pudo abrir Instagram Stories", err);
+                    }
+                };
+
+                if (activity != null) {
+                    activity.runOnUiThread(launchStory);
+                } else {
+                    launchStory.run();
+                }
             } catch (Exception e) {
-                Log.e("AuraMedia", "Error compartiendo en Instagram Story", e);
-                call.reject("No se pudo abrir Instagram Stories", e);
+                Log.e("AuraMedia", "Error preparando Instagram Story", e);
+                call.reject("No se pudo preparar Instagram Story", e);
             }
         }).start();
     }

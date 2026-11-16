@@ -72,9 +72,21 @@ export const ShareSongOverlay: React.FC = () => {
     try {
       const assets = await generateInstagramStoryAssets(song);
       const shareUrl = getSongShareUrl(song);
-      const storyVideoUrl = hasAnimatedCover
-        ? `https://aura.basildo.me/api/tracks/${encodeURIComponent(String(song.id))}/story-bg-video`
-        : undefined;
+      let storyVideoUrl: string | undefined = undefined;
+
+      if (hasAnimatedCover) {
+        try {
+          const resp = await fetch(`https://aura.basildo.me/api/tracks/${encodeURIComponent(String(song.id))}/story-video`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stickerBase64: assets.stickerPngBase64 }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data?.url) storyVideoUrl = data.url;
+          }
+        } catch {}
+      }
 
       if (Capacitor.isNativePlatform() && typeof AuraMedia.shareToInstagramStory === 'function') {
         await AuraMedia.shareToInstagramStory({
