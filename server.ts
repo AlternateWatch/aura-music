@@ -2108,6 +2108,189 @@ app.put('/api/tracks/:id/lore', authenticateToken, async (req: any, res: Respons
     }
 });
 
+app.post('/api/tracks/:id/lore/generate', authenticateToken, async (req: any, res: Response) => {
+    try {
+        const [rows]: any = await pool.execute(
+            'SELECT id, title, artist, album, genre, lyrics, lore_data FROM tracks WHERE id = ? LIMIT 1',
+            [req.params.id]
+        );
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: "Track not found" });
+        }
+        const track = rows[0];
+
+        let geminiKey = (req.body?.apiKey && typeof req.body.apiKey === 'string' && req.body.apiKey.trim())
+            ? req.body.apiKey.trim()
+            : null;
+
+        if (!geminiKey && req.user?.userId) {
+            try {
+                const [uRows]: any = await pool.execute('SELECT gemini_api_key FROM users WHERE id = ?', [req.user.userId]);
+                if (uRows?.[0]?.gemini_api_key) {
+                    geminiKey = decryptApiKey(uRows[0].gemini_api_key);
+                }
+            } catch {}
+        }
+
+        if (!geminiKey) {
+            try {
+                const [adminKeyRows]: any = await pool.execute(
+                    "SELECT gemini_api_key FROM users WHERE gemini_api_key IS NOT NULL AND gemini_api_key != '' ORDER BY (role = 'admin') DESC LIMIT 1"
+                );
+                if (adminKeyRows?.[0]?.gemini_api_key) {
+                    geminiKey = decryptApiKey(adminKeyRows[0].gemini_api_key);
+                }
+            } catch {}
+        }
+
+        if (!geminiKey) {
+            geminiKey = process.env.GEMINI_API_KEY || null;
+        }
+
+        if (!geminiKey) {
+            return res.status(400).json({
+                error: "MISSING_API_KEY",
+                message: "Configura primero tu API Key de Gemini en Aura DJ o en el servidor."
+            });
+        }
+
+        const cleanLyricsSnippet = typeof track.lyrics === 'string' && track.lyrics.trim()
+            ? track.lyrics.replace(/\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/g, '').trim().slice(0, 1200)
+            : '';
+
+        const prompt = `Eres un historiador musical y periodista especializado en rock, pop y música contemporánea para la app AURA Music.
+Tu objetivo es redactar el trasfondo ("Lore") documentado, riguroso y apasionante de la siguiente canción:
+- Canción: "${track.title || 'Desconocida'}"
+- Artista / Banda: "${track.artist || 'Desconocido'}"
+- Álbum: "${track.album || 'Single'}"
+${track.genre ? `- Género: "${track.genre}"` : ''}
+${cleanLyricsSnippet ? `- Fragmento de la letra como contexto:\n${cleanLyricsSnippet}` : ''}
+
+Devuelve ÚNICAMENTE un objeto JSON válido en español con esta estructura exacta:
+{
+  "summary": "2 o 3 párrafos separados por saltos de línea (\\n\\n) explicando la historia detrás de la canción, el significado e inspiración de su letra, y detalles o anécdotas de su composición, grabación y producción.",
+  "artistReflection": "1 o 2 párrafos explicando en qué etapa vital, creativa y musical se encontraba ${track.artist || 'el artista'} durante la creación de este tema y su álbum (${track.album || 'esta época'}), qué buscaban transmitir y qué impacto tuvo en su carrera.",
+  "interviews": [
+    {
+      "quote": "Cita textual o declaración documentada en español del artista, compositor o productor hablando sobre esta canción o sobre el proceso del álbum.",
+      "source": "Nombre del medio, entrevista, documental o miembro de la banda (ej. Billie Joe Armstrong en Rolling Stone, 2004)",
+      "url": ""
+    }
+  ]
+}
+Incluye entre 1 y 3 citas relevantes en "interviews". No incluyas bloques markdown ni texto fuera del JSON.`;
+
+        let candidateModels = [
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-flash-latest',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-flash'
+        ];
+
+        try {
+            const listRes = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, { timeout: 5000 });
+            if (Array.isArray(listRes.data?.models)) {
+                const supported = listRes.data.models
+                    .filter((m: any) =>
+                        Array.isArray(m.supportedGenerationMethods) &&
+                        m.supportedGenerationMethods.includes('generateContent') &&
+                        !m.name.includes('-tts') &&
+                        !m.name.includes('-image') &&
+                        !m.name.includes('-transcribe') &&
+                        !m.name.includes('embedding')
+                    )
+                    .map((m: any) => m.name.replace(/^models\//, ''));
+                const prioritized = [
+                    'gemini-2.5-flash',
+                    'gemini-2.0-flash',
+                    'gemini-3.5-flash-lite',
+                    'gemini-3-flash-preview',
+                    'gemini-flash-latest',
+                    'gemini-1.5-flash'
+                ];
+                const sorted = [
+                    ...prioritized.filter(p => supported.includes(p)),
+                    ...supported.filter((s: string) => !prioritized.includes(s) && s.includes('flash')),
+                    ...supported.filter((s: string) => !prioritized.includes(s) && !s.includes('flash'))
+                ];
+                if (sorted.length > 0) candidateModels = Array.from(new Set(sorted));
+            }
+        } catch {}
+
+        let response: any = null;
+        let lastError: any = null;
+        for (const model of candidateModels) {
+            try {
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+                response = await axios.post(
+                    geminiUrl,
+                    {
+                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            temperature: 0.55
+                        }
+                    },
+                    {
+                        headers: { 'Content-Type': 'application/json' },
+                        timeout: 22000
+                    }
+                );
+                if (response?.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    break;
+                }
+            } catch (err: any) {
+                lastError = err;
+                const msg = err.response?.data?.error?.message || err.message;
+                if (err.response?.status === 400 && msg?.includes('API key')) {
+                    throw err;
+                }
+                continue;
+            }
+        }
+
+        if (!response && lastError) {
+            throw lastError;
+        }
+
+        const rawText = response?.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+            return res.status(502).json({ error: "AI_EMPTY_RESPONSE", message: "La IA no devolvió información para esta canción." });
+        }
+
+        const cleanedJson = String(rawText).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleanedJson);
+
+        const lore = {
+            summary: typeof parsed.summary === 'string' && parsed.summary.trim() ? parsed.summary.trim() : undefined,
+            artistReflection: typeof parsed.artistReflection === 'string' && parsed.artistReflection.trim() ? parsed.artistReflection.trim() : undefined,
+            interviews: Array.isArray(parsed.interviews)
+                ? parsed.interviews
+                    .filter((i: any) => i && typeof i.quote === 'string' && i.quote.trim())
+                    .map((i: any) => ({
+                        quote: String(i.quote).trim(),
+                        source: typeof i.source === 'string' && i.source.trim() ? String(i.source).trim() : (track.artist || 'Entrevista'),
+                        ...(typeof i.url === 'string' && i.url.trim().startsWith('http') ? { url: String(i.url).trim() } : {})
+                    }))
+                : undefined
+        };
+
+        const shouldAutoSave = req.body?.autoSave === true || (!track.lore_data && req.body?.autoSave !== false);
+        if (shouldAutoSave && (lore.summary || lore.artistReflection || (lore.interviews && lore.interviews.length > 0))) {
+            await pool.execute('UPDATE tracks SET lore_data = ? WHERE id = ?', [JSON.stringify(lore), track.id]);
+        }
+
+        return res.json({ success: true, lore, saved: shouldAutoSave });
+    } catch (e: any) {
+        console.error("Error generating lore with AI:", e.response?.data || e.message);
+        const errMsg = e.response?.data?.error?.message || e.message || "Error generando el trasfondo con IA";
+        return res.status(500).json({ error: "AI_LORE_ERROR", message: errMsg });
+    }
+});
+
 app.put('/api/tracks/:id/lyrics', authenticateToken, async (req: any, res: Response) => {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
         return res.status(403).json({ error: "Forbidden" });

@@ -515,13 +515,77 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   };
 
   // Abrir panel de Trasfondo / Lore
+  const [isGeneratingLore, setIsGeneratingLore] = useState(false);
+  const [loreAiError, setLoreAiError] = useState<string | null>(null);
+
   const handleOpenLoreDrawer = (startInEdit = false) => {
     setDraftSummary(loreData?.summary || '');
     setDraftArtistReflection(loreData?.artistReflection || '');
     setDraftInterviews(loreData?.interviews ? [...loreData.interviews] : []);
     setIsEditingLore(startInEdit && canEditLyrics);
+    setLoreAiError(null);
     setActiveAnnotationLine(null);
     setIsLoreDrawerOpen(true);
+  };
+
+  const handleGenerateLoreWithAi = async (openInEditorAfter = false) => {
+    if (!currentSong?.id || isGeneratingLore) return;
+    setIsGeneratingLore(true);
+    setLoreAiError(null);
+    try {
+      const token = localStorage.getItem('aura_token');
+      const localGeminiKey = localStorage.getItem('aura_gemini_api_key') || undefined;
+      const res = await fetch(`${API_BASE}/api/tracks/${currentSong.id}/lore/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          autoSave: !openInEditorAfter,
+          ...(localGeminiKey ? { apiKey: localGeminiKey } : {})
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.lore) {
+        setLoreAiError(data?.message || 'No se pudo generar el trasfondo con IA.');
+        return;
+      }
+
+      const generatedInterviews: TrackInterviewQuote[] = Array.isArray(data.lore.interviews)
+        ? data.lore.interviews.map((item: any, idx: number) => ({
+            id: `ai-q-${Date.now()}-${idx}`,
+            quote: String(item.quote || ''),
+            source: String(item.source || ''),
+            url: item.url ? String(item.url) : undefined
+          }))
+        : [];
+
+      setDraftSummary(data.lore.summary || '');
+      setDraftArtistReflection(data.lore.artistReflection || '');
+      setDraftInterviews(generatedInterviews);
+
+      const updated: TrackLoreData = {
+        ...loreData,
+        summary: data.lore.summary || loreData?.summary,
+        artistReflection: data.lore.artistReflection || loreData?.artistReflection,
+        interviews: generatedInterviews.length > 0 ? generatedInterviews : loreData?.interviews,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (openInEditorAfter && canEditLyrics) {
+        setIsEditingLore(true);
+      } else {
+        setLoreData(updated);
+        const cached = lyricsSessionCache.get(currentSong.id) || {};
+        lyricsSessionCache.set(currentSong.id, { ...cached, lore: updated });
+        setIsEditingLore(false);
+      }
+    } catch (e: any) {
+      setLoreAiError('Error de conexión al generar el trasfondo con IA.');
+    } finally {
+      setIsGeneratingLore(false);
+    }
   };
 
   const handleSaveLore = async () => {
@@ -1340,6 +1404,33 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
               <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 select-text">
                 {isEditingLore && canEditLyrics ? (
                   <div className="space-y-6">
+                    {/* Autocompletar con IA */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-amber-500/10 to-transparent border border-amber-400/20">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Sparkles size={14} className="text-amber-400" />
+                          Asistente de Editorial e Historia (Gemini IA)
+                        </span>
+                        <p className="text-[11px] text-white/50">
+                          Investiga automáticamente el trasfondo de la canción, la etapa del artista y citas de entrevistas reales.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateLoreWithAi(true)}
+                        disabled={isGeneratingLore}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold text-xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isGeneratingLore ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                        <span>{isGeneratingLore ? 'Investigando...' : '✨ Autocompletar con IA'}</span>
+                      </button>
+                    </div>
+                    {loreAiError && (
+                      <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs">
+                        {loreAiError}
+                      </div>
+                    )}
+
                     {/* 1. Reflexión sobre la canción */}
                     <div>
                       <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-300 mb-2">
@@ -1477,15 +1568,31 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
                     <p className="text-xs text-white/50 max-w-sm mx-auto leading-relaxed">
                       Aún no se ha escrito una reflexión o recopilación de entrevistas para esta canción.
                     </p>
-                    {canEditLyrics && (
-                      <button
-                        onClick={() => setIsEditingLore(true)}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer"
-                      >
-                        <Edit3 size={14} />
-                        <span>Escribir trasfondo y referencias</span>
-                      </button>
+                    {loreAiError && (
+                      <div className="max-w-md mx-auto p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs">
+                        {loreAiError}
+                      </div>
                     )}
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateLoreWithAi(false)}
+                        disabled={isGeneratingLore}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isGeneratingLore ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                        <span>{isGeneratingLore ? 'Investigando historia y entrevistas...' : '✨ Descubrir historia y entrevistas con IA'}</span>
+                      </button>
+                      {canEditLyrics && (
+                        <button
+                          onClick={() => setIsEditingLore(true)}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white font-semibold text-xs transition-all cursor-pointer"
+                        >
+                          <Edit3 size={14} />
+                          <span>Escribir manualmente</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-8">

@@ -1,9 +1,14 @@
 {
   "platform": "android",
-  "latestVersion": "1.0.14",
-  "versionCode": 15,
-  "releaseNotes": "• «Reproducir siguiente» y motor Standby perfeccionados: Invalidación instantánea de precarga al modificar la cola y corrección del intercambio entre reproductores A/B en transiciones gapless.\n• Sesiones en vivo con sobreescritura automática: Si estás escuchando cualquier canción y el anfitrión reproduce o reanuda algo, tu reproducción se sincroniza y sobreescribe al instante.\n• Trasfondo («Lore»), entrevistas y anotaciones estilo Genius: Nuevo panel para leer y añadir reflexiones sobre la canción y el artista, citas de entrevistas con enlaces y significados por verso.\n• Búsqueda de letras resiliente (4 reintentos + caché en servidor): Limpieza inteligente de títulos y persistencia automática en base de datos para cargas instantáneas.",
+  "latestVersion": "1.0.15",
+  "versionCode": 16,
+  "releaseNotes": "• Compartir canciones en Redes y Stories: Nuevo menú para compartir temas en WhatsApp (con carátula OpenGraph), Instagram Stories (tarjeta 9:16 estilo Tidal con marca de agua aura.basildo.me), Instagram Direct, Telegram, X y copia rápida en PC/Web.\n• Cola colaborativa con votación y reacciones en vivo: Vota canciones en sesiones grupales (▲ reordenación automática en tiempo real), propón temas desde el buscador integrado y lanza reacciones flotantes.\n• Calidad de Streaming y Ahorro de Datos Móviles: Elige entre Original (FLAC), Alta (320 kbps), Ahorro de Datos (128 kbps) o Automático Inteligente según tu conexión Wi-Fi/Datos.\n• Trasfondo («Lore») e historia con IA + Auto-Buscador Admin: Descubre o autocompleta con Gemini IA la historia y entrevistas de cualquier canción, y rellena masivamente enlaces de tablaturas (Songsterr) y vídeos oficiales (YouTube).\n• Vista de Canciones desagrupada: Visualiza todas las pistas individualmente sin agrupar en tarjetas de álbum.",
   "history": [
+    {
+      "version": "1.0.15",
+      "versionCode": 16,
+      "notes": "• Compartir canciones en Redes y Stories: Nuevo menú para compartir temas en WhatsApp (con carátula OpenGraph), Instagram Stories (tarjeta 9:16 estilo Tidal con marca de agua aura.basildo.me), Instagram Direct, Telegram, X y copia rápida en PC/Web.\n• Cola colaborativa con votación y reacciones en vivo: Vota canciones en sesiones grupales (▲ reordenación automática en tiempo real), propón temas desde el buscador integrado y lanza reacciones flotantes.\n• Calidad de Streaming y Ahorro de Datos Móviles: Elige entre Original (FLAC), Alta (320 kbps), Ahorro de Datos (128 kbps) o Automático Inteligente según tu conexión Wi-Fi/Datos.\n• Trasfondo («Lore») e historia con IA + Auto-Buscador Admin: Descubre o autocompleta con Gemini IA la historia y entrevistas de cualquier canción, y rellena masivamente enlaces de tablaturas (Songsterr) y vídeos oficiales (YouTube).\n• Vista de Canciones desagrupada: Visualiza todas las pistas individualmente sin agrupar en tarjetas de álbum."
+    },
     {
       "version": "1.0.14",
       "versionCode": 15,
@@ -80,7 +85,7 @@
       "notes": "• Lanzamiento inicial de Aura Music para Android."
     }
   ],
-  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.14&build=15",
+  "downloadUrl": "https://aura.basildo.me/download/aura-latest.apk?v=1.0.15&build=16",
   "mandatory": false,
-  "publishedAt": "2026-11-08T12:45:13.642Z"
+  "publishedAt": "2026-11-16T21:06:00.000Z"
 }
