@@ -4889,6 +4889,90 @@ app.get('/api/tracks/:id/similar', async (req: any, res: Response) => {
     }
 });
 
+// GET /api/tracks/:id/story-bg-video (genera o sirve vídeo 9:16 vertical H.264 para fondo de Instagram Stories)
+const storyVideoJobsInFlight = new Map<string, Promise<string | null>>();
+
+app.get('/api/tracks/:id/story-bg-video', async (req: Request, res: Response) => {
+    try {
+        const trackId = String(req.params.id || '').trim();
+        const [rows]: any = await pool.execute(
+            'SELECT id, animated_cover_path FROM tracks WHERE id = ? LIMIT 1',
+            [trackId]
+        );
+        if (!rows || !rows[0] || !rows[0].animated_cover_path) {
+            return res.status(404).send('No animated cover for this track');
+        }
+
+        const rawAnimPath = String(rows[0].animated_cover_path);
+        const filename = path.basename(decodeURIComponent(rawAnimPath.split('?')[0]));
+        const baseName = path.parse(filename).name;
+        const cachedStoryVideo = path.join(transcodedDir, `story_bg_${baseName}.mp4`);
+
+        if (fs.existsSync(cachedStoryVideo) && fs.statSync(cachedStoryVideo).size > 1024) {
+            return serveAudioFileWithRange(req, res, cachedStoryVideo, 'video/mp4');
+        }
+
+        let job = storyVideoJobsInFlight.get(filename);
+        if (!job) {
+            job = (async (): Promise<string | null> => {
+                try {
+                    let srcPath = resolveDiskPath(rawAnimPath);
+                    if ((!srcPath || !fs.existsSync(srcPath)) && isB2Configured()) {
+                        const tempDl = path.join(uploadDir, filename);
+                        const ok = await downloadB2FileToDisk(filename, tempDl);
+                        if (ok && fs.existsSync(tempDl)) srcPath = tempDl;
+                    }
+                    if (!srcPath || !fs.existsSync(srcPath)) return null;
+
+                    const tempOut = `${cachedStoryVideo}.tmp.${Date.now()}.mp4`;
+                    await new Promise<void>((resolve, reject) => {
+                        const ff = spawn('ffmpeg', [
+                            '-y',
+                            '-stream_loop', '3',
+                            '-i', srcPath!,
+                            '-t', '8',
+                            '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,eq=brightness=-0.10:saturation=1.1,setsar=1',
+                            '-c:v', 'libx264',
+                            '-preset', 'veryfast',
+                            '-crf', '23',
+                            '-pix_fmt', 'yuv420p',
+                            '-an',
+                            '-movflags', '+faststart',
+                            tempOut
+                        ], { stdio: 'ignore' });
+
+                        ff.on('error', reject);
+                        ff.on('close', (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`)));
+                    });
+
+                    if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 1024) {
+                        fs.renameSync(tempOut, cachedStoryVideo);
+                        return cachedStoryVideo;
+                    }
+                    try { if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut); } catch {}
+                    return srcPath.endsWith('.mp4') ? srcPath : null;
+                } catch (err: any) {
+                    console.warn('[StoryVideo] Fallback al archivo animado original:', err?.message || err);
+                    const fallback = resolveDiskPath(rawAnimPath);
+                    return fallback && fs.existsSync(fallback) ? fallback : null;
+                } finally {
+                    storyVideoJobsInFlight.delete(filename);
+                }
+            })();
+            storyVideoJobsInFlight.set(filename, job);
+        }
+
+        const outPath = await job;
+        if (outPath && fs.existsSync(outPath)) {
+            return serveAudioFileWithRange(req, res, outPath, 'video/mp4');
+        }
+        return res.status(404).send('Could not prepare story video');
+    } catch (e) {
+        console.error('Error in /api/tracks/:id/story-bg-video:', e);
+        return res.status(500).send('Error generating story video');
+    }
+});
+
 // GET /api/tracks/:id/stream (soporte completo de streaming con Range HTTP y sin bloqueos de socket)
 app.get('/api/tracks/:id/stream', async (req: Request, res: Response) => {
     try {

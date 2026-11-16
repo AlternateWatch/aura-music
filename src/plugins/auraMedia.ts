@@ -47,6 +47,19 @@ export interface AuraMediaPlugin {
     text: string;
   }): Promise<void>;
 
+  shareToInstagramStory?(options: {
+    backgroundImageBase64: string;
+    stickerBase64?: string;
+    backgroundVideoUrl?: string;
+    topColor?: string;
+    bottomColor?: string;
+    contentUrl?: string;
+  }): Promise<void>;
+
+  shareToInstagramDM?(options: {
+    text: string;
+  }): Promise<void>;
+
   addListener(
     eventName: 'play' | 'pause' | 'next' | 'previous' | 'shuffleChanged' | 'repeatChanged' | 'seek',
     listenerFunc: (data: any) => void
