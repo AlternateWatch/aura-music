@@ -556,19 +556,28 @@ public class AuraMediaPlugin extends Plugin {
 
             if (bgVideoUrl != null && !bgVideoUrl.trim().isEmpty() && stickerB64 != null && !stickerB64.isEmpty() && activity != null) {
                 try {
-                    File rawVideo = new File(storyDir, "raw_anim_" + System.currentTimeMillis() + ".mp4");
-                    URL url = new URL(bgVideoUrl.trim());
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setConnectTimeout(10000);
-                    conn.setReadTimeout(15000);
-                    conn.setInstanceFollowRedirects(true);
-                    if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
-                        try (InputStream in = conn.getInputStream();
-                             FileOutputStream fos = new FileOutputStream(rawVideo)) {
-                            byte[] buf = new byte[16384];
-                            int read;
-                            while ((read = in.read(buf)) != -1) {
-                                fos.write(buf, 0, read);
+                    String cleanUrl = bgVideoUrl.trim();
+                    int urlHash = Math.abs(cleanUrl.hashCode());
+                    File rawVideo = new File(storyDir, "cached_anim_" + urlHash + ".mp4");
+
+                    if (!rawVideo.exists() || rawVideo.length() <= 1024) {
+                        File tempDownload = new File(storyDir, "dl_" + System.currentTimeMillis() + ".mp4");
+                        URL url = new URL(cleanUrl);
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(12000);
+                        conn.setInstanceFollowRedirects(true);
+                        if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
+                            try (InputStream in = conn.getInputStream();
+                                 FileOutputStream fos = new FileOutputStream(tempDownload)) {
+                                byte[] buf = new byte[32768];
+                                int read;
+                                while ((read = in.read(buf)) != -1) {
+                                    fos.write(buf, 0, read);
+                                }
+                            }
+                            if (tempDownload.exists() && tempDownload.length() > 1024) {
+                                tempDownload.renameTo(rawVideo);
                             }
                         }
                     }
@@ -598,23 +607,26 @@ public class AuraMediaPlugin extends Plugin {
                                             Arrays.asList((Effect) presentation, (Effect) overlayEffect)
                                     );
 
-                                    MediaItem mediaItem = new MediaItem.Builder().setUri(Uri.fromFile(rawVideo)).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setEndPositionMs(10000).build()).build();
+                                    MediaItem mediaItem = new MediaItem.Builder()
+                                            .setUri(Uri.fromFile(rawVideo))
+                                            .setClippingConfiguration(
+                                                    new MediaItem.ClippingConfiguration.Builder()
+                                                            .setEndPositionMs(5500)
+                                                            .build()
+                                            )
+                                            .build();
+
                                     EditedMediaItem editedItem = new EditedMediaItem.Builder(mediaItem)
                                             .setRemoveAudio(true)
                                             .setEffects(effects)
                                             .build();
-
-                                    // Repetir secuencia 2 veces para asegurar duración suficiente en Instagram Stories
-                                    EditedMediaItemSequence sequence = new EditedMediaItemSequence.Builder(Arrays.asList(editedItem, editedItem)).build();
-                                    Composition composition = new Composition.Builder(
-                                            Collections.singletonList(sequence)
-                                    ).build();
 
                                     Transformer transformer = new Transformer.Builder(context)
                                             .setVideoMimeType(MimeTypes.VIDEO_H264)
                                             .addListener(new Transformer.Listener() {
                                                 @Override
                                                 public void onCompleted(Composition comp, ExportResult exportResult) {
+                                                    Log.d("AuraMedia", "Story video exportado OK (" + outVideo.length() + " bytes)");
                                                     if (outVideo.exists() && outVideo.length() > 1024) {
                                                         launchInstagramStoryWithFile(activity, context, outVideo, "video/mp4", call);
                                                     } else {
@@ -624,15 +636,15 @@ public class AuraMediaPlugin extends Plugin {
 
                                                 @Override
                                                 public void onError(Composition comp, ExportResult exportResult, ExportException exportException) {
-                                                    Log.w("AuraMedia", "Transformer error, usando Story PNG estática: " + exportException.getMessage());
+                                                    Log.e("AuraMedia", "Transformer error detail", exportException);
                                                     new Thread(fallbackToStaticPng).start();
                                                 }
                                             })
                                             .build();
 
-                                    transformer.start(composition, outVideo.getAbsolutePath());
+                                    transformer.start(editedItem, outVideo.getAbsolutePath());
                                 } catch (Exception trErr) {
-                                    Log.w("AuraMedia", "Fallo al iniciar Transformer: " + trErr.getMessage());
+                                    Log.e("AuraMedia", "Fallo al iniciar Transformer", trErr);
                                     new Thread(fallbackToStaticPng).start();
                                 }
                             });
@@ -640,11 +652,11 @@ public class AuraMediaPlugin extends Plugin {
                         }
                     }
                 } catch (Exception e) {
-                    Log.w("AuraMedia", "Error preparando vídeo animado para Story, usando estática: " + e.getMessage());
+                    Log.e("AuraMedia", "Error preparando vídeo animado para Story", e);
                 }
             }
 
-            fallbackToStaticPng.run();
+                        fallbackToStaticPng.run();
         }).start();
     }
 
