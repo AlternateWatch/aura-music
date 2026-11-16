@@ -605,9 +605,7 @@ public class AuraMediaPlugin extends Plugin {
                                             .build();
 
                                     // Repetir secuencia 2 veces para asegurar duración suficiente en Instagram Stories
-                                    EditedMediaItemSequence sequence = new EditedMediaItemSequence(
-                                            Arrays.asList(editedItem, editedItem)
-                                    );
+                                    EditedMediaItemSequence sequence = new EditedMediaItemSequence.Builder(Arrays.asList(editedItem, editedItem)).build();
                                     Composition composition = new Composition.Builder(
                                             Collections.singletonList(sequence)
                                     ).build();
