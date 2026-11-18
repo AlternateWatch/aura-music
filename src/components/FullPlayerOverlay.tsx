@@ -271,18 +271,18 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
         <div 
           onTouchStart={handleHeaderTouchStart}
           onTouchEnd={handleHeaderTouchEnd}
-          className="h-20 md:h-24 flex items-center justify-between px-6 md:px-10 shrink-0 mt-4 md:mt-0 select-none cursor-pointer"
+          className="min-h-20 md:min-h-24 py-3 flex items-center justify-between gap-2 px-4 md:px-10 shrink-0 mt-4 md:mt-0 select-none cursor-pointer"
         >
-          <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-full transition-all text-white/40 hover:text-white cursor-pointer active:scale-90 outline-none">
-            <ChevronDown size={32} className="md:w-9 md:h-9" />
+          <button onClick={onClose} className="w-11 h-11 md:w-12 md:h-12 flex items-center justify-center shrink-0 hover:bg-white/5 rounded-full transition-all text-white/40 hover:text-white cursor-pointer active:scale-90 outline-none">
+            <ChevronDown size={30} className="md:w-9 md:h-9" />
           </button>
-          <div className="text-center pointer-events-none flex-1 px-4">
-              <p className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.5em] text-brand-primary mb-1 truncate">AURA FOCUS ENGINE</p>
-              <p className="text-[10px] md:text-xs font-bold text-white/60 uppercase tracking-widest truncate">{currentSong.album || 'Single'}</p>
+          <div className="min-w-0 flex-1 flex flex-col items-center justify-center text-center pointer-events-none px-1 md:px-4">
+              <p className="w-full text-[9px] md:text-[10px] font-bold uppercase tracking-[0.32em] md:tracking-[0.5em] text-brand-primary mb-1 truncate">AURA FOCUS ENGINE</p>
+              <p className="w-full text-[10px] md:text-xs font-bold text-white/60 uppercase tracking-widest leading-snug line-clamp-2 break-words">{currentSong.album || 'Single'}</p>
           </div>
           <button 
             onClick={onOpenMinigameLobby}
-            className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-full hover:bg-brand-primary/10 cursor-pointer group transition-colors shrink-0 outline-none"
+            className="w-11 h-11 md:w-12 md:h-12 flex items-center justify-center rounded-full hover:bg-brand-primary/10 cursor-pointer group transition-colors shrink-0 outline-none"
             title="Start Recon Minigame"
           >
               <div className="relative w-2 h-2 md:w-3 md:h-3">
@@ -363,7 +363,7 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
               )}
             </motion.div>
 
-            <div className="flex-1 w-full max-w-xl flex flex-col justify-center">
+            <div className="min-w-0 flex-1 w-full max-w-xl flex flex-col justify-center">
               {/* Song Metadata */}
               <div className="mb-8 md:mb-12 text-center md:text-left">
                 <motion.h2 initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="text-3xl sm:text-4xl md:text-7xl font-bold text-white tracking-tighter mb-2 md:mb-4 font-serif italic leading-tight truncate">
