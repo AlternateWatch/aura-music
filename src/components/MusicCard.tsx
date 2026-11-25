@@ -527,11 +527,6 @@ export const MusicCard: React.FC<MusicCardProps> = ({
       {/* PORTADA LIMPIA */}
       <div onClick={onClick} className="relative aspect-square rounded-xl md:rounded-2xl overflow-hidden mb-2.5 sm:mb-3 cursor-pointer shrink-0 bg-white/5 shadow-md">
         <img
-          ref={(el) => {
-            if (el?.complete && !coverLoaded) {
-              setCoverLoaded(true);
-            }
-          }}
           src={getThumbnailUrl(resolvedCoverUrl || song.coverUrl, 300) || DEFAULT_COVER}
           srcSet={getResponsiveCoverSrcSet(resolvedCoverUrl || song.coverUrl, 600)}
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1536px) 25vw, 20vw"

@@ -585,7 +585,7 @@ export function useAudioEngine(
   }, [isPlaying, handleTimeUpdate]);
 
   const getCurrentTime = useCallback(() => {
-    return audioRef.current?.currentTime ?? currentTimeRef.current;
+    return currentTimeRef.current;
   }, []);
 
   const seek = useCallback((targetSeconds: number) => {
@@ -654,6 +654,7 @@ export function useAudioEngine(
         : 0;
       setDuration(initialDur);
       currentTimeRef.current = 0;
+      timeListenersRef.current.forEach((listener) => listener());
     }
     const graph = graphRef.current;
     if (!graph) return;
