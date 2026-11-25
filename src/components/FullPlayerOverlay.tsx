@@ -188,6 +188,38 @@ const resolvedCoverUrl = useFileUrl(currentSong?.coverUrl);
     }
   };
 
+  const animUrl = resolveMediaUrl(
+    animatedCoverUrl ||
+    (currentSong as any)?.animated_cover_path ||
+    (currentSong as any)?.animatedCoverUrl
+  );
+  const isVideo = isVideoUrl(animUrl) || isVideoUrl((currentSong as any)?.animated_cover_path);
+
+  const [videoError, setVideoError] = useState(false);
+  useEffect(() => {
+    setVideoError(false);
+  }, [currentSong?.id, animUrl]);
+
+  useEffect(() => {
+    if (isOpen && isVideo && !videoError && animatedVideoRef.current) {
+      animatedVideoRef.current.muted = true;
+      animatedVideoRef.current.play().catch(() => {});
+    }
+  }, [isOpen, animUrl, isVideo, videoError]);
+
+  if (!isOpen || !currentSong) return null;
+
+  const progress = (duration > 0 && Number.isFinite(duration))
+    ? Math.min(100, Math.max(0, (liveCurrentTime / duration) * 100))
+    : 0;
+
+  const formatTime = (time: number) => {
+    if (!Number.isFinite(time) || time < 0) return "0:00";
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const setVideoNode = (node: HTMLVideoElement | null) => {
     (animatedVideoRef as any).current = node;
     if (node) {
